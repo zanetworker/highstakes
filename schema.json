@@ -1,0 +1,432 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Code Heatmap Schema",
+  "description": "Schema for code heatmap data structure",
+  "type": "object",
+  "required": ["version", "metadata", "files"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Schema version",
+      "const": "1.0.0"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["repo_path", "analyzed_at", "commit_sha"],
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "Absolute path to repository"
+        },
+        "analyzed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When analysis was performed"
+        },
+        "commit_sha": {
+          "type": "string",
+          "description": "Git commit SHA at analysis time"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Git branch at analysis time"
+        },
+        "total_files": {
+          "type": "integer",
+          "description": "Total number of files analyzed"
+        },
+        "languages": {
+          "type": "object",
+          "description": "Language distribution",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "description": "File-level heatmap data, keyed by relative path",
+      "additionalProperties": {
+        "$ref": "#/definitions/FileHeat"
+      }
+    },
+    "incidents": {
+      "type": "array",
+      "description": "Historical incidents",
+      "items": {
+        "$ref": "#/definitions/Incident"
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "description": "Manual annotations, keyed by relative path",
+      "additionalProperties": {
+        "$ref": "#/definitions/Annotation"
+      }
+    }
+  },
+  "definitions": {
+    "FileHeat": {
+      "type": "object",
+      "required": ["path", "heat_score", "tier", "factors"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path from repo root"
+        },
+        "heat_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Aggregate heat score (0-100)"
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"],
+          "description": "Risk tier"
+        },
+        "language": {
+          "type": "string",
+          "description": "Programming language"
+        },
+        "size": {
+          "type": "object",
+          "properties": {
+            "lines": {
+              "type": "integer",
+              "description": "Total lines of code"
+            },
+            "bytes": {
+              "type": "integer",
+              "description": "File size in bytes"
+            }
+          }
+        },
+        "factors": {
+          "type": "object",
+          "required": ["dependency_centrality", "incident_history", "change_frequency"],
+          "properties": {
+            "dependency_centrality": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Centrality score (0-1)"
+                },
+                "import_count": {
+                  "type": "integer",
+                  "description": "Number of files importing this"
+                },
+                "exported_symbols": {
+                  "type": "integer",
+                  "description": "Number of exported symbols"
+                }
+              }
+            },
+            "incident_history": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Incident-based score"
+                },
+                "incident_count": {
+                  "type": "integer",
+                  "description": "Number of incidents"
+                },
+                "last_incident": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "Date of most recent incident"
+                },
+                "severity_breakdown": {
+                  "type": "object",
+                  "properties": {
+                    "critical": {"type": "integer"},
+                    "high": {"type": "integer"},
+                    "medium": {"type": "integer"},
+                    "low": {"type": "integer"}
+                  }
+                }
+              }
+            },
+            "change_frequency": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Change frequency score"
+                },
+                "commit_count": {
+                  "type": "integer",
+                  "description": "Total commits touching this file"
+                },
+                "commits_last_90d": {
+                  "type": "integer",
+                  "description": "Commits in last 90 days"
+                },
+                "unique_authors": {
+                  "type": "integer",
+                  "description": "Number of unique contributors"
+                }
+              }
+            },
+            "user_impact": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "user_facing": {
+                  "type": "boolean",
+                  "description": "Is this on a user-facing code path?"
+                },
+                "affects_auth": {
+                  "type": "boolean"
+                },
+                "affects_data": {
+                  "type": "boolean"
+                },
+                "affects_payments": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "data_sensitivity": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "handles_pii": {
+                  "type": "boolean"
+                },
+                "handles_secrets": {
+                  "type": "boolean"
+                },
+                "handles_financial": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "test_coverage": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Coverage-based score (higher coverage = lower risk)"
+                },
+                "coverage_percent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "test_count": {
+                  "type": "integer",
+                  "description": "Number of tests covering this file"
+                },
+                "has_integration_tests": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "complexity": {
+              "type": "object",
+              "properties": {
+                "score": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "cyclomatic": {
+                  "type": "integer",
+                  "description": "Cyclomatic complexity"
+                },
+                "cognitive": {
+                  "type": "integer",
+                  "description": "Cognitive complexity"
+                },
+                "function_count": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "imported_by": {
+              "type": "array",
+              "description": "Files that import this file",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "heat_score": {"type": "integer"}
+                }
+              }
+            },
+            "imports": {
+              "type": "array",
+              "description": "Files this file imports",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string"},
+                  "heat_score": {"type": "integer"}
+                }
+              }
+            }
+          }
+        },
+        "recent_changes": {
+          "type": "array",
+          "description": "Recent commits affecting this file",
+          "items": {
+            "type": "object",
+            "properties": {
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "message": {
+                "type": "string"
+              },
+              "author": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string"
+              },
+              "pr_number": {
+                "type": "integer"
+              },
+              "had_incident": {
+                "type": "boolean",
+                "description": "Did this change cause an incident?"
+              }
+            }
+          }
+        },
+        "review_requirements": {
+          "type": "object",
+          "required": ["min_reviewers", "auto_merge"],
+          "properties": {
+            "min_reviewers": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Minimum number of human reviewers"
+            },
+            "requires_senior": {
+              "type": "boolean",
+              "description": "Requires senior engineer review"
+            },
+            "requires_security_scan": {
+              "type": "boolean"
+            },
+            "requires_integration_tests": {
+              "type": "boolean"
+            },
+            "auto_merge": {
+              "type": "boolean",
+              "description": "Can this file be auto-merged?"
+            },
+            "estimated_review_time_minutes": {
+              "type": "integer",
+              "description": "Estimated review time in minutes"
+            }
+          }
+        }
+      }
+    },
+    "Incident": {
+      "type": "object",
+      "required": ["id", "file", "date", "severity"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique incident ID"
+        },
+        "file": {
+          "type": "string",
+          "description": "Relative path to affected file"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "caused_by_commit": {
+          "type": "string",
+          "description": "Commit SHA that introduced the bug"
+        },
+        "fixed_by_commit": {
+          "type": "string",
+          "description": "Commit SHA that fixed the bug"
+        },
+        "downtime_minutes": {
+          "type": "integer",
+          "description": "Minutes of downtime caused"
+        },
+        "users_affected": {
+          "type": "integer"
+        }
+      }
+    },
+    "Annotation": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path from repo root"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Manual tags",
+          "items": {
+            "type": "string",
+            "examples": ["payment-flow", "auth-critical", "legacy"]
+          }
+        },
+        "notes": {
+          "type": "string",
+          "description": "Freeform notes"
+        },
+        "override_tier": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"],
+          "description": "Manual tier override"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Primary owner/expert for this file"
+        },
+        "documentation_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    }
+  }
+}
