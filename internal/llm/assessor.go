@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,19 +106,30 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 
 	sem := make(chan struct{}, a.concurrency)
 
-	var assessCount, cacheCount int
+	total := len(files)
+	var done, cached, failed int32
 
+	// Count cached files first
+	var toAssess []FileInput
 	for _, f := range files {
 		hash := contentHash(f.Content)
-
-		if cached, ok := a.loadCache(hash); ok {
+		if c, ok := a.loadCache(hash); ok {
 			mu.Lock()
-			results[f.Path] = cached
-			cacheCount++
+			results[f.Path] = c
 			mu.Unlock()
-			continue
+			atomic.AddInt32(&cached, 1)
+		} else {
+			toAssess = append(toAssess, f)
 		}
+	}
 
+	needAssess := len(toAssess)
+	if cached > 0 {
+		fmt.Fprintf(os.Stderr, "  %d/%d from cache, assessing %d files...\n", cached, total, needAssess)
+	}
+
+	for _, f := range toAssess {
+		hash := contentHash(f.Content)
 		wg.Add(1)
 		go func(file FileInput, h string) {
 			defer wg.Done()
@@ -125,8 +137,11 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 			defer func() { <-sem }()
 
 			assessment, err := a.assessFile(file)
+			n := atomic.AddInt32(&done, 1)
+
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: LLM assessment failed for %s: %v\n", file.Path, err)
+				atomic.AddInt32(&failed, 1)
+				fmt.Fprintf(os.Stderr, "  [%d/%d] FAIL %s: %v\n", n, needAssess, file.Path, err)
 				return
 			}
 
@@ -135,14 +150,19 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 
 			mu.Lock()
 			results[file.Path] = assessment
-			assessCount++
 			mu.Unlock()
+
+			// Progress every 10 files or on last file
+			if n%10 == 0 || int(n) == needAssess {
+				fmt.Fprintf(os.Stderr, "  [%d/%d] assessed\n", n, needAssess)
+			}
 		}(f, hash)
 	}
 
 	wg.Wait()
 
-	fmt.Printf("  LLM assessed %d files (%d from cache)\n", assessCount, cacheCount)
+	assessed := int(done) - int(failed)
+	fmt.Fprintf(os.Stderr, "  Done: %d assessed, %d cached, %d failed\n", assessed, cached, failed)
 
 	return results, nil
 }
@@ -151,8 +171,8 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	content := file.Content
 	lines := strings.Split(content, "\n")
-	if len(lines) > 500 {
-		content = strings.Join(lines[:500], "\n") + "\n... (truncated)"
+	if len(lines) > 300 {
+		content = strings.Join(lines[:300], "\n") + "\n... (truncated)"
 	}
 
 	prompt := buildPrompt(file.Path, content)
@@ -231,15 +251,8 @@ func buildPrompt(path, content string) string {
 	return "Analyze this source file and assess its blast radius: if this code has a bug or breaks, what is the impact?\n\n" +
 		"File: " + path + "\n\n" +
 		content + "\n\n" +
-		"Respond with ONLY valid JSON on a single line. No markdown, no explanation, no newlines inside strings:\n\n" +
-		"{\n" +
-		"  \"security_impact\": <0-100>,\n" +
-		"  \"data_impact\": <0-100>,\n" +
-		"  \"availability_impact\": <0-100>,\n" +
-		"  \"user_impact\": <0-100>,\n" +
-		"  \"blast_radius_summary\": \"<one sentence: what breaks if this file has a bug>\",\n" +
-		"  \"critical_reason\": \"<one phrase: why this matters, or empty string if low impact>\"\n" +
-		"}\n\n" +
+		"Respond with ONLY a single-line JSON object. No markdown. Keep strings under 100 characters.\n\n" +
+		"{\"security_impact\":<0-100>,\"data_impact\":<0-100>,\"availability_impact\":<0-100>,\"user_impact\":<0-100>,\"blast_radius_summary\":\"<max 80 chars>\",\"critical_reason\":\"<max 40 chars or empty>\"}\n\n" +
 		"Scoring guide:\n" +
 		"- 0-20: Internal helper, formatting, logging. Breakage causes cosmetic issues only.\n" +
 		"- 21-40: Utility code. Breakage causes minor functionality loss.\n" +
