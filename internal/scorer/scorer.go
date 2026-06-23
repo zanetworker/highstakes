@@ -3,7 +3,7 @@ package scorer
 import (
 	"time"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // CalculateHeatScore computes the aggregate heat score from all factors.

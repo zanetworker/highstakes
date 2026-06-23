@@ -17,5 +17,5 @@ labels: bug
 **Environment**
 - OS: 
 - Go version: 
-- Heatmap version: (`heatmap --version`)
+- Heatmap version: (`highstakes --version`)
 - Model used: 

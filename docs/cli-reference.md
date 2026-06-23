@@ -12,22 +12,22 @@ heatmap
 
 Keyboard: `↑↓` navigate, `Enter` expand, `f` filter by tier, `s` sort, `/` search, `q` quit.
 
-## heatmap init
+## highstakes init
 
 Initialize heatmap in the current repository.
 
 ```sh
-heatmap init [--json]
+highstakes init [--json]
 ```
 
 Creates `.heatmap/` directory and `.heatmap/config.yaml` with default settings.
 
-## heatmap analyze
+## highstakes analyze
 
 Analyze the repository and generate the heatmap.
 
 ```sh
-heatmap analyze [flags]
+highstakes analyze [flags]
 ```
 
 | Flag | Default | Description |
@@ -43,19 +43,19 @@ heatmap analyze [flags]
 Get the heat score and blast radius reasoning for a specific file.
 
 ```sh
-heatmap get <file> [--json]
+highstakes get <file> [--json]
 ```
 
 If the file is not found, suggests similar paths from the heatmap.
 
 **Exit code 4** if file not found.
 
-## heatmap list
+## highstakes list
 
 List files sorted by heat score.
 
 ```sh
-heatmap list [flags]
+highstakes list [flags]
 ```
 
 | Flag | Default | Description |
@@ -66,12 +66,12 @@ heatmap list [flags]
 
 **Exit code 2** if `--tier` value is invalid (error includes valid values).
 
-## heatmap pr check
+## highstakes pr check
 
 Assess risk of the current diff against a base branch.
 
 ```sh
-heatmap pr check [flags]
+highstakes pr check [flags]
 ```
 
 | Flag | Default | Description |
@@ -83,12 +83,12 @@ Uses `git diff --numstat` to identify changed files, then looks up their heat sc
 
 **Exit code 3** if git diff fails (error includes valid base examples).
 
-## heatmap incident create
+## highstakes incident create
 
 Record a production incident for a file.
 
 ```sh
-heatmap incident create --file <path> --severity <level> --description <text> [--date YYYY-MM-DD] [--json]
+highstakes incident create --file <path> --severity <level> --description <text> [--date YYYY-MM-DD] [--json]
 ```
 
 | Flag | Required | Description |
@@ -98,32 +98,32 @@ heatmap incident create --file <path> --severity <level> --description <text> [-
 | `--description` | Yes | What happened |
 | `--date` | No | Incident date (default: today) |
 
-Incidents are stored in `.heatmap/incidents.json` and feed into the heat score on next `heatmap analyze`.
+Incidents are stored in `.heatmap/incidents.json` and feed into the heat score on next `highstakes analyze`.
 
-## heatmap incident list
+## highstakes incident list
 
 List recorded incidents.
 
 ```sh
-heatmap incident list [--file <path>] [--json]
+highstakes incident list [--file <path>] [--json]
 ```
 
-## heatmap report
+## highstakes report
 
 Generate a heat distribution report.
 
 ```sh
-heatmap report [--limit N] [--json]
+highstakes report [--limit N] [--json]
 ```
 
 Text output shows files grouped by tier with blast radius reasoning. JSON output returns the full heatmap data.
 
-## heatmap dashboard
+## highstakes dashboard
 
 Generate an interactive HTML dashboard and open it in the browser.
 
 ```sh
-heatmap dashboard [--output <path>] [--no-open]
+highstakes dashboard [--output <path>] [--no-open]
 ```
 
 | Flag | Default | Description |
@@ -133,22 +133,22 @@ heatmap dashboard [--output <path>] [--no-open]
 
 The dashboard has two views: a treemap (visual overview) and a file explorer (hierarchical tree). Both support tier filtering, search, and a detail panel with blast radius reasoning.
 
-## heatmap github install
+## highstakes github install
 
 Generate a GitHub Actions workflow for automated PR triage.
 
 ```sh
-heatmap github install
+highstakes github install
 ```
 
 Creates `.github/workflows/heatmap-triage.yml`.
 
-## heatmap agent-context
+## highstakes agent-context
 
 Output machine-readable JSON describing all commands, flags, exit codes, and available models.
 
 ```sh
-heatmap agent-context
+highstakes agent-context
 ```
 
 Designed for AI agents to discover the CLI surface programmatically. The output includes a `schema_version` field for detecting breaking changes.

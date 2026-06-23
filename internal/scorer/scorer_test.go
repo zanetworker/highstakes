@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 func TestCalculateHeatScore_AllZero(t *testing.T) {

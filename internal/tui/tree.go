@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // TreeNode represents a node in the file tree (either a directory or file)

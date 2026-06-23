@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // GitAnalyzer analyzes git history for change frequency and patterns

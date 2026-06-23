@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 var (

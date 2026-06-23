@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zanetworker/code-heatmap/internal/scorer"
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/scorer"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // CalculatePRRisk assesses the risk of a set of changed files

@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // Store manages incident data

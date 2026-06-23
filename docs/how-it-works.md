@@ -9,7 +9,7 @@ Code Heatmap solves this by asking an LLM to read each file and answer: "if this
 ## Analysis Pipeline
 
 ```
-heatmap analyze
+highstakes analyze
   │
   ├── 1. Static Analysis
   │     ├── File discovery (respects .heatmap/config.yaml excludes)
@@ -96,7 +96,7 @@ Path-based heuristics replace the LLM assessment. Files with "auth", "token", "p
 
 LLM assessments are cached in `.heatmap/cache/` by SHA-256 hash of file content. If a file hasn't changed since last analysis, its cached assessment is reused. This makes re-analysis near-free.
 
-Cache files are JSON containing the four impact scores, summary, and critical reason. Delete `.heatmap/cache/` or run `heatmap analyze --force` to re-assess everything.
+Cache files are JSON containing the four impact scores, summary, and critical reason. Delete `.heatmap/cache/` or run `highstakes analyze --force` to re-assess everything.
 
 ## File Filtering
 

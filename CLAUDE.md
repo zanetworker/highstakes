@@ -5,15 +5,15 @@ Go CLI tool that identifies critical code paths using LLM blast radius analysis.
 ## Build and Test
 
 ```sh
-go build -o heatmap ./cmd/heatmap
+go build -o heatmap ./cmd/highstakes
 go test ./... -count=1
-go install ./cmd/heatmap
+go install ./cmd/highstakes
 ```
 
 ## Project Structure
 
 ```
-cmd/heatmap/main.go         CLI entry point (Cobra)
+cmd/highstakes/main.go         CLI entry point (Cobra)
 internal/
   analyzer/                  Static analysis (AST, imports, complexity)
   gitanalyzer/               Git history (commits, churn, contributors)

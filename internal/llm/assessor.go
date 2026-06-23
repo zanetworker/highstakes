@@ -181,8 +181,8 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+a.apiKey)
-		req.Header.Set("HTTP-Referer", "https://github.com/zanetworker/code-heatmap")
-		req.Header.Set("X-Title", "Code Heatmap")
+		req.Header.Set("HTTP-Referer", "https://github.com/zanetworker/highstakes")
+		req.Header.Set("X-Title", "HighStakes")
 
 		resp, err = a.client.Do(req)
 		if err != nil {

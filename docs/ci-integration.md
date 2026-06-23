@@ -7,7 +7,7 @@ Code Heatmap can run in any CI system to automatically assess PR risk and gate m
 ### Quick Setup
 
 ```sh
-heatmap github install
+highstakes github install
 ```
 
 This creates `.github/workflows/heatmap-triage.yml`. Commit and push to activate.
@@ -39,15 +39,15 @@ jobs:
           go-version: '1.25'
 
       - name: Install heatmap
-        run: go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 
       - name: Analyze
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: heatmap init && heatmap analyze
+        run: highstakes init && highstakes analyze
 
       - name: Check PR risk
-        run: heatmap pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
+        run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
 
       - name: Post comment
         uses: actions/github-script@v7
@@ -99,9 +99,9 @@ heatmap:
   stage: test
   image: golang:1.25
   script:
-    - go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
-    - heatmap init && heatmap analyze
-    - heatmap pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --json > risk.json
+    - go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+    - highstakes init && highstakes analyze
+    - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --json > risk.json
     - |
       TIER=$(jq -r .tier risk.json)
       if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
@@ -120,14 +120,14 @@ The CLI is the interface. Any CI that can run a binary works:
 
 ```sh
 # Install
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 
 # Analyze (cached, only re-assesses changed files)
 export OPENROUTER_API_KEY="$YOUR_KEY"
-heatmap init && heatmap analyze
+highstakes init && highstakes analyze
 
 # Check PR risk
-heatmap pr check --base origin/main --json > risk.json
+highstakes pr check --base origin/main --json > risk.json
 
 # Read results
 TIER=$(jq -r .tier risk.json)

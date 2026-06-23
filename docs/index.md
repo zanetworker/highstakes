@@ -19,7 +19,7 @@ AI writes code faster than you can review it. Code Heatmap tells you where you'r
 Reads every source file, asks an LLM "if this breaks, what's the blast radius?", and scores it across security, data, availability, and user impact. Surfaces reasoning so you know *why* a file is critical.
 
 ```
-$ heatmap get python/openshell/sandbox.py
+$ highstakes get python/openshell/sandbox.py
 
 python/openshell/sandbox.py  🔥🔥 HIGH  (score: 73)
 
@@ -35,7 +35,7 @@ Review: 2 reviewers, ~45 min, auto-merge blocked
 ## Install
 
 ```sh
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
@@ -43,8 +43,8 @@ export OPENROUTER_API_KEY="sk-or-..."
 
 ```sh
 cd /path/to/repo
-heatmap init && heatmap analyze
-heatmap dashboard    # Visual treemap + explorer
+highstakes init && highstakes analyze
+highstakes dashboard    # Visual treemap + explorer
 ```
 
 ## Documentation

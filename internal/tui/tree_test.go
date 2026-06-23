@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 func makeFiles() map[string]*types.FileHeat {

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zanetworker/code-heatmap/internal/types"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 type fileEntry struct {
@@ -112,7 +112,7 @@ const tmpl = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Code Heatmap Dashboard</title>
+<title>HighStakes Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;900&family=Red+Hat+Text:wght@400;500;600;700&family=Red+Hat+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -209,7 +209,7 @@ input:focus{outline:none;border-color:var(--accent)}
 </head>
 <body>
 <header>
-<h1>Code Heatmap</h1>
+<h1>HighStakes</h1>
 <span class="meta" id="meta"></span>
 </header>
 <div class="top">

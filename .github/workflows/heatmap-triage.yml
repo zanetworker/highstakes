@@ -20,17 +20,17 @@ jobs:
           go-version: '1.24'
 
       - name: Install heatmap
-        run: go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 
       - name: Analyze repository
         run: |
-          heatmap init
-          heatmap analyze
+          highstakes init
+          highstakes analyze
 
       - name: Assess PR risk
         id: risk
         run: |
-          heatmap pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
+          highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
           echo "tier=$(jq -r .tier pr-risk.json)" >> $GITHUB_OUTPUT
           echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
 

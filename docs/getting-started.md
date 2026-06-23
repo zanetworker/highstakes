@@ -9,14 +9,14 @@
 ## Install
 
 ```sh
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 ```
 
 Or build from source:
 
 ```sh
-git clone https://github.com/zanetworker/code-heatmap
-cd code-heatmap
+git clone https://github.com/zanetworker/highstakes
+cd highstakes
 go install ./cmd/heatmap
 ```
 
@@ -34,11 +34,11 @@ Add it to your shell profile (`~/.zshrc`, `~/.bashrc`) to persist across session
 
 ```sh
 cd /path/to/your/repo
-heatmap init
-heatmap analyze
+highstakes init
+highstakes analyze
 ```
 
-`heatmap init` creates a `.heatmap/` directory with a `config.yaml` file. `heatmap analyze` scans the repo, sends source files to the LLM for blast radius assessment, and writes results to `.heatmap/heatmap.json`.
+`highstakes init` creates a `.heatmap/` directory with a `config.yaml` file. `highstakes analyze` scans the repo, sends source files to the LLM for blast radius assessment, and writes results to `.heatmap/heatmap.json`.
 
 On a 300-file repo this takes about 1-2 minutes and costs roughly $0.15 with the default model (DeepSeek V4 Flash).
 
@@ -48,15 +48,15 @@ Three ways to see the heatmap:
 
 ```sh
 # Interactive HTML dashboard (opens browser)
-heatmap dashboard
+highstakes dashboard
 
 # Terminal TUI
 heatmap
 
 # CLI queries
-heatmap list --tier high
-heatmap get src/auth/oidc.rs
-heatmap report
+highstakes list --tier high
+highstakes get src/auth/oidc.rs
+highstakes report
 ```
 
 ## What to Do With the Results

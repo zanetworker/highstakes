@@ -1,13 +1,13 @@
 <p align="center">
   <br>
-  <img src="docs/images/treemap-view.png" width="820" alt="Code Heatmap treemap view">
+  <img src="docs/images/treemap-view.png" width="820" alt="HighStakes treemap view">
   <br>
   <em>AI writes code faster than you can review it. See where you're needed and where AI can handle the rest.</em>
   <br>
   <br>
 </p>
 
-<h1 align="center">Code Heatmap</h1>
+<h1 align="center">HighStakes</h1>
 
 <p align="center">
   <strong>Know which code would hurt the most if it broke.</strong>
@@ -34,7 +34,7 @@ Static analysis alone can't do this. A complexity counter sees `auth.rs` and `th
 **1.** Install and set up:
 
 ```sh
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
@@ -42,7 +42,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 
 ```sh
 cd /path/to/repo
-heatmap init && heatmap analyze
+highstakes init && highstakes analyze
 ```
 
 ```
@@ -58,9 +58,9 @@ Heat Distribution:
 **3.** See results:
 
 ```sh
-heatmap dashboard     # Visual treemap + file explorer (opens browser)
+highstakes dashboard     # Visual treemap + file explorer (opens browser)
 heatmap               # Terminal TUI
-heatmap list --tier high
+highstakes list --tier high
 ```
 
 ## Dashboard
@@ -119,25 +119,25 @@ The LLM returns structured scores across four dimensions:
 ### Analyze
 
 ```sh
-heatmap init                                         # Create .heatmap/ config
-heatmap analyze                                      # Full LLM analysis (~$0.15)
-heatmap analyze --model z-ai/glm-5.2                 # Different model
-heatmap analyze --no-llm                             # Static only, no API key
+highstakes init                                         # Create .heatmap/ config
+highstakes analyze                                      # Full LLM analysis (~$0.15)
+highstakes analyze --model z-ai/glm-5.2                 # Different model
+highstakes analyze --no-llm                             # Static only, no API key
 ```
 
 ### Visualize
 
 ```sh
-heatmap dashboard                                    # HTML dashboard (browser)
+highstakes dashboard                                    # HTML dashboard (browser)
 heatmap                                              # Terminal TUI
 ```
 
 ### Query
 
 ```sh
-heatmap get <file>                                   # Score + reasoning
-heatmap list --tier high --limit 10                  # Filter files
-heatmap report                                       # Distribution report
+highstakes get <file>                                   # Score + reasoning
+highstakes list --tier high --limit 10                  # Filter files
+highstakes report                                       # Distribution report
 ```
 
 All commands support `--json` for machine-readable output.
@@ -145,7 +145,7 @@ All commands support `--json` for machine-readable output.
 <details><summary><b>Example: heatmap get</b></summary>
 
 ```
-$ heatmap get python/openshell/sandbox.py
+$ highstakes get python/openshell/sandbox.py
 
 python/openshell/sandbox.py  🔥🔥 HIGH  (score: 73)
 
@@ -165,10 +165,10 @@ Review: 2 reviewers, ~45 min, auto-merge blocked
 
 </details>
 
-<details><summary><b>Example: heatmap list --tier high</b></summary>
+<details><summary><b>Example: highstakes list --tier high</b></summary>
 
 ```
-$ heatmap list --tier high --limit 5
+$ highstakes list --tier high --limit 5
 
 🔥🔥  73  python/openshell/sandbox.py       Sandbox isolation breach risk
 🔥🔥  72  python/openshell/_proto/...       Import failures in security-critical logic
@@ -182,27 +182,27 @@ $ heatmap list --tier high --limit 5
 ### PR Risk
 
 ```sh
-heatmap pr check                                     # Score diff vs main
-heatmap pr check --base dev --json                   # For CI pipelines
+highstakes pr check                                     # Score diff vs main
+highstakes pr check --base dev --json                   # For CI pipelines
 ```
 
 ### Incidents
 
 ```sh
-heatmap incident create --file src/auth.rs \
+highstakes incident create --file src/auth.rs \
   --severity high --description "Token bypass"
-heatmap incident list
+highstakes incident list
 ```
 
 ## CI / PR Integration
 
-Run `heatmap github install` to generate the workflow, or add it manually:
+Run `highstakes github install` to generate the workflow, or add it manually:
 
 <details><summary><b>GitHub Action: PR triage comments</b></summary>
 
 ```yaml
 # .github/workflows/heatmap-triage.yml
-name: Code Heatmap Triage
+name: HighStakes Triage
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -224,15 +224,15 @@ jobs:
           go-version: '1.25'
 
       - name: Install heatmap
-        run: go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 
       - name: Analyze and check PR
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          heatmap init
-          heatmap analyze
-          heatmap pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
+          highstakes init
+          highstakes analyze
+          highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
 
       - name: Post risk comment
         uses: actions/github-script@v7
@@ -240,7 +240,7 @@ jobs:
           script: |
             const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
             const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let body = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
+            let body = '## '+e[risk.tier]+' HighStakes: '+risk.tier.toUpperCase()+'\n\n';
             body += '| File | Score | Tier | Lines |\n|------|-------|------|-------|\n';
             for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
               body += '| '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' '+f.tier+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
@@ -249,7 +249,7 @@ jobs:
             body += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
             const comments = await github.rest.issues.listComments({
               owner:context.repo.owner, repo:context.repo.repo, issue_number:context.issue.number});
-            const existing = comments.data.find(c=>c.body.includes('Code Heatmap:'));
+            const existing = comments.data.find(c=>c.body.includes('HighStakes:'));
             if (existing) await github.rest.issues.updateComment({
               owner:context.repo.owner, repo:context.repo.repo, comment_id:existing.id, body});
             else await github.rest.issues.createComment({
@@ -282,14 +282,14 @@ The CLI is the interface. Any CI that can run a binary works:
 
 ```sh
 # Install
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/heatmap@latest
 
 # Analyze (uses cache, only re-assesses changed files)
 export OPENROUTER_API_KEY="$OPENROUTER_KEY"
-heatmap init && heatmap analyze
+highstakes init && highstakes analyze
 
 # Check PR risk (exit code reflects tier)
-heatmap pr check --base origin/main --json > risk.json
+highstakes pr check --base origin/main --json > risk.json
 
 # Use the output
 TIER=$(jq -r .tier risk.json)
@@ -310,7 +310,7 @@ fi
 **What the PR comment looks like:**
 
 ```markdown
-## 🔥🔥 Code Heatmap: HIGH
+## 🔥🔥 HighStakes: HIGH
 
 | File | Score | Tier | Lines |
 |------|-------|------|-------|
@@ -324,7 +324,7 @@ fi
 ### Agent Introspection
 
 ```sh
-heatmap agent-context
+highstakes agent-context
 ```
 
 Machine-readable JSON of all commands, flags, exit codes, and models. Built for AI agents to discover the CLI surface programmatically.

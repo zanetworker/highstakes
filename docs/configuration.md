@@ -1,6 +1,6 @@
 # Configuration
 
-All configuration lives in `.heatmap/config.yaml`, created by `heatmap init`.
+All configuration lives in `.heatmap/config.yaml`, created by `highstakes init`.
 
 ## Tier Thresholds
 
@@ -51,7 +51,7 @@ Add project-specific exclusions here. The defaults cover Python, Go, Rust, JavaS
 The default model is `deepseek/deepseek-v4-flash` via OpenRouter. Override per-run with:
 
 ```sh
-heatmap analyze --model deepseek/deepseek-v4-pro
+highstakes analyze --model deepseek/deepseek-v4-pro
 ```
 
 Available models:
@@ -71,7 +71,7 @@ LLM assessments are cached in `.heatmap/cache/` by file content hash (SHA-256). 
 Force a full re-assessment with:
 
 ```sh
-heatmap analyze --force
+highstakes analyze --force
 ```
 
 ## Static-Only Mode
@@ -79,7 +79,7 @@ heatmap analyze --force
 Skip LLM analysis entirely (no API key needed):
 
 ```sh
-heatmap analyze --no-llm
+highstakes analyze --no-llm
 ```
 
 This uses only static signals (complexity, dependency centrality, path heuristics). Produces less accurate results but is free and fast.
@@ -89,7 +89,7 @@ This uses only static signals (complexity, dependency centrality, path heuristic
 Control how many files are assessed in parallel:
 
 ```sh
-heatmap analyze --concurrency 20
+highstakes analyze --concurrency 20
 ```
 
 Default is 10. Increase for faster analysis on large repos if your API rate limit allows it.

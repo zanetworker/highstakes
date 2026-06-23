@@ -9,4 +9,4 @@
 ## Testing
 
 - [ ] `go test ./...` passes
-- [ ] Tested on a real repo with `heatmap analyze`
+- [ ] Tested on a real repo with `highstakes analyze`

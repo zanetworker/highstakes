@@ -1,4 +1,4 @@
-module github.com/zanetworker/code-heatmap
+module github.com/zanetworker/highstakes
 
 go 1.25.0
 
