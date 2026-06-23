@@ -1,0 +1,34 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosimple
+    - gocritic
+    - misspell
+    - unconvert
+    - unparam
+
+linters-settings:
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - argOrder
+      - badCall
+      - dupArg
+      - dupCase
+      - exitAfterDefer
+      - nilValReturn
+      - sloppyLen
+      - truncateCmp
+
+issues:
+  exclude-dirs:
+    - .heatmap
+  max-issues-per-linter: 20
+  max-same-issues: 5
+
+run:
+  timeout: 3m
