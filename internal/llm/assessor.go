@@ -160,7 +160,7 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	// OpenAI-compatible request (works for all OpenRouter models)
 	reqBody := map[string]interface{}{
 		"model":      a.model,
-		"max_tokens": 512,
+		"max_tokens": 1024,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -231,7 +231,7 @@ func buildPrompt(path, content string) string {
 	return "Analyze this source file and assess its blast radius: if this code has a bug or breaks, what is the impact?\n\n" +
 		"File: " + path + "\n\n" +
 		content + "\n\n" +
-		"Respond with ONLY a JSON object (no markdown, no explanation):\n\n" +
+		"Respond with ONLY valid JSON on a single line. No markdown, no explanation, no newlines inside strings:\n\n" +
 		"{\n" +
 		"  \"security_impact\": <0-100>,\n" +
 		"  \"data_impact\": <0-100>,\n" +
@@ -252,20 +252,59 @@ func buildPrompt(path, content string) string {
 // parseAssessment extracts the Assessment JSON from LLM response text
 func parseAssessment(text string) (*Assessment, error) {
 	var assessment Assessment
+
+	// Try direct parse
 	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &assessment); err == nil {
 		return clampAssessment(&assessment), nil
 	}
 
+	// Extract JSON block
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
 	if start >= 0 && end > start {
 		jsonStr := text[start : end+1]
+
+		// Try as-is
 		if err := json.Unmarshal([]byte(jsonStr), &assessment); err == nil {
+			return clampAssessment(&assessment), nil
+		}
+
+		// Fix common issues: newlines inside string values
+		cleaned := cleanJSON(jsonStr)
+		if err := json.Unmarshal([]byte(cleaned), &assessment); err == nil {
 			return clampAssessment(&assessment), nil
 		}
 	}
 
 	return nil, fmt.Errorf("could not parse assessment from: %s", text[:min(len(text), 200)])
+}
+
+func cleanJSON(s string) string {
+	// Replace literal newlines inside JSON string values with spaces
+	inString := false
+	escaped := false
+	var out strings.Builder
+	for _, ch := range s {
+		if escaped {
+			out.WriteRune(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			out.WriteRune(ch)
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+		}
+		if inString && ch == '\n' {
+			out.WriteRune(' ')
+			continue
+		}
+		out.WriteRune(ch)
+	}
+	return out.String()
 }
 
 func clampAssessment(a *Assessment) *Assessment {

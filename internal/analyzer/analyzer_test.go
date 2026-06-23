@@ -98,7 +98,7 @@ func TestAnalyzer_DiscoverFiles(t *testing.T) {
 		}
 	}
 
-	a := New(dir)
+	a := New(dir, nil, nil)
 	if err := a.discoverFiles(); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ type Config struct {
 		Language: "Go",
 	}
 
-	a := New(dir)
+	a := New(dir, nil, nil)
 	if err := a.analyzeGoFile(path, info); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func Simple() int {
 	}
 
 	info := &FileInfo{Path: "simple.go", Language: "Go"}
-	a := New(dir)
+	a := New(dir, nil, nil)
 	if err := a.analyzeGoFile(path, info); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func Complex(x int) string {
 	}
 
 	info := &FileInfo{Path: "complex.go", Language: "Go"}
-	a := New(dir)
+	a := New(dir, nil, nil)
 	if err := a.analyzeGoFile(path, info); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func Complex(x int) string {
 }
 
 func TestAnalyzer_DependencyCentrality_NoImports(t *testing.T) {
-	a := New("")
+	a := New("", nil, nil)
 	a.files = map[string]*FileInfo{
 		"a.go": {Path: "a.go", ImportedBy: []string{}},
 		"b.go": {Path: "b.go", ImportedBy: []string{}},
@@ -251,7 +251,7 @@ func TestAnalyzer_DependencyCentrality_NoImports(t *testing.T) {
 }
 
 func TestAnalyzer_DependencyCentrality_HighImports(t *testing.T) {
-	a := New("")
+	a := New("", nil, nil)
 	a.files = map[string]*FileInfo{
 		"core.go":   {Path: "core.go", ImportedBy: []string{"a.go", "b.go", "c.go", "d.go"}},
 		"a.go":      {Path: "a.go", ImportedBy: []string{"b.go"}},

@@ -15,8 +15,10 @@ import (
 
 // Analyzer analyzes a codebase to extract dependency and complexity metrics
 type Analyzer struct {
-	repoPath string
-	files    map[string]*FileInfo
+	repoPath    string
+	files       map[string]*FileInfo
+	excludeDirs map[string]bool
+	excludeGlob []string
 }
 
 // FileInfo holds analysis results for a single file
@@ -34,10 +36,16 @@ type FileInfo struct {
 }
 
 // New creates a new analyzer for the given repository path
-func New(repoPath string) *Analyzer {
+func New(repoPath string, excludeDirs []string, excludePatterns []string) *Analyzer {
+	dirs := make(map[string]bool)
+	for _, d := range excludeDirs {
+		dirs[d] = true
+	}
 	return &Analyzer{
-		repoPath: repoPath,
-		files:    make(map[string]*FileInfo),
+		repoPath:    repoPath,
+		files:       make(map[string]*FileInfo),
+		excludeDirs: dirs,
+		excludeGlob: excludePatterns,
 	}
 }
 
@@ -111,14 +119,16 @@ func (a *Analyzer) discoverFiles() error {
 		// Skip hidden directories and common excludes
 		if d.IsDir() {
 			name := d.Name()
-			skip := strings.HasPrefix(name, ".") ||
-				name == "node_modules" || name == "vendor" ||
-				name == "__pycache__" || name == ".venv" || name == "venv" ||
-				name == ".cache" || name == "dist" || name == "build" ||
-				name == ".tox" || name == ".mypy_cache" || name == ".pytest_cache" ||
-				name == "target" || name == ".eggs" || name == "*.egg-info"
-			if skip {
+			if strings.HasPrefix(name, ".") {
 				return filepath.SkipDir
+			}
+			if a.excludeDirs[name] {
+				return filepath.SkipDir
+			}
+			for _, pat := range a.excludeGlob {
+				if matched, _ := filepath.Match(pat, name); matched {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}

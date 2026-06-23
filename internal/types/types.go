@@ -207,12 +207,19 @@ type FileChange struct {
 
 // Config represents heatmap configuration
 type Config struct {
-	Version     string                        `yaml:"version"`
-	Tiers       TierThresholds                `yaml:"tiers"`
-	Requirements map[Tier]ReviewRequirements  `yaml:"review_requirements"`
-	CircuitBreakers CircuitBreakerConfig      `yaml:"circuit_breakers"`
-	Notifications NotificationConfig           `yaml:"notifications"`
-	GitHub      GitHubConfig                  `yaml:"github"`
+	Version         string                       `yaml:"version"`
+	Tiers           TierThresholds               `yaml:"tiers"`
+	Requirements    map[Tier]ReviewRequirements   `yaml:"review_requirements"`
+	CircuitBreakers CircuitBreakerConfig          `yaml:"circuit_breakers"`
+	Notifications   NotificationConfig            `yaml:"notifications"`
+	GitHub          GitHubConfig                  `yaml:"github"`
+	Exclude         ExcludeConfig                 `yaml:"exclude"`
+}
+
+// ExcludeConfig defines directories and patterns to skip during analysis
+type ExcludeConfig struct {
+	Dirs     []string `yaml:"dirs"`
+	Patterns []string `yaml:"patterns"`
 }
 
 // TierThresholds defines heat score thresholds for each tier
