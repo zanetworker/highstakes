@@ -1,0 +1,5 @@
+title: Code Heatmap
+description: Know which code would hurt the most if it broke
+theme: jekyll-theme-midnight
+url: https://zanetworker.github.io/code-heatmap
+baseurl: /code-heatmap
