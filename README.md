@@ -2,7 +2,7 @@
   <br>
   <img src="docs/images/treemap-view.png" width="820" alt="Code Heatmap treemap view">
   <br>
-  <em>305 files analyzed. 30 need your attention. The rest are safe to auto-review.</em>
+  <em>AI writes code faster than you can review it. See where you're needed and where AI can handle the rest.</em>
   <br>
   <br>
 </p>
@@ -194,13 +194,132 @@ heatmap incident create --file src/auth.rs \
 heatmap incident list
 ```
 
-### GitHub Action
+## CI / PR Integration
 
-```sh
-heatmap github install
+Run `heatmap github install` to generate the workflow, or add it manually:
+
+<details><summary><b>GitHub Action: PR triage comments</b></summary>
+
+```yaml
+# .github/workflows/heatmap-triage.yml
+name: Code Heatmap Triage
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install heatmap
+        run: go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+
+      - name: Analyze and check PR
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          heatmap init
+          heatmap analyze
+          heatmap pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
+
+      - name: Post risk comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
+            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
+            let body = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
+            body += '| File | Score | Tier | Lines |\n|------|-------|------|-------|\n';
+            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
+              body += '| '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' '+f.tier+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
+            body += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
+            if (risk.review_requirements.requires_senior) body += ' (senior)';
+            body += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
+            const comments = await github.rest.issues.listComments({
+              owner:context.repo.owner, repo:context.repo.repo, issue_number:context.issue.number});
+            const existing = comments.data.find(c=>c.body.includes('Code Heatmap:'));
+            if (existing) await github.rest.issues.updateComment({
+              owner:context.repo.owner, repo:context.repo.repo, comment_id:existing.id, body});
+            else await github.rest.issues.createComment({
+              owner:context.repo.owner, repo:context.repo.repo, issue_number:context.issue.number, body});
 ```
 
-Posts a risk comment on every PR with file scores and review requirements.
+</details>
+
+<details><summary><b>Block merge on HIGH/CRITICAL files</b></summary>
+
+Add a required status check that fails when the PR touches high-risk files:
+
+```yaml
+      - name: Gate on risk tier
+        run: |
+          TIER=$(jq -r .tier pr-risk.json)
+          if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
+            echo "::error::PR touches $TIER-tier files. Requires senior review before merge."
+            exit 1
+          fi
+```
+
+Then in **Settings > Branches > Branch protection rules**, add `triage` as a required status check. PRs touching critical or high files cannot merge until the check passes (i.e., a senior reviewer approves and the step is skipped or overridden).
+
+</details>
+
+<details><summary><b>Use in any CI (GitLab, Jenkins, etc.)</b></summary>
+
+The CLI is the interface. Any CI that can run a binary works:
+
+```sh
+# Install
+go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+
+# Analyze (uses cache, only re-assesses changed files)
+export OPENROUTER_API_KEY="$OPENROUTER_KEY"
+heatmap init && heatmap analyze
+
+# Check PR risk (exit code reflects tier)
+heatmap pr check --base origin/main --json > risk.json
+
+# Use the output
+TIER=$(jq -r .tier risk.json)
+SCORE=$(jq -r .heat_score risk.json)
+FILES=$(jq -r '.files_changed | length' risk.json)
+
+echo "PR risk: $TIER ($SCORE), $FILES files changed"
+
+# Fail pipeline on high/critical
+if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
+  echo "Requires human review"
+  exit 1
+fi
+```
+
+</details>
+
+**What the PR comment looks like:**
+
+```markdown
+## 🔥🔥 Code Heatmap: HIGH
+
+| File | Score | Tier | Lines |
+|------|-------|------|-------|
+| src/auth/oidc.rs | 63 | 🔥🔥 high | +45/-12 |
+| src/sandbox/proxy.rs | 63 | 🔥🔥 high | +8/-3 |
+| src/tui/theme.rs | 6 | 🟢 low | +2/-1 |
+
+**Review:** 2 reviewers (senior), auto-merge: ❌
+```
 
 ### Agent Introspection
 
