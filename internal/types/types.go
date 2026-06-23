@@ -59,6 +59,19 @@ type Factors struct {
 	DataSensitivity      DataSensitivity      `json:"data_sensitivity"`
 	TestCoverage         TestCoverage         `json:"test_coverage"`
 	Complexity           Complexity           `json:"complexity"`
+	BlastRadius          BlastRadius          `json:"blast_radius,omitempty"`
+}
+
+// BlastRadius holds LLM-assessed impact scores
+type BlastRadius struct {
+	Score              int    `json:"score"`               // Max of the four dimensions (0-100)
+	SecurityImpact     int    `json:"security_impact"`
+	DataImpact         int    `json:"data_impact"`
+	AvailabilityImpact int    `json:"availability_impact"`
+	UserImpact         int    `json:"user_impact"`
+	Summary            string `json:"summary,omitempty"`
+	CriticalReason     string `json:"critical_reason,omitempty"`
+	Assessed           bool   `json:"assessed"`            // Whether LLM assessment was performed
 }
 
 // DependencyCentrality measures how central a file is in the dependency graph

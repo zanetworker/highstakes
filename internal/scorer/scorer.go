@@ -6,33 +6,61 @@ import (
 	"github.com/zanetworker/code-heatmap/internal/types"
 )
 
-// CalculateHeatScore computes the aggregate heat score from all factors
+// CalculateHeatScore computes the aggregate heat score from all factors.
+// When LLM blast radius is available, it is the primary signal (40% weight).
+// Without LLM, it normalizes against available factors.
 func CalculateHeatScore(factors types.Factors) int {
-	// Weights (must sum to 100 before test coverage subtraction)
-	const (
-		dependencyWeight  = 20
-		incidentWeight    = 25
-		changeWeight      = 10
-		userImpactWeight  = 20
-		sensitivityWeight = 15
-		complexityWeight  = 10
-		coverageWeight    = 10 // Subtracted
-	)
+	type weightedFactor struct {
+		score  float64
+		weight float64
+	}
+
+	var active []weightedFactor
+
+	if factors.BlastRadius.Assessed {
+		// LLM-assisted mode: blast radius is primary signal
+		active = append(active, weightedFactor{float64(factors.BlastRadius.Score), 40})
+		active = append(active, weightedFactor{factors.DependencyCentrality.Score * 100, 15})
+		active = append(active, weightedFactor{float64(factors.Complexity.Score), 15})
+		active = append(active, weightedFactor{float64(factors.TestCoverage.Score), 10})
+
+		if factors.IncidentHistory.IncidentCount > 0 || factors.IncidentHistory.Score > 0 {
+			active = append(active, weightedFactor{float64(factors.IncidentHistory.Score), 10})
+		}
+		if factors.ChangeFrequency.CommitCount > 0 || factors.ChangeFrequency.Score > 0 {
+			active = append(active, weightedFactor{float64(factors.ChangeFrequency.Score), 10})
+		}
+	} else {
+		// Static-only mode: normalize across available heuristic factors
+		active = append(active, weightedFactor{factors.DependencyCentrality.Score * 100, 20})
+		active = append(active, weightedFactor{float64(factors.UserImpact.Score), 20})
+		active = append(active, weightedFactor{float64(factors.DataSensitivity.Score), 15})
+		active = append(active, weightedFactor{float64(factors.Complexity.Score), 15})
+		active = append(active, weightedFactor{float64(factors.TestCoverage.Score), 10})
+
+		if factors.IncidentHistory.IncidentCount > 0 || factors.IncidentHistory.Score > 0 {
+			active = append(active, weightedFactor{float64(factors.IncidentHistory.Score), 25})
+		}
+		if factors.ChangeFrequency.CommitCount > 0 || factors.ChangeFrequency.Score > 0 {
+			active = append(active, weightedFactor{float64(factors.ChangeFrequency.Score), 10})
+		}
+	}
+
+	if len(active) == 0 {
+		return 0
+	}
+
+	totalWeight := 0.0
+	for _, f := range active {
+		totalWeight += f.weight
+	}
 
 	score := 0.0
+	for _, f := range active {
+		normalizedWeight := f.weight / totalWeight * 100
+		score += f.score * normalizedWeight / 100
+	}
 
-	// Add weighted factors
-	score += factors.DependencyCentrality.Score * dependencyWeight
-	score += float64(factors.IncidentHistory.Score) * incidentWeight
-	score += float64(factors.ChangeFrequency.Score) * changeWeight
-	score += float64(factors.UserImpact.Score) * userImpactWeight
-	score += float64(factors.DataSensitivity.Score) * sensitivityWeight
-	score += float64(factors.Complexity.Score) * complexityWeight
-
-	// Subtract test coverage (higher coverage = lower risk)
-	score -= float64(factors.TestCoverage.Score) * coverageWeight
-
-	// Clamp to [0, 100]
 	if score < 0 {
 		score = 0
 	}

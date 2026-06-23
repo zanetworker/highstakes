@@ -1,8 +1,8 @@
 # Code Heatmap
 
-**Identify critical code paths for human review vs areas safe for AI review.**
+**Identify which code paths would hurt the most if broken.**
 
-The hard part of engineering moved from writing code to deciding whether to trust it. Code Heatmap automates risk assessment so senior engineers focus on what matters.
+Uses LLM-assisted blast radius analysis to score every file in your repo by security, data, availability, and user impact. Surfaces reasoning so you know *why* a file is critical, not just that it is.
 
 ## Quick Start
 
@@ -10,374 +10,203 @@ The hard part of engineering moved from writing code to deciding whether to trus
 # Install
 go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
 
-# Initialize in your repo
+# Set OpenRouter API key (for LLM blast radius analysis)
+export OPENROUTER_API_KEY="sk-or-..."
+
+# Analyze a repo
 cd /path/to/repo
 heatmap init
-
-# Analyze codebase
 heatmap analyze
 
-# Launch TUI explorer
-heatmap
-
-# Query specific file
-heatmap score src/auth/jwt.ts
-
-# Assess PR risk
-heatmap pr 1234
+# See results
+heatmap list --tier high
+heatmap get src/auth/oidc.rs
+heatmap              # Interactive TUI
 ```
 
 ## What It Does
 
-**Analyzes** your codebase to identify:
-- 🔥🔥🔥 **CRITICAL** files (auth, payments, core infra) → 2 senior reviewers + security scan
-- 🔥🔥 **HIGH** risk files → 2 reviewers + integration tests
-- 🔥 **MEDIUM** risk files → 1 reviewer + tests
-- 🟢 **LOW** risk files → Auto-review safe
+Reads every source file, sends it to an LLM asking "if this breaks, what's the blast radius?", and scores it across four dimensions:
 
-**Scores** files based on:
-- Dependency centrality (how many files import this?)
-- Incident history (production bugs)
-- Change frequency (code churn)
-- User impact (auth, data, payments)
-- Data sensitivity (PII, secrets)
-- Test coverage (higher = lower risk)
-- Complexity (cyclomatic, cognitive)
+- **Security** (auth boundaries, crypto, sandbox isolation)
+- **Data** (PII handling, persistence, data integrity)
+- **Availability** (service lifecycle, infrastructure)
+- **User Impact** (user-facing paths, API contracts)
 
-**Automates** PR triage:
-- Posts risk assessment on every PR
-- Flags PRs needing human attention
-- Generates daily digest of pending reviews
-- Blocks auto-merge on critical files
+The LLM assessment is the primary signal (40% weight), combined with static analysis (complexity, dependency centrality) and git history (change frequency, incidents).
 
-## Features
-
-### 🖥️ Interactive TUI
-
-```
-┌─ Code Heatmap ──────────────────────────────────────────┐
-│ ▼ src/                                                   │
-│   ▼ auth/ 🔥🔥🔥                                          │
-│     > jwt.ts        🔥🔥🔥 95  ← 18 imports, 3 incidents │
-│     > session.ts    🔥🔥  78                             │
-│   ▼ api/                                                 │
-│     > routes.ts     🔥   55                              │
-│   > utils/          🟢   12                              │
-│                                                          │
-│ [f]ilter [s]ort [/]search [Enter]drill-down [q]uit      │
-└──────────────────────────────────────────────────────────┘
-```
-
-### 📊 CLI Queries
+### Example Output
 
 ```bash
-# Get file score
-$ heatmap score src/auth/jwt.ts
-Heat Score: 95 🔥🔥🔥 CRITICAL
+$ heatmap get python/openshell/sandbox.py
+python/openshell/sandbox.py  🔥🔥 HIGH  (score: 73)
+
+Blast Radius (LLM-assessed):
+  Sandbox management and execution failures could compromise isolation,
+  leading to security breaches or service outage.
+  Reason: Sandbox isolation is a security boundary.
+  Security: 95  Data: 90  Availability: 90  User: 90
 
 Risk Factors:
-  Dependency Centrality:  92 (18 imports)
-  Incident History:       85 (3 incidents last 90d)
-  User Impact:            95 (auth path)
-  Data Sensitivity:      100 (PII + secrets)
+  Dependency Centrality:  8 (1 imports)
+  Change Frequency:       0 (0 commits/90d)
+  Complexity:             100 (cyclomatic: 53)
 
-Review Requirements:
-  Min Reviewers:   2 (senior)
-  Security Scan:   Required
-  Auto-Merge:      ❌ Blocked
+Review: 2 reviewers, ~45 min, auto-merge blocked
 ```
-
-### 🤖 GitHub Integration
-
-```yaml
-# .github/workflows/heatmap-triage.yml
-name: Code Heatmap Triage
-on:
-  pull_request:
-    types: [opened, synchronize]
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      
-      - name: Run heatmap
-        run: |
-          heatmap analyze --update
-          heatmap pr ${{ github.event.pull_request.number }}
-```
-
-Posts on every PR:
-
-```markdown
-## 🔥🔥 Code Heatmap: HIGH RISK
-
-Modified 2 CRITICAL and 1 HIGH risk files.
-
-### Files Changed
-| File | Heat | Tier | Review |
-|------|------|------|--------|
-| ⚠️ src/auth/jwt.ts | 95 | 🔥🔥🔥 CRITICAL | 2 senior + security |
-| ✓ src/api/routes.ts | 55 | 🔥 MEDIUM | 1 reviewer |
-
-**Action**: Route to senior reviewers. Security scan required.
-```
-
-### 📋 Daily Digest
 
 ```bash
-$ heatmap report --open-prs
-
-PR Triage Report — 2026-06-17
-
-🔥🔥🔥 URGENT: Needs Human Review (3 PRs)
-  #1234 (3d) - Auth changes - Heat: 95
-  #1242 (1d) - Payment flow - Heat: 88
-
-🔥 Review Recommended (5 PRs)
-
-🟢 Auto-Review Safe (12 PRs)
-
-Total Review Time: 4.5 hours
+$ heatmap list --tier high --limit 5
+🔥🔥  73  python/openshell/sandbox.py       Sandbox isolation breach risk
+🔥🔥  72  python/openshell/_proto/...       Import failures in security-critical sandbox logic
+🔥🔥  69  crates/.../runtime.rs             Host network misconfiguration, VM launch failures
+🔥🔥  67  crates/.../disposition.rs         Corrupted security event disposition values
+🔥🔥  65  crates/.../embedded_runtime.rs    Complete loss of VM functionality
 ```
 
-### 🚨 Real-Time Alerts
+## Tier System
 
-Slack notification on critical PRs:
+| Tier | Score | What It Means | Review Required |
+|------|-------|---------------|-----------------|
+| 🔥🔥🔥 CRITICAL | 86-100 | Security breach, data loss, or full outage if broken | 2 senior reviewers + security scan |
+| 🔥🔥 HIGH | 61-85 | Service degradation or partial outage | 2 reviewers + integration tests |
+| 🔥 MEDIUM | 31-60 | Feature malfunction | 1 reviewer |
+| 🟢 LOW | 0-30 | Cosmetic or minor functionality loss | Auto-review safe |
 
-```
-🚨 HIGH-RISK PR ALERT
+## Commands
 
-PR #1234: Add user preferences
-Author: @alice
-Heat: 95 (CRITICAL)
-
-Modified: src/auth/jwt.ts 🔥🔥🔥
-Needs: 2 senior reviewers + security scan
-
-[View PR]
-```
-
-## Installation
+### Core
 
 ```bash
-# From source
-git clone https://github.com/zanetworker/code-heatmap
-cd code-heatmap
-go install ./cmd/heatmap
-
-# Or via go install (once published)
-go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+heatmap init                    # Create .heatmap/ config
+heatmap analyze                 # Scan repo + LLM blast radius assessment
+heatmap                         # Interactive TUI explorer
 ```
-
-## Usage
-
-### Initialize
-
-```bash
-cd /path/to/repo
-heatmap init
-```
-
-Creates:
-- `.heatmap/` directory
-- `.heatmap/config.yaml` (tier thresholds, review requirements)
-- `.heatmap/heatmap.json` (generated by analyze)
-
-### Analyze
-
-```bash
-heatmap analyze              # Initial analysis
-heatmap analyze --update     # Update existing heatmap
-```
-
-Scans:
-- All source files
-- Dependency graph (imports)
-- Git history (last 90 days)
-- Existing incidents (if any)
 
 ### Query
 
 ```bash
-# Single file
-heatmap score src/auth/jwt.ts
-
-# PR assessment
-heatmap pr 1234
-
-# List high-risk PRs
-heatmap pr list --tier critical --age ">2d"
-
-# Generate report
-heatmap report --open-prs --format markdown
+heatmap get <file>              # Score + reasoning for one file
+heatmap get <file> --json       # Machine-readable output
+heatmap list                    # All files sorted by heat
+heatmap list --tier high        # Filter by tier
+heatmap list --limit 20         # Cap results
+heatmap list --tier critical --json  # Structured output for agents
 ```
 
-### TUI Explorer
+### PR Risk Assessment
 
 ```bash
-heatmap                      # Launch TUI
-heatmap --file src/auth/jwt.ts  # Jump to file
-```
-
-Keyboard shortcuts:
-- `↑/↓` — Navigate tree
-- `Enter` — Drill down / expand
-- `f` — Filter by tier
-- `s` — Sort (heat, size, name)
-- `/` — Search
-- `i` — View incidents
-- `q` — Quit
-
-### GitHub Integration
-
-```bash
-# Install GitHub Action
-heatmap github install
-
-# Manual PR check
-heatmap pr 1234 --json > pr-risk.json
-
-# Watch mode (continuous monitoring)
-heatmap watch --notify-slack
+heatmap pr check                # Score current diff vs main
+heatmap pr check --base dev     # Score against different base
+heatmap pr check --json         # Machine-readable for CI
 ```
 
 ### Incident Tracking
 
 ```bash
-# Record incident
-heatmap incident add \
-  --file src/auth/jwt.ts \
-  --date 2026-06-15 \
+heatmap incident create \
+  --file src/auth/jwt.rs \
   --severity high \
-  --description "JWT expiry bug caused login failures"
+  --description "Token validation bypass" \
+  --date 2026-06-15
 
-# List incidents
-heatmap incident list --file src/auth/jwt.ts
-
-# Export incidents
-heatmap incident export --json > incidents.json
+heatmap incident list
+heatmap incident list --file src/auth/jwt.rs
 ```
+
+### Reports
+
+```bash
+heatmap report                  # Heat distribution with reasoning
+heatmap report --limit 5        # Top 5 per tier
+heatmap report --json           # Full heatmap as JSON
+```
+
+### GitHub Integration
+
+```bash
+heatmap github install          # Create GitHub Action workflow
+```
+
+Posts a risk assessment comment on every PR with file-level scores and review requirements.
+
+### Agent Introspection
+
+```bash
+heatmap agent-context           # Machine-readable command schema
+```
+
+Returns versioned JSON describing all commands, flags, exit codes, and available models. Designed for AI agents to discover the CLI surface programmatically.
+
+## LLM Models
+
+Uses [OpenRouter](https://openrouter.ai) for model access. One API key, any model.
+
+```bash
+heatmap analyze                              # Default: DeepSeek V4 Flash (~$0.15/repo)
+heatmap analyze --model deepseek/deepseek-v4-pro    # Better accuracy
+heatmap analyze --model z-ai/glm-5.2               # Frontier open-weights
+heatmap analyze --model openai/gpt-5.4-mini         # Safest JSON
+heatmap analyze --model google/gemini-3-flash       # Fastest
+heatmap analyze --model anthropic/claude-haiku-4.5   # Best reasoning
+heatmap analyze --no-llm                            # Static only (no API key needed)
+```
+
+Assessments are cached by file content hash in `.heatmap/cache/`. Re-analysis only re-assesses changed files.
 
 ## Configuration
 
-`.heatmap/config.yaml`:
+`.heatmap/config.yaml` (created by `heatmap init`):
 
 ```yaml
-version: 1.0.0
-
-# Tier thresholds (heat score 0-100)
 tiers:
   critical: 86
   high: 61
   medium: 31
   low: 0
-
-# Review requirements per tier
-review_requirements:
-  critical:
-    min_reviewers: 2
-    requires_senior: true
-    requires_security_scan: true
-    auto_merge: false
-
-# Circuit breaker rules (reject PRs automatically)
-circuit_breakers:
-  max_diff_lines: 500          # Reject PRs >500 lines
-  max_languages: 3             # Reject PRs touching >3 languages
-  min_test_ratio: 0.3          # Require test:code ratio ≥ 0.3
-  require_pr_description: true
-
-# Notifications
-notifications:
-  slack:
-    enabled: true
-    webhook_url: ${SLACK_WEBHOOK_URL}
-    notify_on_tier: [critical, high]
-  
-  email:
-    enabled: false
-    recipients: ["team@example.com"]
-    daily_digest: true
-
-# GitHub settings
-github:
-  post_pr_comments: true
-  update_on_push: true
-  block_auto_merge_on_tier: [critical, high]
 ```
 
-## How It Works
+## How Scoring Works
 
-### Heat Score Calculation
+When LLM blast radius is available (default):
 
-Heat score = weighted sum of risk factors (0-100):
+| Factor | Weight | Source |
+|--------|--------|--------|
+| **LLM Blast Radius** | **40%** | Max of security/data/availability/user scores |
+| Dependency Centrality | 15% | Static import graph analysis |
+| Complexity | 15% | Cyclomatic + cognitive complexity |
+| Test Coverage Risk | 10% | Inverse of coverage % |
+| Incident History | 10% | Manual incident records |
+| Change Frequency | 10% | Git commit churn |
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| Dependency Centrality | 20% | How central in import graph? |
-| Incident History | 25% | Production bugs in last 90d |
-| Change Frequency | 10% | Code churn rate |
-| User Impact | 20% | User-facing? Auth? Payments? |
-| Data Sensitivity | 15% | PII? Secrets? Financial data? |
-| Test Coverage | -10% | Higher coverage = lower risk |
-| Complexity | 10% | Cyclomatic + cognitive |
+Without LLM (`--no-llm`), path-based heuristics replace the blast radius assessment with lower accuracy.
 
-**Example:**
+## Exit Codes
 
 ```
-src/auth/jwt.ts:
-  Dependency Centrality: 0.92 × 20 = 18.4
-  Incident History:      85  × 25 = 21.25
-  Change Frequency:      45  × 10 = 4.5
-  User Impact:           95  × 20 = 19.0
-  Data Sensitivity:     100  × 15 = 15.0
-  Complexity:            42  × 10 = 4.2
-  Test Coverage:        -15  × 10 = -1.5
-  
-  Total: 81.85 → 82 🔥🔥 HIGH
+0  Success
+1  Internal error
+2  Invalid input (bad flags, missing required params)
+3  External dependency failure (git, API)
+4  Not found (file not in heatmap)
 ```
 
-### Tier Thresholds
+## Requirements
 
-| Tier | Score | Review |
-|------|-------|--------|
-| 🔥🔥🔥 CRITICAL | 86-100 | 2 senior + security scan |
-| 🔥🔥 HIGH | 61-85 | 2 reviewers + tests |
-| 🔥 MEDIUM | 31-60 | 1 reviewer |
-| 🟢 LOW | 0-30 | Auto-review safe |
+- Go 1.25+
+- Git (for change frequency analysis)
+- `OPENROUTER_API_KEY` environment variable (for LLM analysis; optional with `--no-llm`)
 
-## Roadmap
+## Related
 
-- [x] Schema design
-- [x] Core types
-- [x] Heat scoring engine
-- [ ] Static analyzer (dependency graph)
-- [ ] Git history analyzer
-- [ ] TUI explorer (Bubbletea)
-- [ ] CLI commands
-- [ ] PR risk scoring
-- [ ] Incident tracking
-- [ ] GitHub Action
-- [ ] Slack/email notifications
-- [ ] HTML export
-- [ ] Manual annotations
-- [ ] Watch mode (continuous)
-
-## Contributing
-
-This is an early prototype. Feedback welcome!
+- [Agentic Code Review](https://addyo.substack.com/p/agentic-code-review) by Addy Osmani
+- [Semantically-Seeded Graph-Propagated Impact Analysis](https://arxiv.org/abs/2606.18855) (Jun 2026)
+- [BitsAI-CR: Two-Stage Code Review at ByteDance](https://arxiv.org/abs/2501.15134) (Jan 2025)
+- [c-CRAB: Code Review Agent Benchmark](https://arxiv.org/abs/2603.23448) (Mar 2026)
+- [GitNexus: MCP-native blast radius analysis](https://github.com/nicholasgriffintn/gitnexus)
+- [OpenSSF Criticality Score](https://openssf.org/projects/criticality-score/)
 
 ## License
 
 MIT
-
-## Credits
-
-Inspired by:
-- [Agentic Code Review](https://addyo.substack.com/p/agentic-code-review) by Addy Osmani
-- Production incidents at scale
-- The reality that review capacity is the new bottleneck

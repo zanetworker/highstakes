@@ -1,7 +1,9 @@
 package gitanalyzer
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -97,18 +99,44 @@ func (g *GitAnalyzer) AnalyzeFile(filePath string, lookbackDays int) (*FileHisto
 	return history, nil
 }
 
-// AnalyzeAll analyzes git history for all files in the repository
+// AnalyzeAll analyzes git history for all files with a hard timeout.
+// go-git can hang on repos with unresolvable objects, so we cap total time.
 func (g *GitAnalyzer) AnalyzeAll(files []string, lookbackDays int) (map[string]*FileHistory, error) {
 	results := make(map[string]*FileHistory)
 
+	// Hard timeout for the entire git analysis phase
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	for _, file := range files {
-		history, err := g.AnalyzeFile(file, lookbackDays)
-		if err != nil {
-			// Log error but continue
-			fmt.Printf("Warning: failed to analyze %s: %v\n", file, err)
-			continue
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(os.Stderr, "  Git analysis timeout reached, skipping remaining %d files\n", len(files)-len(results))
+			return results, nil
+		default:
 		}
-		results[file] = history
+
+		done := make(chan struct{})
+		var history *FileHistory
+		var err error
+
+		go func() {
+			history, err = g.AnalyzeFile(file, lookbackDays)
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			if err != nil {
+				continue
+			}
+			results[file] = history
+		case <-time.After(2 * time.Second):
+			// Individual file hung, skip silently
+			continue
+		case <-ctx.Done():
+			return results, nil
+		}
 	}
 
 	return results, nil

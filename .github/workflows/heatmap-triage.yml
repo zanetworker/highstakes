@@ -1,0 +1,98 @@
+name: Code Heatmap Triage
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install heatmap
+        run: go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+
+      - name: Analyze repository
+        run: |
+          heatmap init
+          heatmap analyze
+
+      - name: Assess PR risk
+        id: risk
+        run: |
+          heatmap pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
+          echo "tier=$(jq -r .tier pr-risk.json)" >> $GITHUB_OUTPUT
+          echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const risk = JSON.parse(fs.readFileSync('pr-risk.json', 'utf8'));
+
+            const tierEmoji = {
+              critical: '🔥🔥🔥',
+              high: '🔥🔥',
+              medium: '🔥',
+              low: '🟢'
+            };
+
+            let body = '## ' + (tierEmoji[risk.tier] || '🟢') + ' Code Heatmap: ' + risk.tier.toUpperCase() + '\n\n';
+            body += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
+
+            const sorted = risk.files_changed.sort((a, b) => b.heat_score - a.heat_score);
+            for (const f of sorted) {
+              const icon = (f.tier === 'critical' || f.tier === 'high') ? '⚠️' : '✓';
+              body += '| ' + icon + ' ' + f.path + ' | ' + f.heat_score + ' | ' + (tierEmoji[f.tier] || '🟢') + ' ' + f.tier.toUpperCase() + ' | +' + f.lines_added + '/-' + f.lines_deleted + ' |\n';
+            }
+
+            if (risk.circuit_breaker_signals && risk.circuit_breaker_signals.length > 0) {
+              body += '\n### ⚠️ Circuit Breaker Signals\n';
+              for (const s of risk.circuit_breaker_signals) {
+                body += '- ' + s + '\n';
+              }
+            }
+
+            body += '\n### Review Requirements\n';
+            body += '- **Reviewers**: ' + risk.review_requirements.min_reviewers;
+            if (risk.review_requirements.requires_senior) body += ' (senior)';
+            body += '\n';
+            if (risk.review_requirements.requires_security_scan) body += '- **Security Scan**: Required\n';
+            body += '- **Auto-Merge**: ' + (risk.review_requirements.auto_merge ? '✅ Allowed' : '❌ Blocked') + '\n';
+            body += '- **Est. Review Time**: ' + risk.review_requirements.estimated_review_time_minutes + ' min\n';
+
+            // Find existing comment to update
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existing = comments.data.find(c => c.body.includes('Code Heatmap:'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
