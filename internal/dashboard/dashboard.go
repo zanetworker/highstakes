@@ -176,6 +176,28 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .atag.block{background:#5F0000;color:var(--critical)}
 .atag.safe{background:#0A3D0A;color:var(--low)}
 .empty{padding:30px;text-align:center;color:var(--dim);font:14px var(--font-t)}
+
+.explorer{flex:1;overflow-y:auto;padding:4px 0;display:none}
+.explorer.active{display:block}
+.treemap-wrap.active{display:block}
+.treemap-wrap{display:block}
+.ex-row{display:flex;align-items:center;padding:3px 8px;cursor:pointer;border-left:3px solid transparent;gap:4px}
+.ex-row:hover{background:var(--panel)}
+.ex-row.selected{background:#111;border-left-color:var(--accent)}
+.ex-dir{font:600 12px var(--font-d);color:var(--muted)}
+.ex-dir .arrow{display:inline-block;width:12px;font-size:10px;color:var(--dim)}
+.ex-dir .dname{color:#fff}
+.ex-dir .dheat{margin-left:auto;font:600 11px var(--font-m)}
+.ex-file{font:12px var(--font-m)}
+.ex-file .fname{color:var(--text)}
+.ex-file .fheat{margin-left:auto;font:600 12px var(--font-d);min-width:28px;text-align:right}
+.ex-file .ftier{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ex-file .freason{color:var(--dim);font:11px var(--font-t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px;margin-left:8px}
+.ex-heat-bar{width:60px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0;margin-left:8px}
+.ex-heat-bar .fill{height:100%;border-radius:2px}
+.view-toggle{display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-left:8px}
+.view-toggle button{padding:3px 10px;border:none;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-d)}
+.view-toggle button.on{background:var(--accent);color:#fff}
 .controls{display:flex;gap:6px;padding:6px 12px;align-items:center;border-bottom:1px solid var(--border)}
 .controls label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .fbtn{padding:3px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-t)}
@@ -195,7 +217,11 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="tier-bar" id="tierbar"></div>
 </div>
 <div class="controls">
-<label>View:</label>
+<div class="view-toggle">
+<button class="on" onclick="setMode('treemap',this)">Treemap</button>
+<button onclick="setMode('explorer',this)">Explorer</button>
+</div>
+<label style="margin-left:12px">Tier:</label>
 <button class="fbtn on" onclick="setView('all',this)">All</button>
 <button class="fbtn" onclick="setView('critical',this)">Critical</button>
 <button class="fbtn" onclick="setView('high',this)">High</button>
@@ -209,11 +235,12 @@ input:focus{outline:none;border-color:var(--accent)}
 <button class="fbtn" data-sz="heat" onclick="setSizing('heat',this)">Heat</button>
 </div>
 <div class="main">
-<div class="treemap-wrap">
+<div class="treemap-wrap active" id="treemap-wrap">
 <div class="breadcrumb" id="bread"></div>
 <div class="treemap" id="treemap"></div>
 </div>
-<div class="detail" id="detail"><div class="empty">Click a file in the treemap to see its blast radius</div></div>
+<div class="explorer" id="explorer"></div>
+<div class="detail" id="detail"><div class="empty">Click a file to see its blast radius</div></div>
 </div>
 <script>
 const FILES=/*__FILES__*/[];
@@ -479,7 +506,106 @@ function selectFile(path){
   d.innerHTML=h;
 }
 
-window.addEventListener('resize',()=>renderTreemap());
+// View mode toggle
+let viewMode='treemap';
+function setMode(mode,btn){
+  viewMode=mode;
+  document.querySelectorAll('.view-toggle button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
+  document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
+  if(mode==='treemap')renderTreemap();
+  else renderExplorer();
+}
+
+// Explorer view: file tree with heat indicators
+function renderExplorer(){
+  const el=document.getElementById('explorer');
+  const files=getFiltered();
+  if(!files.length){el.innerHTML='<div class="empty">No files match</div>';return}
+
+  // Build tree structure
+  const tree={children:{},files:[],maxHeat:0,tier:'low',name:'root'};
+  for(const f of files){
+    const parts=f.path.split('/');
+    let node=tree;
+    for(let i=0;i<parts.length-1;i++){
+      const p=parts[i];
+      if(!node.children[p])node.children[p]={children:{},files:[],maxHeat:0,tier:'low',name:p,expanded:true};
+      node=node.children[p];
+    }
+    node.files.push(f);
+    if(f.heat_score>node.maxHeat){node.maxHeat=f.heat_score;node.tier=f.tier}
+  }
+
+  // Propagate max heat up
+  function prop(n){
+    for(const c of Object.values(n.children)){
+      prop(c);
+      if(c.maxHeat>n.maxHeat){n.maxHeat=c.maxHeat;n.tier=c.tier}
+    }
+  }
+  prop(tree);
+
+  // Render tree
+  let html='';
+  function renderNode(node,depth,pathPrefix){
+    // Sort dirs: hottest first
+    const dirs=Object.entries(node.children).sort((a,b)=>b[1].maxHeat-a[1].maxHeat);
+    // Sort files: hottest first
+    const sortedFiles=[...node.files].sort((a,b)=>b.heat_score-a.heat_score);
+
+    for(const [name,child] of dirs){
+      const fullPath=pathPrefix?pathPrefix+'/'+name:name;
+      const dc=C[child.tier]||C.low;
+      const indent=depth*16;
+      const id='dir-'+fullPath.replace(/[^a-zA-Z0-9]/g,'-');
+      const fileCount=countFiles(child);
+
+      html+='<div class="ex-row ex-dir" style="padding-left:'+(indent+8)+'px" onclick="toggleDir(\''+id+'\',this)">';
+      html+='<span class="arrow" id="arr-'+id+'">▼</span>';
+      html+='<span class="dname">'+name+'/</span>';
+      html+='<span style="font:11px var(--font-t);color:var(--dim);margin-left:6px">'+fileCount+'</span>';
+      html+='<span class="dheat" style="color:'+dc+'">'+child.maxHeat+'</span>';
+      html+='</div>';
+      html+='<div id="'+id+'">';
+      renderNode(child,depth+1,fullPath);
+      html+='</div>';
+    }
+
+    for(const f of sortedFiles){
+      const fc=C[f.tier]||C.low;
+      const indent=depth*16;
+      const barW=Math.max(f.heat_score,2);
+      html+='<div class="ex-row ex-file" style="padding-left:'+(indent+20)+'px" onclick="selectFile(\''+esc(f.path)+'\')">';
+      html+='<span class="ftier" style="background:'+fc+'"></span>';
+      html+='<span class="fname">'+f.name+'</span>';
+      html+='<div class="ex-heat-bar"><div class="fill" style="width:'+barW+'%;background:'+fc+'"></div></div>';
+      if(f.reason){html+='<span class="freason">'+f.reason+'</span>';}
+      html+='<span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span>';
+      html+='</div>';
+    }
+  }
+
+  function countFiles(node){
+    let c=node.files.length;
+    for(const ch of Object.values(node.children))c+=countFiles(ch);
+    return c;
+  }
+
+  renderNode(tree,0,'');
+  el.innerHTML=html;
+}
+
+function toggleDir(id,row){
+  const el=document.getElementById(id);
+  const arr=document.getElementById('arr-'+id);
+  if(!el)return;
+  if(el.style.display==='none'){el.style.display='';arr.textContent='▼'}
+  else{el.style.display='none';arr.textContent='▶'}
+}
+
+window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap()});
 renderTreemap();
 </script>
 </body>

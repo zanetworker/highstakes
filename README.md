@@ -1,43 +1,104 @@
 # Code Heatmap
 
-**Identify which code paths would hurt the most if broken.**
+**Know which code would hurt the most if it broke.**
 
-Uses LLM-assisted blast radius analysis to score every file in your repo by security, data, availability, and user impact. Surfaces reasoning so you know *why* a file is critical, not just that it is.
+Code Heatmap uses LLM-assisted blast radius analysis to score every file in your repository. It tells you *why* a file is critical ("sandbox isolation boundary, breakage causes container escapes") not just *that* it is. Point it at any codebase and immediately see where human review matters most.
+
+- **LLM blast radius scoring** sends each file to an LLM asking "if this breaks, what's the impact?" and scores across security, data, availability, and user impact
+- **Treemap dashboard** gives you a visual overview where your eye immediately goes to the biggest, reddest blocks
+- **File explorer** shows directory hierarchy with heat scores, blast radius reasoning inline, and collapsible tree navigation
+- **Agentic CLI** with `--json` on every command, `agent-context` for machine introspection, and structured exit codes
+- **Multi-model** via [OpenRouter](https://openrouter.ai): DeepSeek V4 Flash (~$0.15/repo), GLM-5.2, GPT-5.4 Mini, Gemini 3 Flash, Claude Haiku
+- **Cached** by content hash; re-analysis only re-assesses changed files
+
+<p align="center">
+  <img src="docs/images/treemap-view.png" width="800" alt="Treemap view showing files grouped by module, sized by lines of code, colored by heat score">
+</p>
+
+<p align="center">
+  <img src="docs/images/explorer-view.png" width="800" alt="Explorer view showing collapsible file tree with heat scores and blast radius reasoning">
+</p>
 
 ## Quick Start
 
-```bash
-# Install
+**1.** Install:
+
+```sh
 go install github.com/zanetworker/code-heatmap/cmd/heatmap@latest
+```
 
-# Set OpenRouter API key (for LLM blast radius analysis)
+**2.** Set your OpenRouter API key:
+
+```sh
 export OPENROUTER_API_KEY="sk-or-..."
+```
 
-# Analyze a repo
+**3.** Analyze a repo:
+
+```sh
 cd /path/to/repo
 heatmap init
 heatmap analyze
-
-# See results
-heatmap list --tier high
-heatmap get src/auth/oidc.rs
-heatmap              # Interactive TUI
 ```
 
-## What It Does
+**4.** See results:
 
-Reads every source file, sends it to an LLM asking "if this breaks, what's the blast radius?", and scores it across four dimensions:
+```sh
+heatmap dashboard    # Interactive HTML treemap + explorer
+heatmap              # Terminal TUI
+heatmap list --tier high
+heatmap get src/auth/oidc.rs
+```
 
-- **Security** (auth boundaries, crypto, sandbox isolation)
-- **Data** (PII handling, persistence, data integrity)
-- **Availability** (service lifecycle, infrastructure)
-- **User Impact** (user-facing paths, API contracts)
+## How It Works
 
-The LLM assessment is the primary signal (40% weight), combined with static analysis (complexity, dependency centrality) and git history (change frequency, incidents).
+1. **Static analysis** scans all source files for complexity, dependency centrality, and import graph
+2. **Git analysis** measures change frequency, contributor count, and commit patterns
+3. **LLM assessment** sends each source file to an LLM asking "if this code has a bug, what breaks?" and gets structured scores across four impact dimensions
+4. **Heat scoring** combines LLM blast radius (40% weight) with static signals into a 0-100 score per file
+5. **Tier assignment** maps scores to review requirements: CRITICAL (86+), HIGH (61-85), MEDIUM (31-60), LOW (0-30)
 
-### Example Output
+## Tier System
 
-```bash
+| Tier | Score | What Breaks | Review Required |
+|------|-------|-------------|-----------------|
+| 🔥🔥🔥 **CRITICAL** | 86-100 | Security breach, data loss, full outage | 2 senior reviewers + security scan |
+| 🔥🔥 **HIGH** | 61-85 | Service degradation, partial outage | 2 reviewers + integration tests |
+| 🔥 **MEDIUM** | 31-60 | Feature malfunction | 1 reviewer |
+| 🟢 **LOW** | 0-30 | Cosmetic or minor loss | Auto-review safe |
+
+## Commands
+
+### Analyze
+
+```sh
+heatmap init                                        # Create .heatmap/ config
+heatmap analyze                                     # Full analysis with LLM
+heatmap analyze --model z-ai/glm-5.2                # Use a different model
+heatmap analyze --no-llm                            # Static only (no API key needed)
+```
+
+### Visualize
+
+```sh
+heatmap dashboard                                   # HTML treemap + explorer (opens browser)
+heatmap                                             # Terminal TUI
+```
+
+### Query
+
+```sh
+heatmap get <file>                                  # Score + blast radius reasoning
+heatmap get <file> --json                           # Machine-readable
+heatmap list                                        # All files sorted by heat
+heatmap list --tier high --limit 10                 # Filter and cap
+heatmap list --json                                 # Structured output for agents
+heatmap report                                      # Heat distribution report
+```
+
+<details><summary><b>Example: heatmap get</b></summary>
+
+```
 $ heatmap get python/openshell/sandbox.py
 python/openshell/sandbox.py  🔥🔥 HIGH  (score: 73)
 
@@ -55,109 +116,72 @@ Risk Factors:
 Review: 2 reviewers, ~45 min, auto-merge blocked
 ```
 
-```bash
-$ heatmap list --tier high --limit 5
-🔥🔥  73  python/openshell/sandbox.py       Sandbox isolation breach risk
-🔥🔥  72  python/openshell/_proto/...       Import failures in security-critical sandbox logic
-🔥🔥  69  crates/.../runtime.rs             Host network misconfiguration, VM launch failures
-🔥🔥  67  crates/.../disposition.rs         Corrupted security event disposition values
-🔥🔥  65  crates/.../embedded_runtime.rs    Complete loss of VM functionality
-```
-
-## Tier System
-
-| Tier | Score | What It Means | Review Required |
-|------|-------|---------------|-----------------|
-| 🔥🔥🔥 CRITICAL | 86-100 | Security breach, data loss, or full outage if broken | 2 senior reviewers + security scan |
-| 🔥🔥 HIGH | 61-85 | Service degradation or partial outage | 2 reviewers + integration tests |
-| 🔥 MEDIUM | 31-60 | Feature malfunction | 1 reviewer |
-| 🟢 LOW | 0-30 | Cosmetic or minor functionality loss | Auto-review safe |
-
-## Commands
-
-### Core
-
-```bash
-heatmap init                    # Create .heatmap/ config
-heatmap analyze                 # Scan repo + LLM blast radius assessment
-heatmap                         # Interactive TUI explorer
-```
-
-### Query
-
-```bash
-heatmap get <file>              # Score + reasoning for one file
-heatmap get <file> --json       # Machine-readable output
-heatmap list                    # All files sorted by heat
-heatmap list --tier high        # Filter by tier
-heatmap list --limit 20         # Cap results
-heatmap list --tier critical --json  # Structured output for agents
-```
+</details>
 
 ### PR Risk Assessment
 
-```bash
-heatmap pr check                # Score current diff vs main
-heatmap pr check --base dev     # Score against different base
-heatmap pr check --json         # Machine-readable for CI
+```sh
+heatmap pr check                                    # Score diff vs main
+heatmap pr check --base dev                         # Different base branch
+heatmap pr check --json                             # For CI pipelines
 ```
 
 ### Incident Tracking
 
-```bash
-heatmap incident create \
-  --file src/auth/jwt.rs \
-  --severity high \
-  --description "Token validation bypass" \
-  --date 2026-06-15
-
-heatmap incident list
-heatmap incident list --file src/auth/jwt.rs
-```
-
-### Reports
-
-```bash
-heatmap report                  # Heat distribution with reasoning
-heatmap report --limit 5        # Top 5 per tier
-heatmap report --json           # Full heatmap as JSON
+```sh
+heatmap incident create --file src/auth.rs \
+  --severity high --description "Token bypass"      # Record incident
+heatmap incident list                               # View all incidents
 ```
 
 ### GitHub Integration
 
-```bash
-heatmap github install          # Create GitHub Action workflow
+```sh
+heatmap github install                              # Create GitHub Action workflow
 ```
 
-Posts a risk assessment comment on every PR with file-level scores and review requirements.
+Posts a risk assessment comment on every PR with file scores and review requirements.
 
 ### Agent Introspection
 
-```bash
-heatmap agent-context           # Machine-readable command schema
+```sh
+heatmap agent-context                               # Full command schema as JSON
 ```
 
-Returns versioned JSON describing all commands, flags, exit codes, and available models. Designed for AI agents to discover the CLI surface programmatically.
+Returns versioned JSON with all commands, flags, exit codes, and available models. Designed for AI agents to discover the CLI surface programmatically.
 
-## LLM Models
+## Models
 
 Uses [OpenRouter](https://openrouter.ai) for model access. One API key, any model.
 
-```bash
-heatmap analyze                              # Default: DeepSeek V4 Flash (~$0.15/repo)
-heatmap analyze --model deepseek/deepseek-v4-pro    # Better accuracy
-heatmap analyze --model z-ai/glm-5.2               # Frontier open-weights
-heatmap analyze --model openai/gpt-5.4-mini         # Safest JSON
-heatmap analyze --model google/gemini-3-flash       # Fastest
-heatmap analyze --model anthropic/claude-haiku-4.5   # Best reasoning
-heatmap analyze --no-llm                            # Static only (no API key needed)
+| Model | Cost / 500 files | Best For |
+|-------|-----------------|----------|
+| `deepseek/deepseek-v4-flash` (default) | ~$0.15 | Cheapest viable option |
+| `deepseek/deepseek-v4-pro` | ~$0.50 | Best accuracy per dollar |
+| `z-ai/glm-5.2` | ~$3-5 | Frontier open-weights |
+| `openai/gpt-5.4-mini` | ~$0.90 | Safest JSON reliability |
+| `google/gemini-3-flash` | ~$0.50 | Fastest |
+
+```sh
+heatmap analyze --model deepseek/deepseek-v4-pro
 ```
 
-Assessments are cached by file content hash in `.heatmap/cache/`. Re-analysis only re-assesses changed files.
+## Scoring
+
+| Factor | Weight | Source |
+|--------|--------|--------|
+| **LLM Blast Radius** | **40%** | Max of security/data/availability/user impact |
+| Dependency Centrality | 15% | Static import graph |
+| Complexity | 15% | Cyclomatic + cognitive |
+| Test Coverage Risk | 10% | Inverse of coverage |
+| Incident History | 10% | Manual records |
+| Change Frequency | 10% | Git churn |
+
+Without LLM (`--no-llm`), path heuristics replace blast radius with lower accuracy.
 
 ## Configuration
 
-`.heatmap/config.yaml` (created by `heatmap init`):
+`.heatmap/config.yaml`:
 
 ```yaml
 tiers:
@@ -167,36 +191,21 @@ tiers:
   low: 0
 ```
 
-## How Scoring Works
-
-When LLM blast radius is available (default):
-
-| Factor | Weight | Source |
-|--------|--------|--------|
-| **LLM Blast Radius** | **40%** | Max of security/data/availability/user scores |
-| Dependency Centrality | 15% | Static import graph analysis |
-| Complexity | 15% | Cyclomatic + cognitive complexity |
-| Test Coverage Risk | 10% | Inverse of coverage % |
-| Incident History | 10% | Manual incident records |
-| Change Frequency | 10% | Git commit churn |
-
-Without LLM (`--no-llm`), path-based heuristics replace the blast radius assessment with lower accuracy.
-
 ## Exit Codes
 
-```
-0  Success
-1  Internal error
-2  Invalid input (bad flags, missing required params)
-3  External dependency failure (git, API)
-4  Not found (file not in heatmap)
-```
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Internal error |
+| 2 | Invalid input |
+| 3 | External dependency failure |
+| 4 | Not found |
 
 ## Requirements
 
 - Go 1.25+
-- Git (for change frequency analysis)
-- `OPENROUTER_API_KEY` environment variable (for LLM analysis; optional with `--no-llm`)
+- Git
+- `OPENROUTER_API_KEY` (optional with `--no-llm`)
 
 ## Related
 
@@ -204,7 +213,6 @@ Without LLM (`--no-llm`), path-based heuristics replace the blast radius assessm
 - [Semantically-Seeded Graph-Propagated Impact Analysis](https://arxiv.org/abs/2606.18855) (Jun 2026)
 - [BitsAI-CR: Two-Stage Code Review at ByteDance](https://arxiv.org/abs/2501.15134) (Jan 2025)
 - [c-CRAB: Code Review Agent Benchmark](https://arxiv.org/abs/2603.23448) (Mar 2026)
-- [GitNexus: MCP-native blast radius analysis](https://github.com/nicholasgriffintn/gitnexus)
 - [OpenSSF Criticality Score](https://openssf.org/projects/criticality-score/)
 
 ## License
