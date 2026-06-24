@@ -27,6 +27,7 @@ type fileEntry struct {
 	Lines        int    `json:"lines"`
 	Language     string `json:"language"`
 	Complexity   int    `json:"complexity"`
+	ImportedBy   int    `json:"imported_by"`
 }
 
 func Generate(hm *types.Heatmap, outputPath string) error {
@@ -65,6 +66,7 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 			Reviewers: f.ReviewRequirements.MinReviewers,
 			Lines: lines, Language: f.Language,
 			Complexity: f.Factors.Complexity.Cyclomatic,
+			ImportedBy: len(f.Dependencies.ImportedBy),
 		})
 	}
 
@@ -493,6 +495,12 @@ function selectFile(path){
     h+='<div class="bar-r"><span class="bl">'+d.l+'</span><div class="b"><div class="bf" style="width:'+v+'%;background:'+bc+'"></div></div><span class="bv" style="color:'+bc+'">'+v+'</span></div>';
   });
   h+='</div>';
+
+  if(f.imported_by>0){
+    h+='<div class="sec"><div class="sec-title">Breakage Impact</div>';
+    h+='<div class="reason" style="color:var(--critical)"><strong>'+f.imported_by+' files break</strong> if this changes</div>';
+    h+='</div>';
+  }
 
   h+='<div class="sec"><div class="sec-title">Details</div><div class="rev">';
   h+='<div>Reviewers: <strong>'+f.reviewers+'</strong></div>';

@@ -486,7 +486,16 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		}
 	}
 
-	// Details (matches dashboard)
+	// Breakage impact
+	importedBy := len(heat.Dependencies.ImportedBy)
+	if importedBy > 0 {
+		b.WriteString("\n")
+		b.WriteString(labelStyle.Render("BREAKAGE IMPACT"))
+		b.WriteString("\n")
+		b.WriteString(criticalStyle.Render(fmt.Sprintf("  %d files break if this changes\n", importedBy)))
+	}
+
+	// Details
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render("DETAILS"))
 	b.WriteString("\n")
