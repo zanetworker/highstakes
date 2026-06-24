@@ -460,9 +460,10 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		b.WriteString(labelStyle.Render("IMPACT DIMENSIONS"))
 		b.WriteString("\n")
 
-		barWidth := width - 20
-		if barWidth < 10 {
-			barWidth = 10
+		// label(16) + bar(variable) + score(4) must fit in width
+		barWidth := width - 26
+		if barWidth < 8 {
+			barWidth = 8
 		}
 
 		dims := []struct {
@@ -477,9 +478,10 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 
 		for _, d := range dims {
 			label := fmt.Sprintf("  %-14s", d.name)
+			scoreStr := fmt.Sprintf(" %3d", d.score)
 			b.WriteString(labelStyle.Render(label))
 			b.WriteString(renderBar(d.score, barWidth))
-			b.WriteString(tierStyle(tierFromScore(d.score)).Render(fmt.Sprintf(" %d", d.score)))
+			b.WriteString(tierStyle(tierFromScore(d.score)).Render(scoreStr))
 			b.WriteString("\n")
 		}
 	}
@@ -568,7 +570,8 @@ func renderBar(score, width int) string {
 		empty = 0
 	}
 
-	return barFull.Render(strings.Repeat("█", filled)) +
+	color := tierStyle(tierFromScore(score))
+	return color.Render(strings.Repeat("█", filled)) +
 		barEmpty.Render(strings.Repeat("░", empty))
 }
 
