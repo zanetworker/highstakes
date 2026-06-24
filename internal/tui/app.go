@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -336,45 +335,67 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 
 	if node.IsDir {
 		if node.Expanded {
-			icon = "▼ "
+			icon = "v "
 		} else {
-			icon = "▶ "
+			icon = "> "
 		}
 		name = node.Name + "/"
-		score = tierIcon(tierFromScore(node.MaxHeat))
+		score = tierTag(tierFromScore(node.MaxHeat))
 	} else {
 		icon = "  "
 		name = node.Name
 		if node.Heat != nil {
-			score = fmt.Sprintf("%s %d", tierIcon(node.Heat.Tier), node.Heat.HeatScore)
+			score = fmt.Sprintf("%s %d", tierTag(node.Heat.Tier), node.Heat.HeatScore)
 		}
 	}
 
-	indentW := runewidth.StringWidth(indent)
-	iconW := runewidth.StringWidth(icon)
-	scoreW := runewidth.StringWidth(score)
-
-	maxName := width - indentW - iconW - scoreW - 2
+	// All ASCII now, len() is accurate
+	maxName := width - len(indent) - len(icon) - len(score) - 2
 	if maxName < 5 {
 		maxName = 5
 	}
-	if runewidth.StringWidth(name) > maxName {
-		name = runewidth.Truncate(name, maxName-1, "…")
+	if len(name) > maxName {
+		name = name[:maxName-1] + "~"
 	}
 
-	nameW := runewidth.StringWidth(name)
-	padding := width - indentW - iconW - nameW - scoreW
+	padding := width - len(indent) - len(icon) - len(name) - len(score)
 	if padding < 1 {
 		padding = 1
 	}
 
-	line := indent + icon + name + strings.Repeat(" ", padding) + score
+	pad := strings.Repeat(" ", padding)
+
+	// Color the score tag
+	var coloredScore string
+	if node.IsDir {
+		coloredScore = tierStyle(tierFromScore(node.MaxHeat)).Render(score)
+	} else if node.Heat != nil {
+		coloredScore = tierStyle(node.Heat.Tier).Render(score)
+	} else {
+		coloredScore = score
+	}
+
+	line := indent + icon + name + pad + coloredScore
 
 	if selected {
-		return selectedStyle.Width(width).Render(line)
+		return selectedStyle.Width(width).Render(indent + icon + name + pad + score)
 	}
 
 	return line
+}
+
+// tierTag returns a short ASCII tag for use in the tree (no emojis)
+func tierTag(tier types.Tier) string {
+	switch tier {
+	case types.TierCritical:
+		return "[!!!]"
+	case types.TierHigh:
+		return "[!!]"
+	case types.TierMedium:
+		return "[!]"
+	default:
+		return "[.]"
+	}
 }
 
 func (m Model) renderDetail(width, height int) string {
