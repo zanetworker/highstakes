@@ -31,10 +31,10 @@ var (
 			Background(lipgloss.Color("#333333")).
 			Foreground(lipgloss.Color("#FFFFFF"))
 
-	criticalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
-	highStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8844"))
-	mediumStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
-	lowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#44CC44"))
+	criticalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EE0000"))
+	highStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#E85D75"))
+	mediumStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#D4874D"))
+	lowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#2D8A2D"))
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	barFull       = lipgloss.NewStyle().Foreground(lipgloss.Color("#EE0000"))
@@ -279,7 +279,7 @@ func (m Model) View() string {
 	}
 
 	// Layout: title + tree|detail + help
-	title := titleStyle.Render(" 🔥 Code Heatmap ")
+	title := titleStyle.Render(" HighStakes ")
 	title += fmt.Sprintf("  %d files  %s", m.heatmap.Metadata.TotalFiles, m.heatmap.Metadata.Branch)
 
 	treeWidth := m.width*2/5 - 4
@@ -435,61 +435,65 @@ func (m Model) renderDirDetail(node *TreeNode, width int) string {
 func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 	var b strings.Builder
 
-	// File path
+	// File path + tier badge
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(heat.Path))
-	b.WriteString("\n\n")
-
-	// Heat score with bar
-	b.WriteString(labelStyle.Render("Heat Score: "))
+	b.WriteString("\n")
 	b.WriteString(tierStyle(heat.Tier).Render(
-		fmt.Sprintf("%d %s %s", heat.HeatScore, tierIcon(heat.Tier), tierLabel(heat.Tier))))
-	b.WriteString("\n")
-	b.WriteString(renderBar(heat.HeatScore, width-4))
-	b.WriteString("\n\n")
-
-	// Risk factors
-	b.WriteString(labelStyle.Render("Risk Factors:"))
+		fmt.Sprintf("  %s %s %d", tierIcon(heat.Tier), tierLabel(heat.Tier), heat.HeatScore)))
 	b.WriteString("\n")
 
-	factors := []struct {
-		name  string
-		score int
-		detail string
-	}{
-		{"Dependency", int(heat.Factors.DependencyCentrality.Score * 100),
-			fmt.Sprintf("%d imports", heat.Factors.DependencyCentrality.ImportCount)},
-		{"Incidents", heat.Factors.IncidentHistory.Score,
-			fmt.Sprintf("%d total", heat.Factors.IncidentHistory.IncidentCount)},
-		{"Churn", heat.Factors.ChangeFrequency.Score,
-			fmt.Sprintf("%d/90d", heat.Factors.ChangeFrequency.CommitsLast90d)},
-		{"User Impact", heat.Factors.UserImpact.Score, ""},
-		{"Sensitivity", heat.Factors.DataSensitivity.Score, ""},
-		{"Coverage Risk", heat.Factors.TestCoverage.Score,
-			fmt.Sprintf("%.0f%%", heat.Factors.TestCoverage.CoveragePercent)},
-		{"Complexity", heat.Factors.Complexity.Score,
-			fmt.Sprintf("cyclo: %d", heat.Factors.Complexity.Cyclomatic)},
-	}
-
-	barWidth := width - 24
-	if barWidth < 10 {
-		barWidth = 10
-	}
-
-	for _, f := range factors {
-		label := fmt.Sprintf("  %-14s", f.name)
-		b.WriteString(labelStyle.Render(label))
-		b.WriteString(renderBar(f.score, barWidth))
-		if f.detail != "" {
-			b.WriteString(dimStyle.Render(" " + f.detail))
-		}
+	// Blast radius (the key insight, matches dashboard)
+	br := heat.Factors.BlastRadius
+	if br.Assessed {
 		b.WriteString("\n")
+		b.WriteString(labelStyle.Render("BLAST RADIUS"))
+		b.WriteString("\n")
+		if br.Summary != "" {
+			b.WriteString(fmt.Sprintf("  %s\n", br.Summary))
+		}
+		if br.CriticalReason != "" {
+			b.WriteString(criticalStyle.Render(fmt.Sprintf("  %s\n", br.CriticalReason)))
+		}
+
+		// Impact dimension bars (matches dashboard)
+		b.WriteString("\n")
+		b.WriteString(labelStyle.Render("IMPACT DIMENSIONS"))
+		b.WriteString("\n")
+
+		barWidth := width - 20
+		if barWidth < 10 {
+			barWidth = 10
+		}
+
+		dims := []struct {
+			name  string
+			score int
+		}{
+			{"Security", br.SecurityImpact},
+			{"Data", br.DataImpact},
+			{"Availability", br.AvailabilityImpact},
+			{"User", br.UserImpact},
+		}
+
+		for _, d := range dims {
+			label := fmt.Sprintf("  %-14s", d.name)
+			b.WriteString(labelStyle.Render(label))
+			b.WriteString(renderBar(d.score, barWidth))
+			b.WriteString(tierStyle(tierFromScore(d.score)).Render(fmt.Sprintf(" %d", d.score)))
+			b.WriteString("\n")
+		}
 	}
+
+	// Details (matches dashboard)
+	b.WriteString("\n")
+	b.WriteString(labelStyle.Render("DETAILS"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  Complexity:  %d\n", heat.Factors.Complexity.Cyclomatic))
+	b.WriteString(fmt.Sprintf("  Lines:       %d\n", heat.Size.Lines))
+	b.WriteString(fmt.Sprintf("  Language:    %s\n", heat.Language))
 
 	// Review requirements
 	b.WriteString("\n")
-	b.WriteString(labelStyle.Render("Review:"))
-	b.WriteString("\n")
-
 	req := heat.ReviewRequirements
 	b.WriteString(fmt.Sprintf("  Reviewers: %d", req.MinReviewers))
 	if req.RequiresSenior {
@@ -500,15 +504,15 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		b.WriteString("  Security Scan: Required\n")
 	}
 	if req.AutoMerge {
-		b.WriteString(lowStyle.Render("  Auto-Merge: ✅ Allowed\n"))
+		b.WriteString(lowStyle.Render("  AUTO-MERGE OK\n"))
 	} else {
-		b.WriteString(criticalStyle.Render("  Auto-Merge: ❌ Blocked\n"))
+		b.WriteString(criticalStyle.Render("  HUMAN REVIEW REQUIRED\n"))
 	}
 
 	// Recent changes
 	if len(heat.RecentChanges) > 0 {
 		b.WriteString("\n")
-		b.WriteString(labelStyle.Render("Recent Changes:"))
+		b.WriteString(labelStyle.Render("RECENT CHANGES"))
 		b.WriteString("\n")
 		limit := 5
 		if len(heat.RecentChanges) < limit {
