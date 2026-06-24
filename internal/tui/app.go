@@ -329,72 +329,64 @@ func (m Model) renderTree(width, height int) string {
 }
 
 func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
-	indent := strings.Repeat("  ", node.Depth-1)
+	depth := node.Depth - 1
+	if depth < 0 {
+		depth = 0
+	}
+	indent := strings.Repeat("  ", depth)
 
-	var icon, name, score string
+	var prefix, name string
 
 	if node.IsDir {
+		arrow := "▶"
 		if node.Expanded {
-			icon = "v "
-		} else {
-			icon = "> "
+			arrow = "▼"
 		}
+		tier := tierFromScore(node.MaxHeat)
+		// Format: "  ▼ dirname/"  with colored tier marker
+		prefix = indent + tierMarker(tier) + " " + arrow + " "
 		name = node.Name + "/"
-		score = tierTag(tierFromScore(node.MaxHeat))
 	} else {
-		icon = "  "
-		name = node.Name
+		score := ""
+		marker := " "
 		if node.Heat != nil {
-			score = fmt.Sprintf("%s %d", tierTag(node.Heat.Tier), node.Heat.HeatScore)
+			score = fmt.Sprintf(" %3d", node.Heat.HeatScore)
+			marker = tierMarker(node.Heat.Tier)
 		}
+		// Format: "    ● filename              42"
+		prefix = indent + "  " + marker + " "
+		nameWidth := width - len(indent) - 6 - 4
+		if nameWidth < 5 {
+			nameWidth = 5
+		}
+		if len(node.Name) > nameWidth {
+			name = node.Name[:nameWidth-1] + "~"
+		} else {
+			name = node.Name + strings.Repeat(" ", nameWidth-len(node.Name))
+		}
+		name = name + score
 	}
 
-	// All ASCII now, len() is accurate
-	maxName := width - len(indent) - len(icon) - len(score) - 2
-	if maxName < 5 {
-		maxName = 5
-	}
-	if len(name) > maxName {
-		name = name[:maxName-1] + "~"
-	}
-
-	padding := width - len(indent) - len(icon) - len(name) - len(score)
-	if padding < 1 {
-		padding = 1
-	}
-
-	pad := strings.Repeat(" ", padding)
-
-	// Color the score tag
-	var coloredScore string
-	if node.IsDir {
-		coloredScore = tierStyle(tierFromScore(node.MaxHeat)).Render(score)
-	} else if node.Heat != nil {
-		coloredScore = tierStyle(node.Heat.Tier).Render(score)
-	} else {
-		coloredScore = score
-	}
-
-	line := indent + icon + name + pad + coloredScore
+	line := prefix + name
 
 	if selected {
-		return selectedStyle.Width(width).Render(indent + icon + name + pad + score)
+		return selectedStyle.Render(line)
 	}
 
 	return line
 }
 
-// tierTag returns a short ASCII tag for use in the tree (no emojis)
-func tierTag(tier types.Tier) string {
+// tierMarker returns a single colored dot character (1 cell wide, no emoji)
+func tierMarker(tier types.Tier) string {
 	switch tier {
 	case types.TierCritical:
-		return "[!!!]"
+		return criticalStyle.Render("●")
 	case types.TierHigh:
-		return "[!!]"
+		return highStyle.Render("●")
 	case types.TierMedium:
-		return "[!]"
+		return mediumStyle.Render("●")
 	default:
-		return "[.]"
+		return lowStyle.Render("●")
 	}
 }
 
