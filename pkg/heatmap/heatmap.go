@@ -90,10 +90,16 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	var assessments map[string]*llm.Assessment
 	if !g.opts.NoLLM {
 		apiKey := os.Getenv("OPENROUTER_API_KEY")
+		apiURL := ""
+		if k := os.Getenv("HIGHSTAKES_API_KEY"); k != "" {
+			apiKey = k
+			apiURL = os.Getenv("HIGHSTAKES_API_URL")
+		}
 		if apiKey != "" {
 			fmt.Println("  - Assessing blast radius (LLM)...")
 			assessor, err := llm.NewAssessor(llm.Config{
 				APIKey:      apiKey,
+				APIURL:      apiURL,
 				Model:       g.opts.Model,
 				CacheDir:    filepath.Join(g.repoPath, ".heatmap", "cache"),
 				Concurrency: g.opts.Concurrency,
@@ -118,7 +124,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				}
 			}
 		} else {
-			fmt.Println("  - Skipping LLM analysis (OPENROUTER_API_KEY not set)")
+			fmt.Println("  - Skipping LLM (set OPENROUTER_API_KEY or HIGHSTAKES_API_KEY)")
 		}
 	}
 

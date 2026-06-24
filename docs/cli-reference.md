@@ -165,6 +165,10 @@ Designed for AI agents to discover the CLI surface programmatically. The output 
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENROUTER_API_KEY` | For LLM analysis | OpenRouter API key. Not needed with `--no-llm`. |
+| Variable | Description |
+|----------|-------------|
+| `OPENROUTER_API_KEY` | OpenRouter API key (default provider) |
+| `HIGHSTAKES_API_KEY` | API key for any OpenAI-compatible endpoint (overrides `OPENROUTER_API_KEY`) |
+| `HIGHSTAKES_API_URL` | Base URL for the API endpoint (used with `HIGHSTAKES_API_KEY`) |
+
+Set either `OPENROUTER_API_KEY` or `HIGHSTAKES_API_KEY` + `HIGHSTAKES_API_URL`. Neither is needed with `--no-llm`.

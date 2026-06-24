@@ -46,9 +46,52 @@ exclude:
 
 Add project-specific exclusions here. The defaults cover Python, Go, Rust, JavaScript, and Java ecosystems.
 
-## LLM Model
+## LLM Provider
 
-The default model is `deepseek/deepseek-v4-flash` via OpenRouter. Override per-run with:
+HighStakes works with any OpenAI-compatible API. Three ways to configure it:
+
+### Option 1: OpenRouter (default, easiest)
+
+One API key, access to every model. Get a key at [openrouter.ai](https://openrouter.ai).
+
+```sh
+export OPENROUTER_API_KEY="sk-or-..."
+highstakes analyze
+```
+
+### Option 2: Direct provider API
+
+Point at any OpenAI-compatible endpoint (DeepSeek, OpenAI, vLLM, Ollama, etc.):
+
+```sh
+export HIGHSTAKES_API_KEY="your-key"
+export HIGHSTAKES_API_URL="https://api.deepseek.com/v1/chat/completions"
+highstakes analyze --model deepseek-chat
+```
+
+```sh
+# OpenAI directly
+export HIGHSTAKES_API_KEY="sk-..."
+export HIGHSTAKES_API_URL="https://api.openai.com/v1/chat/completions"
+highstakes analyze --model gpt-4.1-mini
+
+# Local Ollama
+export HIGHSTAKES_API_KEY="ollama"
+export HIGHSTAKES_API_URL="http://localhost:11434/v1/chat/completions"
+highstakes analyze --model llama3
+```
+
+### Option 3: No LLM
+
+Static analysis only. No API key needed. Less accurate but free.
+
+```sh
+highstakes analyze --no-llm
+```
+
+## Model Selection
+
+Override the model per-run:
 
 ```sh
 highstakes analyze --model deepseek/deepseek-v4-pro

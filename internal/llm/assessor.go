@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	DefaultModel    = "deepseek/deepseek-v4-flash"
-	OpenRouterURL   = "https://openrouter.ai/api/v1/chat/completions"
+	DefaultModel  = "deepseek/deepseek-v4-flash"
+	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
 )
 
 // Assessment holds the LLM's blast radius evaluation for a single file
@@ -46,9 +46,10 @@ func (a Assessment) MaxScore() int {
 	return m
 }
 
-// Assessor performs LLM-based blast radius analysis via OpenRouter
+// Assessor performs LLM-based blast radius analysis
 type Assessor struct {
 	apiKey      string
+	apiURL      string
 	model       string
 	cacheDir    string
 	concurrency int
@@ -58,6 +59,7 @@ type Assessor struct {
 // Config holds assessor configuration
 type Config struct {
 	APIKey      string
+	APIURL      string
 	Model       string
 	CacheDir    string
 	Concurrency int
@@ -66,9 +68,12 @@ type Config struct {
 // NewAssessor creates a new LLM assessor
 func NewAssessor(cfg Config) (*Assessor, error) {
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("OPENROUTER_API_KEY not set. Use --no-llm for static-only analysis")
+		return nil, fmt.Errorf("no API key set. Set OPENROUTER_API_KEY, or HIGHSTAKES_API_KEY + HIGHSTAKES_API_URL for any OpenAI-compatible endpoint. Use --no-llm for static-only analysis")
 	}
 
+	if cfg.APIURL == "" {
+		cfg.APIURL = DefaultAPIURL
+	}
 	if cfg.Model == "" {
 		cfg.Model = DefaultModel
 	}
@@ -85,6 +90,7 @@ func NewAssessor(cfg Config) (*Assessor, error) {
 
 	return &Assessor{
 		apiKey:      cfg.APIKey,
+		apiURL:      cfg.APIURL,
 		model:       cfg.Model,
 		cacheDir:    cfg.CacheDir,
 		concurrency: cfg.Concurrency,
@@ -194,7 +200,7 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	// Retry with backoff
 	var resp *http.Response
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequest("POST", OpenRouterURL, bytes.NewReader(body))
+		req, err := http.NewRequest("POST", a.apiURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
