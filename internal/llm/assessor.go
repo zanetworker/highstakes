@@ -273,23 +273,94 @@ func parseAssessment(text string) (*Assessment, error) {
 
 	// Extract JSON block
 	start := strings.Index(text, "{")
-	end := strings.LastIndex(text, "}")
-	if start >= 0 && end > start {
-		jsonStr := text[start : end+1]
+	if start < 0 {
+		return nil, fmt.Errorf("no JSON found in response")
+	}
 
-		// Try as-is
-		if err := json.Unmarshal([]byte(jsonStr), &assessment); err == nil {
-			return clampAssessment(&assessment), nil
-		}
+	jsonStr := text[start:]
 
-		// Fix common issues: newlines inside string values
-		cleaned := cleanJSON(jsonStr)
-		if err := json.Unmarshal([]byte(cleaned), &assessment); err == nil {
+	// Clean newlines inside strings
+	jsonStr = cleanJSON(jsonStr)
+
+	// Try as-is
+	if err := json.Unmarshal([]byte(jsonStr), &assessment); err == nil {
+		return clampAssessment(&assessment), nil
+	}
+
+	// Try truncating to last complete }
+	end := strings.LastIndex(jsonStr, "}")
+	if end > 0 {
+		if err := json.Unmarshal([]byte(jsonStr[:end+1]), &assessment); err == nil {
 			return clampAssessment(&assessment), nil
 		}
 	}
 
+	// Repair truncated JSON: close any open strings and braces
+	repaired := repairJSON(jsonStr)
+	if err := json.Unmarshal([]byte(repaired), &assessment); err == nil {
+		return clampAssessment(&assessment), nil
+	}
+
 	return nil, fmt.Errorf("could not parse assessment from: %s", text[:min(len(text), 200)])
+}
+
+// repairJSON attempts to close truncated JSON by adding missing quotes and braces
+func repairJSON(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Find last complete key-value pair by looking for last successful comma or opening brace
+	// Then truncate everything after it and close
+	lastComma := strings.LastIndex(s, ",")
+	lastBrace := strings.LastIndex(s, "{")
+
+	cutPoint := lastComma
+	if lastBrace > lastComma {
+		cutPoint = lastBrace
+	}
+
+	if cutPoint > 0 {
+		// Try truncating to last comma (drop incomplete field)
+		candidate := s[:cutPoint]
+
+		// If we cut at a comma, just close the brace
+		if s[cutPoint] == ',' {
+			candidate += "}"
+		} else {
+			candidate += "}"
+		}
+
+		var test Assessment
+		if err := json.Unmarshal([]byte(candidate), &test); err == nil {
+			return candidate
+		}
+	}
+
+	// Fallback: close any open strings and braces
+	inString := false
+	escaped := false
+	for _, ch := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+		}
+	}
+	if inString {
+		s += `"`
+	}
+
+	opens := strings.Count(s, "{") - strings.Count(s, "}")
+	for i := 0; i < opens; i++ {
+		s += "}"
+	}
+
+	return s
 }
 
 func cleanJSON(s string) string {

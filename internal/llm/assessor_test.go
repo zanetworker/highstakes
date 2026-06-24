@@ -38,6 +38,36 @@ func TestParseAssessment_WrappedInMarkdown(t *testing.T) {
 	}
 }
 
+func TestParseAssessment_TruncatedJSON(t *testing.T) {
+	// This is the exact pattern from DeepSeek truncation
+	input := `{"security_impact":95,"data_impact":80,"availability_impact":85,"user_impact":90,"blast_radius_summary":"Breaks all network access decisions, bypasses sandbox isolation","critical_reason":"Network pol`
+
+	a, err := parseAssessment(input)
+	if err != nil {
+		t.Fatalf("should repair truncated JSON, got error: %v", err)
+	}
+
+	if a.SecurityImpact != 95 {
+		t.Errorf("security: got %d, want 95", a.SecurityImpact)
+	}
+	if a.AvailabilityImpact != 85 {
+		t.Errorf("availability: got %d, want 85", a.AvailabilityImpact)
+	}
+}
+
+func TestParseAssessment_TruncatedMidNumber(t *testing.T) {
+	input := `{"security_impact":85,"data_impact":30,"availability_impact":90,"user_impact":75,"blast_radius_summary":"Orphaned VM subprocesses leak","critical`
+
+	a, err := parseAssessment(input)
+	if err != nil {
+		t.Fatalf("should repair truncated JSON, got error: %v", err)
+	}
+
+	if a.SecurityImpact != 85 {
+		t.Errorf("security: got %d, want 85", a.SecurityImpact)
+	}
+}
+
 func TestParseAssessment_InvalidJSON(t *testing.T) {
 	_, err := parseAssessment("this is not json at all")
 	if err == nil {
