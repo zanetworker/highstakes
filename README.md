@@ -59,9 +59,17 @@ Heat Distribution:
 
 ```sh
 highstakes dashboard     # Visual treemap + file explorer (opens browser)
-heatmap               # Terminal TUI
+highstakes               # Terminal TUI
 highstakes list --tier high
 ```
+
+## Terminal TUI
+
+Navigate the file tree with colored tier indicators. Select any file to see blast radius, impact dimensions, and review requirements.
+
+<p align="center">
+  <img src="docs/images/tui-view.png" width="820" alt="Terminal TUI with file tree, blast radius detail, and impact dimension bars">
+</p>
 
 ## Dashboard
 
