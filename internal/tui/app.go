@@ -332,6 +332,7 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 	indent := strings.Repeat("  ", node.Depth-1)
 
 	var icon, name, score string
+	var scoreDisplayWidth int
 
 	if node.IsDir {
 		if node.Expanded {
@@ -341,16 +342,21 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 		}
 		name = node.Name + "/"
 		score = tierIcon(tierFromScore(node.MaxHeat))
+		scoreDisplayWidth = displayWidth(score)
 	} else {
 		icon = "  "
 		name = node.Name
 		if node.Heat != nil {
-			score = fmt.Sprintf("%s %d", tierIcon(node.Heat.Tier), node.Heat.HeatScore)
+			ti := tierIcon(node.Heat.Tier)
+			score = fmt.Sprintf("%s %d", ti, node.Heat.HeatScore)
+			scoreDisplayWidth = displayWidth(ti) + 1 + digitWidth(node.Heat.HeatScore)
 		}
 	}
 
-	// Truncate name if needed
-	maxName := width - len(indent) - len(icon) - len(score) - 2
+	indentW := len(indent)
+	iconW := displayWidth(icon)
+
+	maxName := width - indentW - iconW - scoreDisplayWidth - 2
 	if maxName < 5 {
 		maxName = 5
 	}
@@ -358,7 +364,7 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 		name = name[:maxName-1] + "…"
 	}
 
-	padding := width - len(indent) - len(icon) - len(name) - len(score)
+	padding := width - indentW - iconW - len(name) - scoreDisplayWidth
 	if padding < 1 {
 		padding = 1
 	}
@@ -370,6 +376,28 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 	}
 
 	return line
+}
+
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if r > 0x2600 {
+			w += 2 // emoji = 2 cells
+		} else {
+			w += 1
+		}
+	}
+	return w
+}
+
+func digitWidth(n int) int {
+	if n < 10 {
+		return 1
+	}
+	if n < 100 {
+		return 2
+	}
+	return 3
 }
 
 func (m Model) renderDetail(width, height int) string {
