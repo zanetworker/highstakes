@@ -1,5 +1,7 @@
-title: Code Heatmap
-description: Know which code would hurt the most if it broke
-theme: jekyll-theme-midnight
+title: HighStakes
+description: AI writes code faster than you can review it. See where you're needed and where AI can handle the rest.
+remote_theme: pages-themes/minimal@v0.2.0
 url: https://zanetworker.github.io/highstakes
 baseurl: /highstakes
+plugins:
+  - jekyll-remote-theme
