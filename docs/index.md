@@ -91,4 +91,4 @@ export HIGHSTAKES_API_URL="http://localhost:11434/v1/chat/completions"
 ## Links
 
 - [GitHub repo](https://github.com/zanetworker/highstakes)
-- [Blog post](https://adelzaalouk.me/2026/Jun/25/your-code-review-process-is-already-broken)
+- [Blog post](https://adelzaalouk.me/2026/Jun/27/your-code-review-process-is-already-broken)
