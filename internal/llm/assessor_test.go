@@ -201,7 +201,7 @@ func TestCache_CorruptedFile(t *testing.T) {
 	a := &Assessor{cacheDir: dir}
 
 	// Write corrupt cache file
-	os.WriteFile(filepath.Join(dir, "corrupt.json"), []byte("not json"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "corrupt.json"), []byte("not json"), 0644)
 
 	_, ok := a.loadCache("corrupt")
 	if ok {

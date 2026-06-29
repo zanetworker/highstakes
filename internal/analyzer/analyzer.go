@@ -500,7 +500,7 @@ func calculateCyclomatic(fn *ast.FuncDecl) int {
 	complexity := 1 // Base complexity
 
 	ast.Inspect(fn, func(n ast.Node) bool {
-		switch n.(type) {
+		switch n := n.(type) {
 		case *ast.IfStmt:
 			complexity++
 		case *ast.ForStmt, *ast.RangeStmt:
@@ -511,10 +511,8 @@ func calculateCyclomatic(fn *ast.FuncDecl) int {
 			complexity++
 		case *ast.BinaryExpr:
 			// Count && and || as additional branches
-			if b, ok := n.(*ast.BinaryExpr); ok {
-				if b.Op == token.LAND || b.Op == token.LOR {
-					complexity++
-				}
+			if n.Op == token.LAND || n.Op == token.LOR {
+				complexity++
 			}
 		}
 		return true

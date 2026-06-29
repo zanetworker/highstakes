@@ -64,9 +64,9 @@ func TestStore_ForFile(t *testing.T) {
 	store, _ := NewStore(path)
 
 	now := time.Now()
-	store.Add("src/auth/jwt.go", "high", "Bug 1", now)
-	store.Add("src/api/handler.go", "medium", "Bug 2", now)
-	store.Add("src/auth/jwt.go", "critical", "Bug 3", now)
+	_, _ = store.Add("src/auth/jwt.go", "high", "Bug 1", now)
+	_, _ = store.Add("src/api/handler.go", "medium", "Bug 2", now)
+	_, _ = store.Add("src/auth/jwt.go", "critical", "Bug 3", now)
 
 	jwtIncidents := store.ForFile("src/auth/jwt.go")
 	if len(jwtIncidents) != 2 {
@@ -90,7 +90,7 @@ func TestStore_Persistence(t *testing.T) {
 
 	// Create and add
 	store1, _ := NewStore(path)
-	store1.Add("file.go", "high", "Bug", time.Now())
+	_, _ = store1.Add("file.go", "high", "Bug", time.Now())
 
 	// Reload from same file
 	store2, err := NewStore(path)

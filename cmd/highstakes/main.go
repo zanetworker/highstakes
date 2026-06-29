@@ -585,7 +585,7 @@ var dashboardCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "Dashboard generated: %s\n", absPath)
 
 		if !noOpen {
-			exec.Command("open", absPath).Start()
+			_ = exec.Command("open", absPath).Start()
 		}
 
 		return nil
@@ -835,13 +835,6 @@ func (e *exitError) Error() string { return e.msg }
 
 func cliError(code int, format string, args ...interface{}) error {
 	return &exitError{code: code, msg: fmt.Sprintf(format, args...)}
-}
-
-func boolLabel(b bool, ifTrue, ifFalse string) string {
-	if b {
-		return ifTrue
-	}
-	return ifFalse
 }
 
 // --- command registration ---

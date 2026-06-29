@@ -328,12 +328,7 @@ func repairJSON(s string) string {
 		// Try truncating to last comma (drop incomplete field)
 		candidate := s[:cutPoint]
 
-		// If we cut at a comma, just close the brace
-		if s[cutPoint] == ',' {
-			candidate += "}"
-		} else {
-			candidate += "}"
-		}
+		candidate += "}"
 
 		var test Assessment
 		if err := json.Unmarshal([]byte(candidate), &test); err == nil {
@@ -398,19 +393,19 @@ func cleanJSON(s string) string {
 }
 
 func clampAssessment(a *Assessment) *Assessment {
-	a.SecurityImpact = clamp(a.SecurityImpact, 0, 100)
-	a.DataImpact = clamp(a.DataImpact, 0, 100)
-	a.AvailabilityImpact = clamp(a.AvailabilityImpact, 0, 100)
-	a.UserImpact = clamp(a.UserImpact, 0, 100)
+	a.SecurityImpact = clamp0to100(a.SecurityImpact)
+	a.DataImpact = clamp0to100(a.DataImpact)
+	a.AvailabilityImpact = clamp0to100(a.AvailabilityImpact)
+	a.UserImpact = clamp0to100(a.UserImpact)
 	return a
 }
 
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
+func clamp0to100(v int) int {
+	if v < 0 {
+		return 0
 	}
-	if v > hi {
-		return hi
+	if v > 100 {
+		return 100
 	}
 	return v
 }
@@ -446,7 +441,7 @@ func (a *Assessor) saveCache(hash string, assessment *Assessment) {
 		return
 	}
 
-	os.WriteFile(a.cachePath(hash), data, 0644)
+	_ = os.WriteFile(a.cachePath(hash), data, 0644)
 }
 
 // ShouldAssess returns true if the file should be sent to the LLM
@@ -472,9 +467,6 @@ func ShouldAssess(path string) bool {
 		".md": true, ".yaml": true, ".yml": true, ".toml": true,
 		".json": true, ".lock": true, ".sum": true, ".mod": true,
 	}
-	if skipExts[ext] {
-		return false
-	}
 
-	return true
+	return !skipExts[ext]
 }

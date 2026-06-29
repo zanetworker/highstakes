@@ -37,8 +37,7 @@ var (
 	lowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#2D8A2D"))
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	barFull       = lipgloss.NewStyle().Foreground(lipgloss.Color("#EE0000"))
-	barEmpty      = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+	barEmpty = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
@@ -364,7 +363,7 @@ func (m Model) renderTreeLine(node *TreeNode, selected bool, width int) string {
 		} else {
 			name = node.Name + strings.Repeat(" ", nameWidth-len(node.Name))
 		}
-		name = name + score
+		name += score
 	}
 
 	line := prefix + name
@@ -390,7 +389,7 @@ func tierMarker(tier types.Tier) string {
 	}
 }
 
-func (m Model) renderDetail(width, height int) string {
+func (m Model) renderDetail(width, _ int) string {
 	if m.cursor >= len(m.visible) || len(m.visible) == 0 {
 		return dimStyle.Render("Select a file to see details")
 	}
@@ -408,7 +407,7 @@ func (m Model) renderDetail(width, height int) string {
 	return m.renderFileDetail(node.Heat, width)
 }
 
-func (m Model) renderDirDetail(node *TreeNode, width int) string {
+func (m Model) renderDirDetail(node *TreeNode, _ int) string {
 	var b strings.Builder
 
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render(node.Path+"/"))
@@ -467,7 +466,7 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		b.WriteString(labelStyle.Render("BLAST RADIUS"))
 		b.WriteString("\n")
 		if br.Summary != "" {
-			b.WriteString(fmt.Sprintf("  %s\n", br.Summary))
+			fmt.Fprintf(&b, "  %s\n", br.Summary)
 		}
 		if br.CriticalReason != "" {
 			b.WriteString(criticalStyle.Render(fmt.Sprintf("  %s\n", br.CriticalReason)))
@@ -517,14 +516,14 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 	b.WriteString("\n")
 	b.WriteString(labelStyle.Render("DETAILS"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  Complexity:  %d\n", heat.Factors.Complexity.Cyclomatic))
-	b.WriteString(fmt.Sprintf("  Lines:       %d\n", heat.Size.Lines))
-	b.WriteString(fmt.Sprintf("  Language:    %s\n", heat.Language))
+	fmt.Fprintf(&b, "  Complexity:  %d\n", heat.Factors.Complexity.Cyclomatic)
+	fmt.Fprintf(&b, "  Lines:       %d\n", heat.Size.Lines)
+	fmt.Fprintf(&b, "  Language:    %s\n", heat.Language)
 
 	// Review requirements
 	b.WriteString("\n")
 	req := heat.ReviewRequirements
-	b.WriteString(fmt.Sprintf("  Reviewers: %d", req.MinReviewers))
+	fmt.Fprintf(&b, "  Reviewers: %d", req.MinReviewers)
 	if req.RequiresSenior {
 		b.WriteString(" (senior)")
 	}
@@ -553,7 +552,7 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 			if len(msg) > width-16 {
 				msg = msg[:width-19] + "..."
 			}
-			b.WriteString(fmt.Sprintf("  %s  %s\n", dimStyle.Render(date), msg))
+			fmt.Fprintf(&b, "  %s  %s\n", dimStyle.Render(date), msg)
 		}
 	}
 
