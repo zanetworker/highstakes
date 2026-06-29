@@ -30,16 +30,16 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
 
-      - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+      - name: Install highstakes
+        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
       - name: Analyze
         env:
@@ -50,7 +50,7 @@ jobs:
         run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
 
       - name: Post comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
@@ -99,7 +99,7 @@ heatmap:
   stage: test
   image: golang:1.25
   script:
-    - go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+    - go install github.com/zanetworker/highstakes/cmd/highstakes@latest
     - highstakes init && highstakes analyze
     - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --json > risk.json
     - |
@@ -120,7 +120,7 @@ The CLI is the interface. Any CI that can run a binary works:
 
 ```sh
 # Install
-go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
 # Analyze (cached, only re-assesses changed files)
 export OPENROUTER_API_KEY="$YOUR_KEY"
