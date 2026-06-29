@@ -1,5 +1,6 @@
 # Binary
-highstakes
+/highstakes
+/heatmap
 *.exe
 
 # Test output
@@ -16,4 +17,3 @@ coverage.html
 
 # Local config
 .heatmap/
-highstakes

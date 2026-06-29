@@ -11,16 +11,16 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25'
 
-      - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+      - name: Install highstakes
+        run: go install ./cmd/highstakes
 
       - name: Analyze repository
         run: |
@@ -35,7 +35,7 @@ jobs:
           echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
 
       - name: Post PR comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
