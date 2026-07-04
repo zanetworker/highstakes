@@ -320,13 +320,20 @@ fi
 ```markdown
 ## 🔥🔥 HighStakes: HIGH
 
-| File | Score | Tier | Lines |
-|------|-------|------|-------|
-| src/auth/oidc.rs | 63 | 🔥🔥 high | +45/-12 |
-| src/sandbox/proxy.rs | 63 | 🔥🔥 high | +8/-3 |
-| src/tui/theme.rs | 6 | 🟢 low | +2/-1 |
+| File | Heat | Tier | Lines |
+|------|------|------|-------|
+| ⚠️ src/auth/oidc.rs | 63 | 🔥🔥 HIGH | +45/-12 |
+| ⚠️ src/sandbox/proxy.rs | 63 | 🔥🔥 HIGH | +8/-3 |
+| ✓ src/tui/theme.rs | 6 | 🟢 LOW | +2/-1 |
 
-**Review:** 2 reviewers (senior), auto-merge: ❌
+### ⚠️ Circuit Breaker Signals
+- Large diff (>500 lines)
+
+### Review Requirements
+- **Reviewers**: 2 (senior)
+- **Security Scan**: Required
+- **Auto-Merge**: ❌ Blocked
+- **Est. Review Time**: 60 min
 ```
 
 ### Agent Introspection

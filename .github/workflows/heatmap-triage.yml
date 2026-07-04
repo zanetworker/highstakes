@@ -1,4 +1,4 @@
-name: Code Heatmap Triage
+name: HighStakes Triage
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -48,7 +48,7 @@ jobs:
               low: '🟢'
             };
 
-            let body = '## ' + (tierEmoji[risk.tier] || '🟢') + ' Code Heatmap: ' + risk.tier.toUpperCase() + '\n\n';
+            let body = '## ' + (tierEmoji[risk.tier] || '🟢') + ' HighStakes: ' + risk.tier.toUpperCase() + '\n\n';
             body += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
 
             const sorted = risk.files_changed.sort((a, b) => b.heat_score - a.heat_score);
@@ -79,7 +79,7 @@ jobs:
               issue_number: context.issue.number
             });
 
-            const existing = comments.data.find(c => c.body.includes('Code Heatmap:'));
+            const existing = comments.data.find(c => c.body.includes('HighStakes:'));
 
             if (existing) {
               await github.rest.issues.updateComment({
