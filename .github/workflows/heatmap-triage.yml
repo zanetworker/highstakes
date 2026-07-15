@@ -19,10 +19,18 @@ jobs:
         with:
           go-version: '1.25'
 
+      - uses: actions/cache@v4
+        with:
+          path: .heatmap
+          key: heatmap-${{ hashFiles('**/*.go') }}
+          restore-keys: heatmap-
+
       - name: Install highstakes
         run: go install ./cmd/highstakes
 
       - name: Analyze repository
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           highstakes init
           highstakes analyze
@@ -34,11 +42,21 @@ jobs:
           echo "tier=$(jq -r .tier pr-risk.json)" >> $GITHUB_OUTPUT
           echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
 
+      - name: Gate on risk tier
+        run: |
+          TIER=$(jq -r .tier pr-risk.json)
+          if [ "$TIER" = "critical" ]; then
+            echo "::error::PR touches critical-tier files. Requires senior review before merge."
+            exit 1
+          fi
+
       - name: Post PR comment
         uses: actions/github-script@v9
+        if: always()
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('pr-risk.json')) return;
             const risk = JSON.parse(fs.readFileSync('pr-risk.json', 'utf8'));
 
             const tierEmoji = {
@@ -72,7 +90,6 @@ jobs:
             body += '- **Auto-Merge**: ' + (risk.review_requirements.auto_merge ? '✅ Allowed' : '❌ Blocked') + '\n';
             body += '- **Est. Review Time**: ' + risk.review_requirements.estimated_review_time_minutes + ' min\n';
 
-            // Find existing comment to update
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
