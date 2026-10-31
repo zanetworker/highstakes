@@ -164,3 +164,10 @@ Owners are derived from one `git log --numstat` pass. Each author's score for a 
 `highstakes check calibration` tests the scores against git history: did the files the heatmap calls hot attract reverts, bug fixes, security fixes and incidents? It reports per-tier event rates, precision@K, lift over random and rank correlation, for the heat score and for each factor on its own. See the [CLI reference](cli-reference.md#highstakes-check-calibration).
 
 Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve CRITICAL with no fixes at all, so expect blast radius to correlate weakly with fix counts. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
+
+### Validating impact
+
+Fix history validates likelihood (how often a file breaks). Blast radius is the impact axis (how bad a break would be), and needs a different check. There are two:
+
+- **Security fixes only.** `highstakes check calibration --events security --since 1095d` counts only security fixes, which tend to land where a bug hurts most. A positive blast-radius Spearman and precision@K above the base rate here is evidence for the impact axis. Security fixes are rare: the report warns when fewer than 10 files have one, and most repos need a window of years.
+- **Maintainer labels.** `highstakes create labels --out labels.csv` writes a blind sheet: the 20 files HighStakes rates highest on blast radius mixed with 20 random other files, shuffled, with no scores shown. Maintainers rate each from 1 to 5 (5 = "a bug here would be a serious incident"). `highstakes check calibration --labels labels.csv` then reports Spearman and precision@K (positive = rating 4 or 5) for blast radius and heat. This is the direct test of impact, and the one to trust when security fixes are too few.

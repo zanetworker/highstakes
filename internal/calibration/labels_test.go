@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,22 @@ func TestClassifyMessage(t *testing.T) {
 		{"fix keyword only in body is not a fix", "feat: add tour\n\nAlso fixes a typo and a security note.", Labels{}},
 		{"advisory id in body counts", "chore(deps): bump x/net\n\nAddresses GHSA-abcd-efgh-ijkl.", Labels{Security: true}},
 		{"empty", "", Labels{}},
+		// Security keyword false positives seen in benchmark repos.
+		{"docs type is not a security fix", "docs(security): add private reporting workflows (#4832)", Labels{}},
+		{"ci type is not a security fix", "ci(security): gate tagged releases on scans (#3523)", Labels{}},
+		{"test type is not a security fix", "test(server): cover service endpoint plaintext security (#1352)", Labels{}},
+		{"chore type is not a security fix", "chore(security): document Kubernetes runtime RBAC (#3328)", Labels{}},
+		{"SECURITY.md edit", "Update SECURITY.md", Labels{}},
+		{"CSP header name", "browse: fix Content-Security-Policy warnings in Firefox (#6443)", Labels{BugFix: true}},
+		{"identifier podSecurityContext", "fix(helm): omit podSecurityContext block when value is null", Labels{BugFix: true}},
+		{"identifier SecurityException", "Return the default enum if a SecurityException is caught", Labels{}},
+		{"constant JAVA_SECURITY_KERBEROS_CONF", "Add SystemProperties.JAVA_SECURITY_KERBEROS_CONF", Labels{}},
+		// True positives that must survive the tightening.
+		{"fix(security) scope", "fix(security): harden Vault credential transport (#3329)", Labels{BugFix: true, Security: true}},
+		{"vulnerability word", "fastcgi: fix HTTPoxy vulnerability (#7934)", Labels{BugFix: true, Security: true}},
+		{"hyphenated vulnerable", "Set an arbitrary upper limit on ReDoS-vulnerable regexps", Labels{Security: true}},
+		{"security at end of subject", "caddyhttp: enhancements for client IP parsing security", Labels{Security: true}},
+		{"cve id in docs commit still counts", "docs: note CVE-2026-1234 workaround", Labels{Security: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,7 +78,7 @@ func TestCountEvents(t *testing.T) {
 		{File: "c.go", Date: base.AddDate(0, 0, 5)},
 		{File: "c.go", Date: base.AddDate(-1, 0, 0)}, // outside window
 	}
-	got := CountEvents(commits, incs, base, base.AddDate(0, 0, 10))
+	got := CountEvents(commits, incs, base, base.AddDate(0, 0, 10), EventsAll)
 
 	want := map[string]FileEvents{
 		"a.go": {Total: 3, Revert: 1, BugFix: 2, Security: 1},
@@ -85,8 +102,86 @@ func TestCountEvents(t *testing.T) {
 		})
 	}
 
-	if empty := CountEvents(nil, nil, base, base); len(empty) != 0 {
+	if empty := CountEvents(nil, nil, base, base, EventsAll); len(empty) != 0 {
 		t.Errorf("empty input gave %v", empty)
+	}
+}
+
+func TestParseEventFilter(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    EventFilter
+		wantErr bool
+	}{
+		{"all", EventsAll, false},
+		{"fixes", EventsFixes, false},
+		{"reverts", EventsReverts, false},
+		{"security", EventsSecurity, false},
+		{"SECURITY", EventsSecurity, false},
+		{"", "", true},
+		{"bugs", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := ParseEventFilter(tt.in)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("ParseEventFilter(%q) = (%q, %v), want (%q, err=%v)", tt.in, got, err, tt.want, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "all, fixes, reverts, security") {
+				t.Errorf("error %q must list valid values", err)
+			}
+		})
+	}
+}
+
+func TestCountEvents_Filter(t *testing.T) {
+	commits := []gitanalyzer.CommitInfo{
+		{Message: "fix: nil deref", When: base.AddDate(0, 0, 1), Files: []string{"a.go"}},
+		{Message: `Revert "feat: x"`, When: base.AddDate(0, 0, 2), Files: []string{"a.go", "r.go"}},
+		{Message: "fix CVE-2026-1 token leak", When: base.AddDate(0, 0, 3), Files: []string{"a.go", "s.go"}},
+		{Message: "harden vuln scanner", When: base.AddDate(0, 0, 4), Files: []string{"v.go"}},
+	}
+	incs := []types.Incident{{File: "i.go", Date: base.AddDate(0, 0, 5)}}
+	to := base.AddDate(0, 0, 10)
+	tests := []struct {
+		filter EventFilter
+		want   map[string]FileEvents
+	}{
+		{EventsAll, map[string]FileEvents{
+			"a.go": {Total: 3, Revert: 1, BugFix: 2, Security: 1},
+			"r.go": {Total: 1, Revert: 1},
+			"s.go": {Total: 1, BugFix: 1, Security: 1},
+			"v.go": {Total: 1, Security: 1},
+			"i.go": {Total: 1, Incident: 1},
+		}},
+		// fixes: bug-fix or security commits; a CVE fix is counted once.
+		{EventsFixes, map[string]FileEvents{
+			"a.go": {Total: 2, BugFix: 2, Security: 1},
+			"s.go": {Total: 1, BugFix: 1, Security: 1},
+			"v.go": {Total: 1, Security: 1},
+		}},
+		{EventsReverts, map[string]FileEvents{
+			"a.go": {Total: 1, Revert: 1},
+			"r.go": {Total: 1, Revert: 1},
+		}},
+		{EventsSecurity, map[string]FileEvents{
+			"a.go": {Total: 1, Security: 1},
+			"s.go": {Total: 1, Security: 1},
+			"v.go": {Total: 1, Security: 1},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.filter), func(t *testing.T) {
+			got := CountEvents(commits, incs, base, to, tt.filter)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d files %v, want %v", len(got), got, tt.want)
+			}
+			for path, w := range tt.want {
+				if g := got[path]; g == nil || *g != w {
+					t.Errorf("%s = %+v, want %+v", path, g, w)
+				}
+			}
+		})
 	}
 }
 
@@ -135,7 +230,7 @@ func TestCountEvents_RealRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := CountEvents(commits, nil, base, base.AddDate(0, 0, 30))
+	got := CountEvents(commits, nil, base, base.AddDate(0, 0, 30), EventsAll)
 
 	want := map[string]FileEvents{
 		"auth/token.go": {Total: 2, Revert: 1, BugFix: 1, Security: 1},

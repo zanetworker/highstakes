@@ -240,6 +240,32 @@ highstakes create policy > .github/highstakes-policy.yaml
 
 **Exit code 2** for an invalid `--min-tier`. **Exit code 4** if there is no heatmap.
 
+## highstakes create labels
+
+Write a blind CSV sheet for maintainers to rate how bad a bug in each file would be. Score the filled sheet with [`check calibration --labels`](#maintainer-labels).
+
+```sh
+highstakes create labels [--top 20] [--random 20] [--seed 1] [--out FILE] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--top` | `20` | Files HighStakes rates highest on blast radius (on heat when no file has an LLM assessment) |
+| `--random` | `20` | Other non-test files, sampled at random |
+| `--seed` | `1` | Random seed; the same seed and heatmap give the same sheet |
+| `--out` | (stdout) | Write the CSV to this file |
+| `--json` | `false` | Print `ranked_by`, `top`, `random`, `seed`, `files`, `out` and `paths` (sheet order) as JSON |
+
+The sheet has the columns `path`, `maintainer_rating` (blank) and `notes`. Maintainers rate each file from 1 to 5, where 5 means "a bug here would be a serious incident", and leave a row blank when unsure. The two groups are shuffled together and the sheet carries no HighStakes scores, so the raters cannot anchor on them. Test files are never sampled.
+
+```sh
+highstakes create labels --out labels.csv
+# maintainers fill in maintainer_rating, then:
+highstakes check calibration --labels labels.csv
+```
+
+**Exit code 2** for a negative `--top` or `--random`, or both 0. **Exit code 4** if there is no heatmap or it has no non-test files.
+
 ## highstakes incident create
 
 Record a production incident for a file.
@@ -317,18 +343,21 @@ Designed for AI agents to discover the CLI surface programmatically. The output 
 Compare heat scores with what actually happened in git history.
 
 ```sh
-highstakes check calibration [--since 365d | --holdout <cutoff>] [--top 10] [--limit 10] [--json]
+highstakes check calibration [--since 365d | --holdout <cutoff>] [--events all] [--top 10] [--limit 10] [--json]
+highstakes check calibration --labels FILE [--top 10] [--json]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--since` | `365d` | Count events in the last N days (format `Nd`) |
 | `--holdout` | (off) | Cutoff as `YYYY-MM-DD` or `Nd` ago. Churn and incident history are recomputed from history up to the cutoff, files that did not exist yet are dropped, and events are counted after it. Cannot be combined with `--since` |
+| `--events` | `all` | Event kinds to count: `all` (reverts, bug fixes, security fixes, incidents), `fixes` (bug-fix and security commits), `reverts`, or `security` (security fixes only). Incidents count only with `all` |
+| `--labels` | (off) | Compare with maintainer ratings in this CSV instead of git history. Cannot be combined with `--since`, `--holdout` or `--events` |
 | `--top` | `10` | K for precision@K and recall@K |
 | `--limit` | `10` | Maximum files per surprise list |
 | `--json` | `false` | Output as JSON |
 
-**Events.** Each non-merge commit in the window is labelled from its message: a revert (subject starts with `Revert` or the body has `This reverts commit`), a bug fix (fix, bug, patch, hotfix, repair, correct or resolve in the subject), or a security fix (`CVE-` or `GHSA-` anywhere, `security` or `vuln` in the subject). Every file the commit touched gets one event. Commits touching more than 50 files are skipped as bulk changes. Incidents in `.heatmap/incidents.json` dated in the window add one event to their file.
+**Events.** Each non-merge commit in the window is labelled from its message: a revert (subject starts with `Revert` or the body has `This reverts commit`), a bug fix (fix, bug, patch, hotfix, repair, correct or resolve in the subject), or a security fix (`CVE-` or `GHSA-` anywhere in the message, or `security` as a standalone word or a word starting with `vuln` in the subject). The security keywords do not count in `docs`, `ci`, `test`, `chore`, `build` or `style` commits, nor inside names such as `Content-Security-Policy`, `podSecurityContext`, `SecurityException` or `SECURITY.md`. Every file the commit touched gets one event. Commits touching more than 50 files are skipped as bulk changes. Incidents in `.heatmap/incidents.json` dated in the window add one event to their file.
 
 **Metrics.**
 
@@ -343,9 +372,25 @@ highstakes check calibration [--since 365d | --holdout <cutoff>] [--top 10] [--l
 
 Metrics are reported for `heat` and for `blast_radius` (LLM-assessed files only), `churn`, `complexity` and `centrality` alone. Surprises list LOW-tier files with the most events and CRITICAL/HIGH files with none.
 
+The report starts with the event kinds counted (`event_filter` in JSON). When fewer than 10 scored files have events it prints a `WARNING` line and sets `too_few_events`: the numbers are then anecdotes, not evidence.
+
+**Security-only mode.** Fix history measures how likely a file is to break; blast radius scores how bad a break would be, so fix counts cannot validate it. `--events security` counts only security fixes, a rough proxy for impact: read the `blast_radius` row first. Security fixes are rare, so widen the window (`--since 1095d`) and expect too few events on young repos.
+
 **Leakage.** In the default (in-sample) mode, churn and incident history come from the same history as the events, so they look better than they are. `--holdout` removes that for churn and incidents. Complexity, centrality, path heuristics and blast radius still come from today's file contents, so some leakage remains.
 
-**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`). **Exit code 3** if git history cannot be read. **Exit code 4** if no heatmap exists.
+### Maintainer labels
+
+`--labels FILE` reads a sheet made by [`create labels`](#highstakes-create-labels) and filled in by maintainers. Rows with a blank rating are skipped; columns are found by header name, so extra columns and any order are fine. For `blast_radius` (LLM-assessed files only) and `heat` it reports, over the rated files in the heatmap:
+
+| Metric | Definition |
+|--------|------------|
+| Spearman | Rank correlation between the score and the 1-5 rating |
+| precision@K | Share of the K highest-scoring rated files with a rating of 4 or 5 |
+| Lift | precision@K divided by the share of rated files with 4 or 5 |
+
+It also prints how many files were rated, how many are in the heatmap, and the rated paths it could not find. Under 10 rated files in the heatmap it prints a `WARNING` (`too_few` in JSON). JSON fields: `rated`, `matched`, `unmatched`, `positives`, `base_rate`, `k`, `too_few`, `signals` (each `name`, `available`, `note`, `files`, `precision_at_k`, `lift`, `spearman`).
+
+**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` value (the error lists the valid ones), `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read. **Exit code 4** if no heatmap or labels file exists.
 
 ## Exit Codes
 

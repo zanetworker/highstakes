@@ -17,7 +17,7 @@ import (
 
 var createCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create review artifacts (CODEOWNERS block, AI reviewer policy) from the heatmap",
+	Short: "Create review artifacts (CODEOWNERS block, AI reviewer policy, maintainer labelling sheet) from the heatmap",
 }
 
 var createCodeownersCmd = &cobra.Command{

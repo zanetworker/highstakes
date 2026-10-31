@@ -1,7 +1,9 @@
 package calibration
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,5 +232,59 @@ func TestRun_ExcludesTestFiles(t *testing.T) {
 	}
 	if r.Events.Total != 0 {
 		t.Errorf("Events.Total = %d, want 0 (events on test files are not counted)", r.Events.Total)
+	}
+}
+
+func TestRun_EventFilterAndTooFew(t *testing.T) {
+	// Ten files, each with one security fix; hot.go also has plain fixes.
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	var commits []gitanalyzer.CommitInfo
+	for i := 0; i < 10; i++ {
+		p := fmt.Sprintf("f%02d.go", i)
+		hm.Files[p] = fileHeat(p, 10*i, types.TierLow, 0, 0, 0)
+		commits = append(commits, gitanalyzer.CommitInfo{Message: "fix CVE-2026-" + p, When: base.Add(time.Hour), Files: []string{p}})
+	}
+	hm.Files["hot.go"] = fileHeat("hot.go", 95, types.TierCritical, 0, 0, 0)
+	commits = append(commits, fixes("hot.go", 3, base)...)
+	run := func(filter EventFilter, cs []gitanalyzer.CommitInfo) *Report {
+		return Run(hm, cs, nil, Options{K: 3, From: base, To: base.AddDate(0, 0, 30), Tiers: scorer.DefaultTierThresholds(), Events: filter})
+	}
+	hasCaveat := func(r *Report, sub string) bool {
+		for _, c := range r.Caveats {
+			if strings.Contains(c, sub) {
+				return true
+			}
+		}
+		return false
+	}
+
+	tests := []struct {
+		name         string
+		filter       EventFilter
+		commits      []gitanalyzer.CommitInfo
+		wantFilter   EventFilter
+		wantWith     int
+		wantTotal    int
+		wantTooFew   bool
+		wantSecurity bool // security-only caveat present
+	}{
+		{"empty filter means all", "", commits, EventsAll, 11, 13, false, false},
+		{"security only: exactly the threshold", EventsSecurity, commits, EventsSecurity, MinFilesWithEvents, 10, false, true},
+		{"security only: one under the threshold", EventsSecurity, commits[1:], EventsSecurity, MinFilesWithEvents - 1, 9, true, true},
+		{"reverts: none", EventsReverts, commits, EventsReverts, 0, 0, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := run(tt.filter, tt.commits)
+			if r.EventFilter != tt.wantFilter || r.FilesWithEvents != tt.wantWith || r.Events.Total != tt.wantTotal {
+				t.Fatalf("filter %q with %d total %d, want %q %d %d", r.EventFilter, r.FilesWithEvents, r.Events.Total, tt.wantFilter, tt.wantWith, tt.wantTotal)
+			}
+			if r.TooFewEvents != tt.wantTooFew || hasCaveat(r, "too few") != tt.wantTooFew {
+				t.Errorf("TooFewEvents = %v, caveats %q, want %v", r.TooFewEvents, r.Caveats, tt.wantTooFew)
+			}
+			if hasCaveat(r, "Security-only") != tt.wantSecurity {
+				t.Errorf("security caveat present = %v, want %v: %q", !tt.wantSecurity, tt.wantSecurity, r.Caveats)
+			}
+		})
 	}
 }

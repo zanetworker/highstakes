@@ -36,13 +36,22 @@ the base rate, Spearman rank correlation, and the same metrics for blast radius,
 churn, complexity and centrality alone.
 
 By default the run is in-sample: churn comes from the same history as the
-events. Use --holdout to score with history up to a cutoff and count events after it.`,
+events. Use --holdout to score with history up to a cutoff and count events after it.
+
+--events picks the event kinds: all (default), fixes, reverts, or security.
+Fix history measures how likely a file is to break; security fixes are a rough
+proxy for impact, the axis blast radius scores.
+
+--labels FILE skips git history and compares blast radius and heat with
+maintainer ratings from a sheet made by "highstakes create labels".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		top, _ := cmd.Flags().GetInt("top")
 		limit, _ := cmd.Flags().GetInt("limit")
 		sinceStr, _ := cmd.Flags().GetString("since")
 		holdoutStr, _ := cmd.Flags().GetString("holdout")
+		eventsStr, _ := cmd.Flags().GetString("events")
+		labelsFile, _ := cmd.Flags().GetString("labels")
 
 		if top < 1 {
 			return cliError(2, "invalid --top %d: must be 1 or more", top)
@@ -53,9 +62,19 @@ events. Use --holdout to score with history up to a cutoff and count events afte
 		if holdoutStr != "" && cmd.Flags().Changed("since") {
 			return cliError(2, "use --since or --holdout, not both (holdout counts events from the cutoff to now)")
 		}
+		events, err := calibration.ParseEventFilter(eventsStr)
+		if err != nil {
+			return cliError(2, "invalid --events: %v", err)
+		}
+		if labelsFile != "" {
+			if holdoutStr != "" || cmd.Flags().Changed("since") || cmd.Flags().Changed("events") {
+				return cliError(2, "--labels compares with maintainer ratings, not git history; drop --since, --holdout and --events")
+			}
+			return checkLabels(labelsFile, top, jsonOut)
+		}
 
 		now := time.Now()
-		opts := calibration.Options{K: top, To: now, SurpriseLimit: limit}
+		opts := calibration.Options{K: top, To: now, SurpriseLimit: limit, Events: events}
 		walkFrom := time.Time{}
 		if holdoutStr != "" {
 			cutoff, err := parseCutoff(holdoutStr, now)
@@ -148,6 +167,10 @@ func parseCutoff(s string, now time.Time) (time.Time, error) {
 
 func printCalibration(out io.Writer, r *calibration.Report) {
 	fmt.Fprintf(out, "Calibration (%s): events from %s to %s\n", r.Mode, r.From.Format("2006-01-02"), r.To.Format("2006-01-02"))
+	fmt.Fprintf(out, "Events counted: %s\n", r.EventFilter)
+	if r.TooFewEvents {
+		fmt.Fprintf(out, "WARNING: only %d file(s) had %s events (under %d). Too few for these numbers to mean anything.\n", r.FilesWithEvents, r.EventFilter, calibration.MinFilesWithEvents)
+	}
 	fmt.Fprintf(out, "Files scored: %d   with events: %d   base rate: %.1f%%\n", r.Files, r.FilesWithEvents, 100*r.BaseRate)
 	fmt.Fprintf(out, "Events: %d (revert %d, bug fix %d, security %d, incident %d)",
 		r.Events.Total, r.Events.Revert, r.Events.BugFix, r.Events.Security, r.Events.Incident)
@@ -221,6 +244,8 @@ func init() {
 	checkCalibrationCmd.Flags().String("since", "365d", "Event window: count events in the last N days (e.g. 365d)")
 	checkCalibrationCmd.Flags().String("holdout", "", "Cutoff (YYYY-MM-DD or Nd ago): score with history up to it, count events after it")
 	checkCalibrationCmd.Flags().Int("limit", 10, "Max files per surprise list")
+	checkCalibrationCmd.Flags().String("events", "all", "Event kinds to count: all, fixes, reverts, security")
+	checkCalibrationCmd.Flags().String("labels", "", "Compare with maintainer ratings in this CSV (from create labels) instead of git history")
 	checkCalibrationCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return cliError(2, "%v", err)
 	})

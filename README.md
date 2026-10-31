@@ -264,11 +264,14 @@ Is the heatmap right? `check calibration` replays git history and compares the s
 highstakes check calibration                    # Last 365 days, in-sample
 highstakes check calibration --holdout 180d     # Score with history before the cutoff, count events after it
 highstakes check calibration --top 20 --json    # Precision/recall for the 20 hottest files
+highstakes check calibration --events security --since 1095d  # Security fixes only: a proxy for impact
+highstakes create labels --out labels.csv       # Blind sheet for maintainers to rate impact 1-5
+highstakes check calibration --labels labels.csv  # Score blast radius and heat against their ratings
 ```
 
 It reports the event rate per tier, precision@K and recall@K of the K hottest files, lift over the base rate (1.0 means no better than random), Spearman rank correlation, and the same metrics for blast radius, churn, complexity and centrality alone, so you can see which signal predicts fixes. It also lists surprises: LOW-tier files with many fixes and CRITICAL/HIGH files with none.
 
-Churn comes from the same history as the fixes, so the default run flatters it. Use `--holdout` for an honest number. Blast radius measures impact if broken, not how often code breaks, so a weak correlation for it is expected. See [How It Works](docs/how-it-works.md#is-it-right).
+Churn comes from the same history as the fixes, so the default run flatters it. Use `--holdout` for an honest number. Blast radius measures impact if broken, not how often code breaks, so a weak correlation for it is expected; check it with `--events security` or maintainer labels instead. See [How It Works](docs/how-it-works.md#is-it-right).
 
 To judge a scoring change across projects and languages, run the pinned multi-repo benchmark in [bench/](bench/README.md).
 

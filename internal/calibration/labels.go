@@ -1,6 +1,8 @@
 package calibration
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,14 +26,24 @@ func (l Labels) Any() bool { return l.Revert || l.BugFix || l.Security }
 const MaxFilesPerEvent = 50
 
 var (
-	securityIDs      = []string{"cve-", "ghsa-"}    // matched anywhere in the message
-	securityKeywords = []string{"security", "vuln"} // matched in the subject only
+	securityIDs = []string{"cve-", "ghsa-"} // matched anywhere in the message
+
+	// Subject-only keywords. "security" must be a standalone word, so header
+	// names and identifiers (Content-Security-Policy, podSecurityContext,
+	// SecurityException, JAVA_SECURITY_DEBUG) and SECURITY.md do not count.
+	securityWord = regexp.MustCompile(`(^|[^a-z0-9_.-])security([^a-z0-9_.-]|\.?$)`)
+	vulnWord     = regexp.MustCompile(`(^|[^a-z0-9_])vuln`) // vuln, vulnerability, ReDoS-vulnerable
+
+	// Conventional-commit types that do not change shipped code. Their subjects
+	// mention security for docs, CI scans and tests, not for fixes.
+	nonCodeType = regexp.MustCompile(`^(docs|ci|test|tests|chore|build|style)(\([^)]*\))?!?:`)
 )
 
 // ClassifyMessage labels a commit message. Bug-fix and security keywords are
 // matched in the subject line only, because bodies mention "fix" or "security"
 // in passing far too often; advisory IDs and the "This reverts commit" trailer
-// count anywhere. A revert is not also counted as a bug fix, because its title
+// count anywhere. Security keywords are ignored in docs, ci, test, chore,
+// build and style commits. A revert is not also counted as a bug fix, because its title
 // repeats the reverted commit's message.
 func ClassifyMessage(msg string) Labels {
 	var l Labels
@@ -46,10 +58,40 @@ func ClassifyMessage(msg string) Labels {
 			l.Security = true
 		}
 	}
-	for _, kw := range securityKeywords {
-		if strings.Contains(lowerSubject, kw) {
-			l.Security = true
-		}
+	if !nonCodeType.MatchString(lowerSubject) && (securityWord.MatchString(lowerSubject) || vulnWord.MatchString(lowerSubject)) {
+		l.Security = true
+	}
+	return l
+}
+
+// EventFilter selects which event kinds a calibration run counts.
+type EventFilter string
+
+const (
+	EventsAll      EventFilter = "all"      // reverts, bug fixes, security fixes and incidents
+	EventsFixes    EventFilter = "fixes"    // bug-fix and security commits
+	EventsReverts  EventFilter = "reverts"  // reverts only
+	EventsSecurity EventFilter = "security" // security fixes only, a proxy for impact
+)
+
+// ParseEventFilter parses an --events value (case-insensitive).
+func ParseEventFilter(s string) (EventFilter, error) {
+	switch f := EventFilter(strings.ToLower(s)); f {
+	case EventsAll, EventsFixes, EventsReverts, EventsSecurity:
+		return f, nil
+	}
+	return "", fmt.Errorf("unknown event kind %q (valid: all, fixes, reverts, security)", s)
+}
+
+// apply keeps only the labels the filter counts.
+func (f EventFilter) apply(l Labels) Labels {
+	switch f {
+	case EventsFixes:
+		l.Revert = false
+	case EventsReverts:
+		l = Labels{Revert: l.Revert}
+	case EventsSecurity:
+		l = Labels{Security: l.Security}
 	}
 	return l
 }
@@ -66,9 +108,10 @@ type FileEvents struct {
 }
 
 // CountEvents labels commits and incidents dated in the window (from, to] and
-// returns the counts per file. Commits touching more than MaxFilesPerEvent
-// files are skipped. Files without events are absent.
-func CountEvents(commits []gitanalyzer.CommitInfo, incidents []types.Incident, from, to time.Time) map[string]*FileEvents {
+// returns the counts per file, keeping only the kinds the filter selects
+// (incidents count only for EventsAll). Commits touching more than
+// MaxFilesPerEvent files are skipped. Files without events are absent.
+func CountEvents(commits []gitanalyzer.CommitInfo, incidents []types.Incident, from, to time.Time, filter EventFilter) map[string]*FileEvents {
 	out := map[string]*FileEvents{}
 	get := func(path string) *FileEvents {
 		e, ok := out[path]
@@ -87,7 +130,7 @@ func CountEvents(commits []gitanalyzer.CommitInfo, incidents []types.Incident, f
 		if len(c.Files) > MaxFilesPerEvent {
 			continue
 		}
-		l := ClassifyMessage(c.Message)
+		l := filter.apply(ClassifyMessage(c.Message))
 		if !l.Any() {
 			continue
 		}
@@ -106,7 +149,7 @@ func CountEvents(commits []gitanalyzer.CommitInfo, incidents []types.Incident, f
 		}
 	}
 	for _, inc := range incidents {
-		if !inWindow(inc.Date) {
+		if filter != EventsAll || !inWindow(inc.Date) {
 			continue
 		}
 		e := get(inc.File)

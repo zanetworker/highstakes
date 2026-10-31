@@ -67,6 +67,7 @@ Prefer the holdout rows. In-sample churn is computed from the same commits the e
 ## Caveats
 
 - Fix history measures how likely code is to break, not the blast radius if it does. A weak blast-radius correlation is expected and is not by itself a failure; judge blast radius with reviewers, not this benchmark.
+- To check blast radius against history, run `highstakes check calibration --events security --since 1095d` (and `--holdout <cutoff> --events security`) in a clone with an LLM heatmap. Security fixes are a rough proxy for impact, but they are rare: most benchmark repos have fewer than 10 files with one, and the report warns when that happens. For a direct check, have maintainers fill a `highstakes create labels` sheet and score it with `--labels`.
 - Events come from commit-message keywords, so they are noisy: "fix typo" counts as a fix, and a fix that touches ten files labels all ten.
 - Complexity, centrality and blast radius come from today's file contents even in holdout mode, so some leakage remains.
 - Precision@10 on a few hundred files moves in steps of 0.1. Treat differences under about 0.1 as noise.

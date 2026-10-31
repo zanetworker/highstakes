@@ -21,16 +21,19 @@ type Options struct {
 	// ExistingAtCutoff limits the population to files present at the cutoff
 	// (holdout only). Nil means every file in the heatmap.
 	ExistingAtCutoff map[string]bool
+	Events           EventFilter // event kinds to count; empty means EventsAll
 }
 
 // Report is the result of a calibration run.
 type Report struct {
 	Mode               string         `json:"mode"` // "in-sample" or "holdout"
+	EventFilter        EventFilter    `json:"event_filter"`
 	From               time.Time      `json:"from"`
 	To                 time.Time      `json:"to"`
 	K                  int            `json:"k"`
 	Files              int            `json:"files"`
 	FilesWithEvents    int            `json:"files_with_events"`
+	TooFewEvents       bool           `json:"too_few_events"` // under MinFilesWithEvents
 	BaseRate           float64        `json:"base_rate"`
 	Events             FileEvents     `json:"events"`
 	UnscoredEventFiles int            `json:"unscored_event_files"`
@@ -80,16 +83,24 @@ type Surprises struct {
 const (
 	CaveatInSample = "In-sample: churn and incident history were computed from the same history the events come from, so they look better than they are. Use --holdout to score with history before a cutoff and count events after it."
 	CaveatHoldout  = "Holdout: churn and incident history were recomputed from history up to the cutoff. Complexity, centrality, path heuristics and blast radius still come from today's file contents, so some leakage remains."
+	CaveatSecurity = "Security-only: events are security fixes, a rough proxy for impact (how bad a break is). Read the blast_radius row first; heat and churn also rise with how often a file changes, so they score on any event kind."
 	CaveatLabels   = "Events come from commit-message keywords and recorded incidents. They are noisy (\"fix typo\" counts as a fix) and measure how often code breaks, while blast radius measures the impact if it breaks, so a weak blast-radius correlation is not by itself a failure."
 )
+
+// MinFilesWithEvents is the fewest files with events for which the report's
+// numbers mean anything; below it the report sets TooFewEvents.
+const MinFilesWithEvents = 10
 
 var tierOrder = []types.Tier{types.TierCritical, types.TierHigh, types.TierMedium, types.TierLow}
 
 // Run scores the heatmap against events in the window.
 func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.Incident, opts Options) *Report {
-	events := CountEvents(commits, incidents, opts.From, opts.To)
+	if opts.Events == "" {
+		opts.Events = EventsAll
+	}
+	events := CountEvents(commits, incidents, opts.From, opts.To, opts.Events)
 
-	r := &Report{Mode: "in-sample", From: opts.From, To: opts.To, K: opts.K}
+	r := &Report{Mode: "in-sample", EventFilter: opts.Events, From: opts.From, To: opts.To, K: opts.K}
 	if opts.Holdout {
 		r.Mode = "holdout"
 	}
@@ -151,9 +162,13 @@ func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.
 	} else {
 		r.Caveats = append(r.Caveats, CaveatInSample)
 	}
+	if opts.Events == EventsSecurity {
+		r.Caveats = append(r.Caveats, CaveatSecurity)
+	}
 	r.Caveats = append(r.Caveats, CaveatLabels)
-	if r.FilesWithEvents < 5 {
-		r.Caveats = append(r.Caveats, fmt.Sprintf("Only %d file(s) had events in the window; treat the numbers as anecdotes, not evidence.", r.FilesWithEvents))
+	if r.FilesWithEvents < MinFilesWithEvents {
+		r.TooFewEvents = true
+		r.Caveats = append(r.Caveats, fmt.Sprintf("Only %d file(s) had %s events in the window (under %d): too few for these numbers to mean anything; treat them as anecdotes, not evidence.", r.FilesWithEvents, opts.Events, MinFilesWithEvents))
 	}
 	return r
 }
