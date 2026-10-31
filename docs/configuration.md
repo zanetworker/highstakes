@@ -46,6 +46,18 @@ exclude:
 
 Add project-specific exclusions here. The defaults cover Python, Go, Rust, JavaScript, and Java ecosystems.
 
+## Owner Aliases
+
+`pr check` reviewers and `create codeowners` owners come from git history, which only knows emails. Map emails to GitHub handles so the output can be used in CODEOWNERS and PR comments:
+
+```yaml
+owners:
+  alice@example.com: "@alice"
+  bob@corp.example: bob-gh      # the @ is added if missing
+```
+
+Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+alice@users.noreply.github.com`) become `@alice` and other authors appear by email, which CODEOWNERS also accepts. Use a `.mailmap` file to merge an author's multiple emails first; it is applied automatically. Authors whose name or email contains `[bot]` are ignored.
+
 ## LLM Provider
 
 HighStakes works with any OpenAI-compatible API. Three ways to configure it:

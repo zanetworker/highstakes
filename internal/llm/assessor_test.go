@@ -1,9 +1,14 @@
 package llm
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseAssessment_CleanJSON(t *testing.T) {
@@ -123,7 +128,18 @@ func TestShouldAssess(t *testing.T) {
 		{"test_something.py", false},
 		{"generated.pb.go", false},
 		{"README.md", false},
-		{"config.yaml", false},
+		{"config.yaml", true},
+		{".github/workflows/ci.yml", true},
+		{"charts/app/values.yaml", true},
+		{"pyproject.toml", true},
+		{"tsconfig.json", true},
+		{"Dockerfile", true},
+		{"infra/main.tf", true},
+		{"package-lock.json", false},
+		{"pnpm-lock.yaml", false},
+		{"Cargo.lock", false},
+		{"poetry.lock", false},
+		{"deploy/zz_generated.deepcopy.yaml", false},
 		{"go.mod", false},
 		{"go.sum", false},
 		{"src/main.rs", true},
@@ -237,4 +253,123 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestAssessFile_RetryFailures(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+
+	tests := []struct {
+		name      string
+		server    func(calls *int32) *httptest.Server
+		closed    bool
+		wantErr   string
+		wantCalls int32
+	}{
+		{
+			name: "network failure on every attempt returns error",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+			},
+			closed:  true,
+			wantErr: "API request failed after 3 attempts",
+		},
+		{
+			name: "429 on every attempt returns rate limit error",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					atomic.AddInt32(calls, 1)
+					w.WriteHeader(http.StatusTooManyRequests)
+				}))
+			},
+			wantErr:   "rate limited (429) after 3 attempts",
+			wantCalls: 3,
+		},
+		{
+			name: "429 then success recovers",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if atomic.AddInt32(calls, 1) < 3 {
+						w.WriteHeader(http.StatusTooManyRequests)
+						return
+					}
+					_, _ = w.Write([]byte(okBody))
+				}))
+			},
+			wantCalls: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			srv := tt.server(&calls)
+			if tt.closed {
+				srv.Close()
+			} else {
+				defer srv.Close()
+			}
+			a := &Assessor{apiURL: srv.URL, model: "m", client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+			got, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if got.SecurityImpact != 10 {
+					t.Errorf("SecurityImpact = %d, want 10", got.SecurityImpact)
+				}
+			}
+			if !tt.closed && atomic.LoadInt32(&calls) != tt.wantCalls {
+				t.Errorf("calls = %d, want %d", calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestAssessFiles_CacheKeyedByModel(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	cacheDir := t.TempDir()
+	files := []FileInput{{Path: "x.go", Content: "package x"}}
+
+	newAssessor := func(model string) *Assessor {
+		return &Assessor{apiURL: srv.URL, model: model, cacheDir: cacheDir, concurrency: 1,
+			client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	}
+
+	steps := []struct {
+		name      string
+		model     string
+		wantCalls int32
+	}{
+		{"first run with model A calls the API", "model-a", 1},
+		{"same content and model A hits the cache", "model-a", 0},
+		{"same content with model B misses the cache", "model-b", 1},
+		{"model B is now cached too", "model-b", 0},
+	}
+	for _, st := range steps {
+		t.Run(st.name, func(t *testing.T) {
+			atomic.StoreInt32(&calls, 0)
+			res, err := newAssessor(st.model).AssessFiles(files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res["x.go"] == nil {
+				t.Fatal("missing assessment for x.go")
+			}
+			if got := atomic.LoadInt32(&calls); got != st.wantCalls {
+				t.Errorf("API calls = %d, want %d", got, st.wantCalls)
+			}
+		})
+	}
 }

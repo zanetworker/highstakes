@@ -77,9 +77,11 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 
 	// Run git analysis
 	fmt.Println("  - Analyzing git history...")
+	historyStatus := "complete"
 	gitHistory, err := gitAnalyzer.AnalyzeAll(filePaths, 365)
 	if err != nil {
-		return nil, fmt.Errorf("git analysis: %w", err)
+		fmt.Fprintf(os.Stderr, "  Warning: git history unavailable, change frequency will be 0 for every file: %v\n", err)
+		historyStatus = "unavailable: " + err.Error()
 	}
 
 	// Get git metadata
@@ -139,6 +141,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 			Branch:     branch,
 			TotalFiles: len(allFiles),
 			Languages:  countLanguages(allFiles),
+			GitHistory: historyStatus,
 		},
 		Files:       make(map[string]*types.FileHeat),
 		Incidents:   []types.Incident{},
@@ -267,6 +270,9 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 			Path:      imp,
 			HeatScore: 0, // Will be filled in second pass if needed
 		})
+	}
+	for _, imp := range fileInfo.Imports {
+		deps.Imports = append(deps.Imports, types.Dependency{Path: imp})
 	}
 
 	// Recent changes

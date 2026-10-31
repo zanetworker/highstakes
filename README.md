@@ -34,7 +34,7 @@ Static analysis alone can't do this. A complexity counter sees `auth.rs` and `th
 **1.** Install and set up:
 
 ```sh
-go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 export OPENROUTER_API_KEY="sk-or-..."
 ```
 
@@ -58,7 +58,7 @@ Heat Distribution:
 **3.** See results:
 
 ```sh
-highstakes dashboard     # Visual treemap + file explorer (opens browser)
+highstakes dashboard     # Treemap, file explorer and architecture view (opens browser)
 highstakes               # Terminal TUI
 highstakes list --tier high
 ```
@@ -73,7 +73,7 @@ Navigate the file tree with colored tier indicators. Select any file to see blas
 
 ## Dashboard
 
-Two views, one detail panel. Click any file to see blast radius reasoning, impact dimensions, and review requirements.
+Three views, one detail panel. Click any file to see blast radius reasoning, impact dimensions, and review requirements.
 
 **Treemap** — blocks sized by code volume, colored by heat. Your eye goes to the big red blocks first.
 
@@ -83,7 +83,9 @@ Two views, one detail panel. Click any file to see blast radius reasoning, impac
   <img src="docs/images/explorer-view.png" width="820" alt="Explorer view with file tree, heat scores, and blast radius reasoning">
 </p>
 
-Both views respond to tier filters (Critical / High / Medium / Low), search, and size toggle (Lines vs Heat).
+All views respond to tier filters (Critical / High / Medium / Low) and search; the treemap also has the size toggle (Lines vs Heat).
+
+**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the most severe tier in the package, and each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Packages outside the current tier filter or search are dimmed.
 
 ## How It Works
 
@@ -187,12 +189,64 @@ $ highstakes list --tier high --limit 5
 
 </details>
 
+### Tour
+
+A risk-ordered reading path for newcomers, auditors and agents. Packages come in dependency order (what everything else imports first), hottest file first within each package. Each stop has a `file:line` anchor at the first top-level declaration, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
+
+```sh
+highstakes get tour --limit 10                          # 10 hottest files, dependencies first
+highstakes get tour --focus internal/llm                # One directory
+highstakes get tour --json > tour.json                  # Feed /show-me walkthrough or an agent
+```
+
+<details><summary><b>Example: highstakes get tour --limit 3</b></summary>
+
+```
+$ highstakes get tour --limit 3
+Tour: 3 stops, dependencies first
+
+1. internal/types  [level 0, max heat 31 MEDIUM]
+   1. internal/types/types.go:6  🔥 31 medium
+      why: imported by 20 files
+      used by: internal/scorer/scorer.go, internal/tour/tour.go, ... (+15 more)
+
+2. internal/scorer  [level 1, max heat 31 MEDIUM]
+   2. internal/scorer/scorer.go:12  🔥 31 medium
+      why: imported by 5 files
+      depends on: internal/types/types.go
+      used by: pkg/heatmap/heatmap.go, internal/prscore/prscore.go, cmd/highstakes/main.go, ...
+
+3. internal/tour  [level 1, max heat 28 LOW]
+   3. internal/tour/tour.go:34  🟢 28 low
+      why: imported by 3 files
+      depends on: internal/types/types.go
+```
+
+</details>
+
+The tour is a starting draft. Add expert guidance through the `annotations` map in `.heatmap/heatmap.json` (`owner`, `notes`); both appear on each stop.
+
 ### PR Risk
 
 ```sh
 highstakes pr check                                     # Score diff vs main
 highstakes pr check --base dev --json                   # For CI pipelines
+highstakes pr check --fail-on high                      # Exit 5 on high/critical PRs
+highstakes pr check --shadow                            # Log the decision, never fail
 ```
+
+`pr check` reports two numbers: importance (how hot the touched code is) and change risk (size, new files, config or infra files, deletions in hot files, test ratio). It also names suggested reviewers: the most active recent authors of the hottest changed files, excluding the PR author. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+
+### Review Policy
+
+```sh
+highstakes create codeowners                            # Print a CODEOWNERS block for HIGH/CRITICAL paths
+highstakes create codeowners --write                    # Update the marked block in .github/CODEOWNERS
+highstakes create policy > .github/highstakes-policy.yaml   # No-auto-approve paths for AI reviewers
+highstakes create policy --json --min-tier critical
+```
+
+Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code, and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
 
 ### Incidents
 
@@ -201,6 +255,20 @@ highstakes incident create --file src/auth.rs \
   --severity high --description "Token bypass"
 highstakes incident list
 ```
+
+### Calibration
+
+Is the heatmap right? `check calibration` replays git history and compares the scores with what actually broke: reverts, bug-fix commits, security fixes (CVE, GHSA, "security", "vuln") and recorded incidents.
+
+```sh
+highstakes check calibration                    # Last 365 days, in-sample
+highstakes check calibration --holdout 180d     # Score with history before the cutoff, count events after it
+highstakes check calibration --top 20 --json    # Precision/recall for the 20 hottest files
+```
+
+It reports the event rate per tier, precision@K and recall@K of the K hottest files, lift over the base rate (1.0 means no better than random), Spearman rank correlation, and the same metrics for blast radius, churn, complexity and centrality alone, so you can see which signal predicts fixes. It also lists surprises: LOW-tier files with many fixes and CRITICAL/HIGH files with none.
+
+Churn comes from the same history as the fixes, so the default run flatters it. Use `--holdout` for an honest number. Blast radius measures impact if broken, not how often code breaks, so a weak correlation for it is expected. See [How It Works](docs/how-it-works.md#is-it-right).
 
 ## CI / PR Integration
 
@@ -232,7 +300,7 @@ jobs:
           go-version: '1.25'
 
       - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
       - name: Analyze and check PR
         env:
@@ -290,7 +358,7 @@ The CLI is the interface. Any CI that can run a binary works:
 
 ```sh
 # Install
-go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
 # Analyze (uses cache, only re-assesses changed files)
 export OPENROUTER_API_KEY="$OPENROUTER_KEY"
@@ -365,6 +433,7 @@ One [OpenRouter](https://openrouter.ai) API key, any model. Assessments cached b
 | `2` | Invalid input |
 | `3` | External dependency failure |
 | `4` | Not found |
+| `5` | PR blocked by `pr check --fail-on` |
 
 ## Requirements
 

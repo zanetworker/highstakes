@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,7 +27,8 @@ var version = "1.0.0"
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -314,6 +316,10 @@ var prCheckCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		base, _ := cmd.Flags().GetString("base")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		shadow, _ := cmd.Flags().GetBool("shadow")
+		failOn, _ := cmd.Flags().GetString("fail-on")
+		authorFlag, _ := cmd.Flags().GetString("author")
+		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
 
 		hm, err := loadHeatmap()
 		if err != nil {
@@ -325,6 +331,7 @@ var prCheckCmd = &cobra.Command{
 			return cliError(3, "git diff failed against base %q: %v. Valid bases: main, origin/main, HEAD~N", base, err)
 		}
 
+		added := addedFiles(base)
 		var changes []prscore.FileChange
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if line == "" {
@@ -334,10 +341,10 @@ var prCheckCmd = &cobra.Command{
 			if len(parts) < 3 {
 				continue
 			}
-			added, _ := strconv.Atoi(parts[0])
+			linesAdded, _ := strconv.Atoi(parts[0])
 			deleted, _ := strconv.Atoi(parts[1])
 			changes = append(changes, prscore.FileChange{
-				Path: parts[2], LinesAdded: added, LinesDeleted: deleted,
+				Path: parts[2], LinesAdded: linesAdded, LinesDeleted: deleted, IsNew: added[parts[2]],
 			})
 		}
 
@@ -350,16 +357,32 @@ var prCheckCmd = &cobra.Command{
 		}
 
 		risk := prscore.CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
+		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
+		gateErr := applyGate(&risk, failOn, shadow)
+		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
+			return gateErr
+		}
+		if shadow {
+			if err := appendShadowLog(shadowLogPath, base, &risk); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			}
+			fmt.Fprintf(os.Stderr, "shadow: tier=%s change_risk=%s decision=%s (not enforced, logged to %s)\n",
+				risk.Tier, risk.ChangeRiskLevel, risk.Decision, shadowLogPath)
+		}
 
 		if jsonOut {
-			return printJSON(risk)
+			if err := printJSON(risk); err != nil {
+				return err
+			}
+			return gateErr
 		}
 
 		sort.Slice(risk.FilesChanged, func(i, j int) bool {
 			return risk.FilesChanged[i].HeatScore > risk.FilesChanged[j].HeatScore
 		})
 
-		fmt.Printf("PR Risk: %s %s (score: %d)\n\n", tierEmoji(risk.Tier), strings.ToUpper(string(risk.Tier)), risk.HeatScore)
+		fmt.Printf("PR Risk: %s %s (score: %d)\n", tierEmoji(risk.Tier), strings.ToUpper(string(risk.Tier)), risk.HeatScore)
+		printPRExtras(&risk)
 
 		for _, fc := range risk.FilesChanged {
 			icon := " "
@@ -391,7 +414,8 @@ var prCheckCmd = &cobra.Command{
 			fmt.Print(", security scan")
 		}
 		fmt.Printf(", ~%d min\n", req.EstimatedReviewTimeMinutes)
-		return nil
+		printDecision(&risk)
+		return gateErr
 	},
 }
 
@@ -620,6 +644,16 @@ var agentContextCmd = &cobra.Command{
 					"description": "Get heat score and blast radius reasoning for a file",
 					"args":        "file_path (required)",
 					"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+					"subcommands": map[string]interface{}{
+						"tour": map[string]interface{}{
+							"description": "Risk-ordered reading path: directories in dependency order (dependencies first), hottest files first, with file:line anchors",
+							"flags": map[string]interface{}{
+								"--json":  flagDef("bool", false, "Output as JSON (schema version 1)"),
+								"--limit": flagDef("int", 0, "Keep the N hottest files (0 = all)"),
+								"--focus": flagDef("string", "", "Only files under this repo-relative directory or file"),
+							},
+						},
+					},
 				},
 				"list": map[string]interface{}{
 					"description": "List files sorted by heat score",
@@ -635,8 +669,34 @@ var agentContextCmd = &cobra.Command{
 						"check": map[string]interface{}{
 							"description": "Score current diff against a base branch",
 							"flags": map[string]interface{}{
-								"--json": flagDef("bool", false, "Output as JSON"),
-								"--base": flagDef("string", "main", "Base branch"),
+								"--json":      flagDef("bool", false, "Output as JSON"),
+								"--base":      flagDef("string", "main", "Base branch"),
+								"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
+								"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
+								"--author":    flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
+								"--reviewers": flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+							},
+						},
+					},
+				},
+				"create": map[string]interface{}{
+					"description": "Create review artifacts from the heatmap",
+					"subcommands": map[string]interface{}{
+						"codeowners": map[string]interface{}{
+							"description": "CODEOWNERS block for high-stakes paths with owners from git history",
+							"flags": map[string]interface{}{
+								"--json":       flagDef("bool", false, "Output as JSON"),
+								"--write":      flagDef("bool", false, "Update the marked block in --file"),
+								"--file":       flagDef("string", ".github/CODEOWNERS", "CODEOWNERS path for --write"),
+								"--min-tier":   flagDef("enum", "high", "Values: critical, high, medium, low"),
+								"--max-owners": flagDef("int", 2, "Owners per path"),
+							},
+						},
+						"policy": map[string]interface{}{
+							"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json)",
+							"flags": map[string]interface{}{
+								"--json":     flagDef("bool", false, "Output as JSON"),
+								"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low"),
 							},
 						},
 					},
@@ -659,6 +719,21 @@ var agentContextCmd = &cobra.Command{
 							"flags": map[string]interface{}{
 								"--json": flagDef("bool", false, "Output as JSON"),
 								"--file": flagDef("string", "", "Filter by file path"),
+							},
+						},
+					},
+				},
+				"check": map[string]interface{}{
+					"description": "Check how well the heatmap matches reality",
+					"subcommands": map[string]interface{}{
+						"calibration": map[string]interface{}{
+							"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history",
+							"flags": map[string]interface{}{
+								"--json":    flagDef("bool", false, "Output as JSON"),
+								"--top":     flagDef("int", 10, "K for precision@K and recall@K"),
+								"--since":   flagDef("string", "365d", "Event window in days (Nd)"),
+								"--holdout": flagDef("string", "", "Cutoff YYYY-MM-DD or Nd: score with history before it, count events after it"),
+								"--limit":   flagDef("int", 10, "Max files per surprise list"),
 							},
 						},
 					},
@@ -696,6 +771,7 @@ var agentContextCmd = &cobra.Command{
 				"2": "Invalid input (bad flags, missing required params)",
 				"3": "External dependency failure (git, API)",
 				"4": "Not found (file not in heatmap)",
+				"5": "PR blocked by pr check --fail-on",
 			},
 		}
 		return printJSON(ctx)
@@ -837,6 +913,15 @@ func cliError(code int, format string, args ...interface{}) error {
 	return &exitError{code: code, msg: fmt.Sprintf(format, args...)}
 }
 
+// exitCode maps an error to the documented exit code (1 when unclassified).
+func exitCode(err error) int {
+	var e *exitError
+	if errors.As(err, &e) {
+		return e.code
+	}
+	return 1
+}
+
 // --- command registration ---
 
 func init() {
@@ -864,6 +949,10 @@ func init() {
 
 	prCheckCmd.Flags().String("base", "main", "Base branch to compare against")
 	prCheckCmd.Flags().Bool("json", false, "Output as JSON")
+	prCheckCmd.Flags().String("fail-on", "", "Exit 5 when the PR tier is at or above this tier: critical, high, medium, low")
+	prCheckCmd.Flags().Bool("shadow", false, "Log tier and decision to .heatmap/shadow.jsonl but always exit 0 (gate defaults to critical)")
+	prCheckCmd.Flags().String("author", "", "PR author email or handle to exclude from reviewers (default: HEAD commit author)")
+	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)
 

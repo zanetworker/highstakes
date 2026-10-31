@@ -16,6 +16,7 @@ import (
 // Analyzer analyzes a codebase to extract dependency and complexity metrics
 type Analyzer struct {
 	repoPath    string
+	modulePath  string // Go module path from go.mod, empty if none
 	files       map[string]*FileInfo
 	excludeDirs map[string]bool
 	excludeGlob []string
@@ -51,6 +52,8 @@ func New(repoPath string, excludeDirs []string, excludePatterns []string) *Analy
 
 // Analyze scans the repository and builds dependency graph
 func (a *Analyzer) Analyze() error {
+	a.modulePath = readModulePath(a.repoPath)
+
 	// First pass: discover all files
 	if err := a.discoverFiles(); err != nil {
 		return fmt.Errorf("discover files: %w", err)
@@ -119,7 +122,7 @@ func (a *Analyzer) discoverFiles() error {
 		// Skip hidden directories and common excludes
 		if d.IsDir() {
 			name := d.Name()
-			if strings.HasPrefix(name, ".") {
+			if strings.HasPrefix(name, ".") && name != ".github" {
 				return filepath.SkipDir
 			}
 			if a.excludeDirs[name] {
@@ -200,8 +203,8 @@ func (a *Analyzer) analyzeGoFile(absPath string, info *FileInfo) error {
 	// Extract imports
 	for _, imp := range node.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
-		// Only track local imports (relative paths or same module)
-		if strings.HasPrefix(importPath, ".") || !strings.Contains(importPath, "/") {
+		// Only track imports of packages in the same module
+		if _, ok := a.goImportDir(importPath); ok {
 			info.Imports = append(info.Imports, importPath)
 		}
 	}
@@ -419,33 +422,86 @@ func (a *Analyzer) analyzeGenericFile(absPath string, info *FileInfo) error {
 	return nil
 }
 
+// readModulePath returns the module path declared in repoPath/go.mod, or "".
+func readModulePath(repoPath string) string {
+	content, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.Trim(fields[1], `"`)
+		}
+	}
+	return ""
+}
+
+// goImportDir maps a same-module Go import path to its repo-relative directory.
+func (a *Analyzer) goImportDir(importPath string) (string, bool) {
+	if a.modulePath == "" {
+		return "", false
+	}
+	if importPath == a.modulePath {
+		return ".", true
+	}
+	if rest, ok := strings.CutPrefix(importPath, a.modulePath+"/"); ok {
+		return filepath.FromSlash(rest), true
+	}
+	return "", false
+}
+
+// resolveImport returns the repo files an import refers to.
+func (a *Analyzer) resolveImport(importer *FileInfo, imp string) []string {
+	if importer.Language == "Go" {
+		dir, ok := a.goImportDir(imp)
+		if !ok {
+			return nil
+		}
+		// A Go import names a package: every non-test file in that directory.
+		var targets []string
+		for p, f := range a.files {
+			if f.Language == "Go" && filepath.Dir(p) == dir && !strings.HasSuffix(p, "_test.go") {
+				targets = append(targets, p)
+			}
+		}
+		return targets
+	}
+
+	candidates := []string{
+		imp + ".py",
+		imp + ".ts",
+		imp + ".js",
+		filepath.Join(imp, "__init__.py"),
+	}
+	for _, candidate := range candidates {
+		if _, ok := a.files[candidate]; ok {
+			return []string{candidate}
+		}
+	}
+	// Fallback: match on a whole path-segment suffix (e.g. src/foo/bar.py for foo/bar)
+	for _, candidate := range candidates {
+		for p := range a.files {
+			if strings.HasSuffix(p, "/"+candidate) {
+				return []string{p}
+			}
+		}
+	}
+	return nil
+}
+
 // buildReverseDependencies builds the imported_by graph
 func (a *Analyzer) buildReverseDependencies() {
+	seen := make(map[[2]string]bool)
 	for path, info := range a.files {
 		for _, imp := range info.Imports {
-			// Try multiple resolution strategies
-			candidates := []string{
-				imp + ".py",
-				imp + ".go",
-				imp + ".ts",
-				imp + ".js",
-				imp + "/__init__.py",
-				filepath.Join(imp, "__init__.py"),
-			}
-
-			for _, candidate := range candidates {
-				if _, ok := a.files[candidate]; ok {
-					a.files[candidate].ImportedBy = append(a.files[candidate].ImportedBy, path)
-					break
+			for _, target := range a.resolveImport(info, imp) {
+				key := [2]string{target, path}
+				if target == path || seen[key] {
+					continue
 				}
-			}
-
-			// Fallback: substring match for partial imports
-			for otherPath := range a.files {
-				if otherPath != path && strings.Contains(otherPath, imp) {
-					a.files[otherPath].ImportedBy = append(a.files[otherPath].ImportedBy, path)
-					break
-				}
+				seen[key] = true
+				a.files[target].ImportedBy = append(a.files[target].ImportedBy, path)
 			}
 		}
 	}
@@ -453,6 +509,9 @@ func (a *Analyzer) buildReverseDependencies() {
 
 // detectLanguage returns the programming language based on file extension
 func detectLanguage(path string) string {
+	if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+		return "Dockerfile"
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".go":
@@ -475,6 +534,14 @@ func detectLanguage(path string) string {
 		return "C"
 	case ".cs":
 		return "C#"
+	case ".yaml", ".yml":
+		return "YAML"
+	case ".toml":
+		return "TOML"
+	case ".json":
+		return "JSON"
+	case ".tf":
+		return "Terraform"
 	default:
 		return ""
 	}

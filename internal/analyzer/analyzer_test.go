@@ -3,6 +3,8 @@ package analyzer
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -23,7 +25,14 @@ func TestDetectLanguage(t *testing.T) {
 		{"app.c", "C"},
 		{"app.cpp", "C++"},
 		{"README.md", ""},
-		{"config.yaml", ""},
+		{"config.yaml", "YAML"},
+		{".github/workflows/ci.yml", "YAML"},
+		{"pyproject.toml", "TOML"},
+		{"tsconfig.json", "JSON"},
+		{"Dockerfile", "Dockerfile"},
+		{"build/Dockerfile.ubi", "Dockerfile"},
+		{"infra/main.tf", "Terraform"},
+		{"go.sum", ""},
 		{"image.png", ""},
 	}
 
@@ -86,6 +95,7 @@ func TestAnalyzer_DiscoverFiles(t *testing.T) {
 		"pkg/util_test.go": "package pkg\n",
 		"README.md":        "# Project\n",
 		".hidden/skip.go":  "package hidden\n",
+		".github/workflows/ci.yml": "on: push\n",
 	}
 
 	for path, content := range files {
@@ -117,6 +127,9 @@ func TestAnalyzer_DiscoverFiles(t *testing.T) {
 	}
 	if _, ok := allFiles[".hidden/skip.go"]; ok {
 		t.Error("should skip hidden directories")
+	}
+	if _, ok := allFiles[".github/workflows/ci.yml"]; !ok {
+		t.Error("should find CI workflows under .github")
 	}
 }
 
@@ -271,5 +284,106 @@ func TestAnalyzer_DependencyCentrality_HighImports(t *testing.T) {
 	}
 	if coreCentrality.ImportCount != 4 {
 		t.Errorf("expected import count 4, got %d", coreCentrality.ImportCount)
+	}
+}
+
+func writeRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for path, content := range files {
+		fullPath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestAnalyzer_GoModuleImports(t *testing.T) {
+	withMod := map[string]string{
+		"go.mod":            "module example.com/m\n\ngo 1.22\n",
+		"core/core.go":      "package core\n\nimport \"strings\"\n\nfunc Up(s string) string { return strings.ToUpper(s) }\n",
+		"core/types.go":     "package core\n\ntype T struct{}\n",
+		"core/core_test.go": "package core\n",
+		"corelib/x.go":      "package corelib\n",
+		"app/app.go":        "package app\n\nimport (\n\t\"fmt\"\n\t\"example.com/m/core\"\n)\n\nfunc Run() { fmt.Println(core.Up(\"x\")) }\n",
+		"app/handler.go":    "package app\n\nimport \"example.com/m/core\"\n\nvar _ core.T\n",
+		"main.go":           "package main\n\nimport (\n\t\"os\"\n\t\"example.com/m/app\"\n\t\"example.com/m/core\"\n)\n\nfunc main() { app.Run(); _ = core.T{}; os.Exit(0) }\n",
+	}
+	noMod := map[string]string{
+		"core/core.go": "package core\n",
+		"main.go":      "package main\n\nimport \"example.com/m/core\"\n\nfunc main() {}\n",
+	}
+
+	tests := []struct {
+		name           string
+		files          map[string]string
+		wantImportedBy map[string][]string
+		wantImports    map[string][]string
+	}{
+		{
+			name:  "same-module package import credits every non-test file in the package once",
+			files: withMod,
+			wantImportedBy: map[string][]string{
+				"core/core.go":      {"app/app.go", "app/handler.go", "main.go"},
+				"core/types.go":     {"app/app.go", "app/handler.go", "main.go"},
+				"core/core_test.go": {},
+				"corelib/x.go":      {},
+				"app/app.go":        {"main.go"},
+				"app/handler.go":    {"main.go"},
+				"main.go":           {},
+			},
+			wantImports: map[string][]string{
+				"core/core.go": {},
+				"app/app.go":   {"example.com/m/core"},
+				"main.go":      {"example.com/m/app", "example.com/m/core"},
+			},
+		},
+		{
+			name:  "no go.mod tracks no Go imports and does not fail",
+			files: noMod,
+			wantImportedBy: map[string][]string{
+				"core/core.go": {},
+				"main.go":      {},
+			},
+			wantImports: map[string][]string{
+				"main.go": {},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeRepo(t, tt.files)
+			a := New(dir, nil, nil)
+			if err := a.Analyze(); err != nil {
+				t.Fatal(err)
+			}
+			for path, want := range tt.wantImportedBy {
+				info, ok := a.GetFileInfo(path)
+				if !ok {
+					t.Fatalf("missing file %s", path)
+				}
+				got := append([]string{}, info.ImportedBy...)
+				sort.Strings(got)
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("%s ImportedBy = %v, want %v", path, got, want)
+				}
+				if c := a.CalculateDependencyCentrality(path).ImportCount; c != len(want) {
+					t.Errorf("%s ImportCount = %d, want %d", path, c, len(want))
+				}
+			}
+			for path, want := range tt.wantImports {
+				info, _ := a.GetFileInfo(path)
+				got := append([]string{}, info.Imports...)
+				sort.Strings(got)
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("%s Imports = %v, want %v", path, got, want)
+				}
+			}
+		})
 	}
 }

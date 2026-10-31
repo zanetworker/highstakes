@@ -98,7 +98,10 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 		"languages":   hm.Metadata.Languages,
 	})
 
+	archJSON, _ := json.Marshal(buildArchitecture(hm))
+
 	html := strings.ReplaceAll(tmpl, "/*__FILES__*/[]", string(filesJSON))
+	html = strings.ReplaceAll(html, "/*__ARCH__*/{}", string(archJSON))
 	html = strings.ReplaceAll(html, "/*__STATS__*/{}", string(statsJSON))
 	html = strings.ReplaceAll(html, "/*__ACTIONS__*/[]", string(actionsJSON))
 
@@ -200,6 +203,23 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .view-toggle{display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-left:8px}
 .view-toggle button{padding:3px 10px;border:none;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-d)}
 .view-toggle button.on{background:var(--accent);color:#fff}
+.arch{flex:1;overflow:auto;display:none;position:relative}
+.arch-hint{position:sticky;top:0;left:0;padding:6px 12px;font:11px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
+.arch svg{display:block}
+.arch .an{cursor:pointer}
+.arch .an rect{stroke-width:1.5}
+.arch .an:hover rect{stroke-width:2.5}
+.arch .an.sel rect{stroke:var(--text);stroke-width:2.5}
+.arch .an.dim,.arch .ae.dim{opacity:.15}
+.arch .an-dir{font:600 12px var(--font-m);fill:var(--text)}
+.arch .an-hot{font:11px var(--font-t);fill:var(--muted)}
+.arch .an-heat{font:700 13px var(--font-d)}
+.arch .ae path{fill:none;stroke:var(--dim)}
+.arch .ae.hl path{stroke:var(--text)}
+.arch .ae text{font:10px var(--font-m);fill:var(--muted)}
+.arch .ae.hl text{fill:var(--text)}
+.arch .arrow{fill:var(--dim)}
+.flist .ex-row{padding:4px 0}
 .controls{display:flex;gap:6px;padding:6px 12px;align-items:center;border-bottom:1px solid var(--border)}
 .controls label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .fbtn{padding:3px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-t)}
@@ -222,6 +242,7 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="view-toggle">
 <button class="on" onclick="setMode('treemap',this)">Treemap</button>
 <button onclick="setMode('explorer',this)">Explorer</button>
+<button onclick="setMode('arch',this)">Architecture</button>
 </div>
 <label style="margin-left:12px">Tier:</label>
 <button class="fbtn on" onclick="setView('all',this)">All</button>
@@ -242,12 +263,14 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="treemap" id="treemap"></div>
 </div>
 <div class="explorer" id="explorer"></div>
+<div class="arch" id="arch"></div>
 <div class="detail" id="detail"><div class="empty">Click a file to see its blast radius</div></div>
 </div>
 <script>
 const FILES=/*__FILES__*/[];
 const STATS=/*__STATS__*/{};
 const ACTIONS=/*__ACTIONS__*/[];
+const ARCH=/*__ARCH__*/{};
 const C={critical:'#EE0000',high:'#E85D75',medium:'#D4874D',low:'#2D8A2D'};
 
 document.getElementById('meta').textContent=(STATS.branch||'')+' @ '+(STATS.commit||'').slice(0,7)+'  |  '+STATS.analyzed_at+'  |  '+STATS.total+' files';
@@ -288,7 +311,7 @@ function setView(tier,btn){
   document.querySelectorAll('.controls .fbtn:not([data-sz])').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
   else document.querySelector('.controls .fbtn[onclick*="'+tier+'"]')?.classList.add('on');
-  if(viewMode==='treemap')renderTreemap();else renderExplorer();
+  rerender();
 }
 
 function setSizing(mode,btn){
@@ -300,7 +323,7 @@ function setSizing(mode,btn){
 
 function onSearch(){
   searchQ=document.getElementById('search').value.toLowerCase();
-  if(viewMode==='treemap')renderTreemap();else renderExplorer();
+  rerender();
 }
 
 function getFiltered(){
@@ -522,8 +545,8 @@ function setMode(mode,btn){
   btn.classList.add('on');
   document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
   document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
-  if(mode==='treemap')renderTreemap();
-  else renderExplorer();
+  document.getElementById('arch').style.display=mode==='arch'?'block':'none';
+  rerender();
 }
 
 // Explorer view: file tree with heat indicators
@@ -611,6 +634,125 @@ function toggleDir(id,row){
   if(!el)return;
   if(el.style.display==='none'){el.style.display='';arr.textContent='▼'}
   else{el.style.display='none';arr.textContent='▶'}
+}
+
+function rerender(){
+  if(viewMode==='treemap')renderTreemap();
+  else if(viewMode==='arch')renderArch();
+  else renderExplorer();
+}
+
+// Architecture view: directory nodes in dependency layers. Entry points on
+// top, foundations at the bottom; arrows point from importer to dependency.
+let archSel=null;
+function archLayout(){
+  const NODE_H=50,GAP_X=28,GAP_Y=84,PAD=24;
+  const maxLines=Math.max(1,...ARCH.nodes.map(n=>n.lines));
+  const width=n=>Math.round(130+110*Math.sqrt(n.lines/maxLines));
+  const maxLevel=Math.max(0,...ARCH.nodes.map(n=>n.level));
+  const layers=[];
+  for(let l=0;l<=maxLevel;l++)layers.push(ARCH.nodes.filter(n=>n.level===l));
+  const nbrs={};
+  ARCH.nodes.forEach(n=>nbrs[n.id]=[]);
+  ARCH.edges.forEach(e=>{if(nbrs[e.from]&&nbrs[e.to]){nbrs[e.from].push(e.to);nbrs[e.to].push(e.from)}});
+  // Barycenter sweeps to reduce crossings; nodes arrive hottest-first.
+  const pos={};
+  layers.forEach(L=>L.forEach((n,i)=>pos[n.id]=i));
+  for(let sweep=0;sweep<4;sweep++){
+    const order=sweep%2?[...layers.keys()]:[...layers.keys()].reverse();
+    for(const li of order){
+      const L=layers[li];
+      const bc=n=>{const ps=nbrs[n.id].map(m=>pos[m]);return ps.length?ps.reduce((a,b)=>a+b,0)/ps.length:pos[n.id]};
+      const keyed=L.map(n=>[bc(n),n]);
+      keyed.sort((a,b)=>a[0]-b[0]);
+      layers[li]=keyed.map(k=>k[1]);
+      layers[li].forEach((n,i)=>pos[n.id]=i);
+    }
+  }
+  const rowW=L=>L.reduce((s,n)=>s+width(n),0)+GAP_X*Math.max(0,L.length-1);
+  const W=Math.max(...layers.map(rowW),300)+PAD*2;
+  const boxes={};
+  layers.forEach((L,li)=>{
+    let x=PAD+(W-PAD*2-rowW(L))/2;
+    const y=PAD+(maxLevel-li)*(NODE_H+GAP_Y);
+    L.forEach(n=>{boxes[n.id]={n,x,y,w:width(n),h:NODE_H};x+=width(n)+GAP_X});
+  });
+  return {boxes,W,H:PAD*2+(maxLevel+1)*NODE_H+maxLevel*GAP_Y};
+}
+
+function renderArch(){
+  const el=document.getElementById('arch');
+  if(!ARCH.nodes||!ARCH.nodes.length){el.innerHTML='<div class="empty">No files in heatmap</div>';return}
+  const {boxes,W,H}=archLayout();
+  const visible=new Set(getFiltered().map(f=>f.dir));
+  const linked=new Set();
+  if(archSel){linked.add(archSel);ARCH.edges.forEach(e=>{if(e.from===archSel)linked.add(e.to);if(e.to===archSel)linked.add(e.from)})}
+  let s='<svg width="'+W+'" height="'+H+'" xmlns="http://www.w3.org/2000/svg">';
+  s+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0L10,5L0,10z"/></marker></defs>';
+  for(const e of ARCH.edges){
+    const a=boxes[e.from],b=boxes[e.to];
+    if(!a||!b)continue;
+    const x1=a.x+a.w/2,x2=b.x+b.w/2;
+    let y1,y2,d;
+    if(a.y===b.y){ // same layer (import cycle): arc above
+      y1=a.y;y2=b.y;const lift=Math.min(60,20+Math.abs(x2-x1)/6);
+      d='M'+x1+','+y1+' C'+x1+','+(y1-lift)+' '+x2+','+(y2-lift)+' '+x2+','+y2;
+    }else{
+      const down=a.y<b.y;
+      y1=down?a.y+a.h:a.y;y2=down?b.y:b.y+b.h;
+      const my=(y1+y2)/2;
+      d='M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2;
+    }
+    const sw=(1+Math.log2(e.count)).toFixed(2);
+    const hl=archSel&&(e.from===archSel||e.to===archSel);
+    const dim=archSel&&!hl;
+    s+='<g class="ae'+(hl?' hl':'')+(dim?' dim':'')+'"><path d="'+d+'" stroke-width="'+sw+'" marker-end="url(#ah)"/>';
+    s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0))+'">'+e.count+'</text>';
+    s+='<title>'+e.count+' file(s) in '+e.from+' import '+e.to+'</title></g>';
+  }
+  for(const id in boxes){
+    const {n,x,y,w,h}=boxes[id];
+    const c=C[n.tier]||C.low;
+    const dim=(!visible.has(n.id))||(archSel&&!linked.has(n.id));
+    const hot=n.hottest.split('/').pop();
+    s+='<g class="an'+(archSel===n.id?' sel':'')+(dim?' dim':'')+'" data-dir="'+attr(n.id)+'">';
+    s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" fill="'+c+'2E" stroke="'+c+'"/>';
+    s+='<text class="an-dir" x="'+(x+10)+'" y="'+(y+20)+'">'+html(clip(n.id==='.'?'(root)':n.id,w-50,7.2))+'</text>';
+    s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+20)+'" text-anchor="end" fill="'+c+'">'+n.max_heat+'</text>';
+    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(hot+' · '+n.files+' files · '+n.lines+' lines',w-20,6))+'</text>';
+    s+='<title>'+html(n.id)+'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')\n'+n.files+' files, '+n.lines+' lines</title></g>';
+  }
+  s+='</svg>';
+  el.innerHTML='<div class="arch-hint">Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines, color = most severe tier. Click a package to list its files.</div>'+s;
+  el.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>selectDir(g.dataset.dir)));
+}
+
+function clip(t,px,charW){const n=Math.max(4,Math.floor(px/charW));return t.length>n?t.slice(0,n-1)+'…':t}
+function html(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function attr(t){return html(t).replace(/"/g,'&quot;')}
+
+function selectDir(dir){
+  archSel=archSel===dir?null:dir;
+  renderArch();
+  if(!archSel)return;
+  const n=ARCH.nodes.find(x=>x.id===dir);
+  const c=C[n.tier]||C.low;
+  const files=FILES.filter(f=>f.dir===dir).sort((a,b)=>b.heat_score-a.heat_score);
+  const deps=ARCH.edges.filter(e=>e.from===dir).map(e=>e.to);
+  const users=ARCH.edges.filter(e=>e.to===dir).map(e=>e.from);
+  let h='<h3>'+html(dir==='.'?'(root)':dir)+'/</h3>';
+  h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+n.tier+' '+n.max_heat+'</span>';
+  h+='<div class="sec"><div class="sec-title">Files, hottest first</div><div class="flist">';
+  for(const f of files){
+    const fc=C[f.tier]||C.low;
+    h+='<div class="ex-row ex-file" data-path="'+attr(f.path)+'"><span class="ftier" style="background:'+fc+'"></span><span class="fname">'+html(f.name)+'</span><span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span></div>';
+  }
+  h+='</div></div>';
+  h+='<div class="sec"><div class="sec-title">Imports</div><div class="reason">'+(deps.length?deps.map(html).join(', '):'none')+'</div></div>';
+  h+='<div class="sec"><div class="sec-title">Imported by</div><div class="reason">'+(users.length?users.map(html).join(', '):'none')+'</div></div>';
+  const d=document.getElementById('detail');
+  d.innerHTML=h;
+  d.querySelectorAll('[data-path]').forEach(r=>r.addEventListener('click',()=>selectFile(r.dataset.path)));
 }
 
 window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap()});

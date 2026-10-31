@@ -1,0 +1,145 @@
+package dashboard
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/zanetworker/highstakes/internal/types"
+)
+
+func fh(path string, heat int, tier types.Tier, lines int, importedBy ...string) *types.FileHeat {
+	f := &types.FileHeat{Path: path, HeatScore: heat, Tier: tier, Size: types.FileSize{Lines: lines}}
+	for _, p := range importedBy {
+		f.Dependencies.ImportedBy = append(f.Dependencies.ImportedBy, types.Dependency{Path: p})
+	}
+	return f
+}
+
+func archHeatmap() *types.Heatmap {
+	files := []*types.FileHeat{
+		fh("cmd/main.go", 40, types.TierMedium, 300),
+		fh("api/a.go", 90, types.TierCritical, 100, "cmd/main.go"),
+		fh("api/b.go", 20, types.TierLow, 50, "cmd/main.go"),
+		fh("types/t.go", 10, types.TierLow, 80, "api/a.go", "api/b.go", "cmd/main.go"),
+		fh("README.md", 5, types.TierLow, 20),
+	}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	for _, f := range files {
+		hm.Files[f.Path] = f
+	}
+	return hm
+}
+
+func TestBuildArchitecture_Nodes(t *testing.T) {
+	arch := buildArchitecture(archHeatmap())
+	byID := map[string]archNode{}
+	for _, n := range arch.Nodes {
+		byID[n.ID] = n
+	}
+	tests := []struct {
+		id   string
+		want archNode
+	}{
+		{"api", archNode{ID: "api", Files: 2, Lines: 150, MaxHeat: 90, Tier: "critical", Hottest: "api/a.go", Level: 1}},
+		{"types", archNode{ID: "types", Files: 1, Lines: 80, MaxHeat: 10, Tier: "low", Hottest: "types/t.go", Level: 0}},
+		{"cmd", archNode{ID: "cmd", Files: 1, Lines: 300, MaxHeat: 40, Tier: "medium", Hottest: "cmd/main.go", Level: 2}},
+		{".", archNode{ID: ".", Files: 1, Lines: 20, MaxHeat: 5, Tier: "low", Hottest: "README.md", Level: 0}},
+	}
+	if len(arch.Nodes) != len(tests) {
+		t.Fatalf("got %d nodes, want %d: %+v", len(arch.Nodes), len(tests), arch.Nodes)
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			if got := byID[tt.id]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("node = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+	// Ordered by level, then heat: types/. (0), api (1), cmd (2).
+	var order []string
+	for _, n := range arch.Nodes {
+		order = append(order, n.ID)
+	}
+	if want := []string{"types", ".", "api", "cmd"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+}
+
+func TestBuildArchitecture_Edges(t *testing.T) {
+	arch := buildArchitecture(archHeatmap())
+	want := []archEdge{
+		{From: "api", To: "types", Count: 2},
+		{From: "cmd", To: "api", Count: 1},
+		{From: "cmd", To: "types", Count: 1},
+	}
+	if !reflect.DeepEqual(arch.Edges, want) {
+		t.Errorf("edges = %+v, want %+v", arch.Edges, want)
+	}
+}
+
+func TestBuildArchitecture_Empty(t *testing.T) {
+	arch := buildArchitecture(&types.Heatmap{Files: map[string]*types.FileHeat{}})
+	if arch.Nodes == nil || arch.Edges == nil || len(arch.Nodes) != 0 || len(arch.Edges) != 0 {
+		t.Errorf("empty heatmap should give empty non-nil slices, got %+v", arch)
+	}
+}
+
+func TestBuildArchitecture_TierIsMaxSeverity(t *testing.T) {
+	// An annotation override can make a lower-heat file a higher tier.
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"x/hot.go":  fh("x/hot.go", 70, types.TierHigh, 10),
+		"x/crit.go": fh("x/crit.go", 50, types.TierCritical, 10),
+	}}
+	n := buildArchitecture(hm).Nodes[0]
+	if n.Tier != "critical" || n.Hottest != "x/hot.go" || n.MaxHeat != 70 {
+		t.Errorf("node = %+v", n)
+	}
+}
+
+func TestGenerate_EmbedsArchitecture(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "d.html")
+	if err := Generate(archHeatmap(), out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{`"from":"api","to":"types","count":2`, `setMode('arch',this)`, `id="arch"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+	if strings.Contains(html, "/*__ARCH__*/") {
+		t.Error("architecture placeholder not replaced")
+	}
+}
+
+func TestBuildArchitecture_IgnoresTestFiles(t *testing.T) {
+	hm := archHeatmap()
+	hm.Files["api/a_test.go"] = fh("api/a_test.go", 99, types.TierCritical, 500)
+	hm.Files["e2e/flow_test.go"] = fh("e2e/flow_test.go", 50, types.TierMedium, 200)
+	hm.Files["types/t.go"].Dependencies.ImportedBy = append(hm.Files["types/t.go"].Dependencies.ImportedBy,
+		types.Dependency{Path: "e2e/flow_test.go"})
+
+	arch := buildArchitecture(hm)
+	for _, n := range arch.Nodes {
+		switch n.ID {
+		case "api":
+			if n.Hottest != "api/a.go" || n.Files != 2 || n.Lines != 150 || n.Tier != string(types.TierCritical) {
+				t.Errorf("api node = %+v, want hottest api/a.go, 2 files, 150 lines, critical", n)
+			}
+		case "e2e":
+			t.Errorf("test-only dir e2e should not be a node: %+v", n)
+		}
+	}
+	for _, e := range arch.Edges {
+		if e.From == "e2e" {
+			t.Errorf("edge from test-only dir: %+v", e)
+		}
+	}
+}

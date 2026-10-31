@@ -9,7 +9,7 @@
 ## Install
 
 ```sh
-go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 ```
 
 Or build from source:
@@ -17,7 +17,7 @@ Or build from source:
 ```sh
 git clone https://github.com/zanetworker/highstakes
 cd highstakes
-go install ./cmd/heatmap
+go install ./cmd/highstakes
 ```
 
 ## Set Up

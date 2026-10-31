@@ -5,7 +5,7 @@ Go CLI tool that identifies critical code paths using LLM blast radius analysis.
 ## Build and Test
 
 ```sh
-go build -o heatmap ./cmd/highstakes
+go build -o highstakes ./cmd/highstakes
 go test ./... -count=1
 go install ./cmd/highstakes
 ```
@@ -14,12 +14,15 @@ go install ./cmd/highstakes
 
 ```
 cmd/highstakes/main.go         CLI entry point (Cobra)
+cmd/highstakes/create.go       `create codeowners` / `create policy`
 internal/
   analyzer/                  Static analysis (AST, imports, complexity)
   gitanalyzer/               Git history (commits, churn, contributors)
   llm/                       LLM blast radius assessment via OpenRouter
   scorer/                    Heat score formula and tier assignment
-  prscore/                   PR risk scoring and circuit breakers
+  prscore/                   PR risk scoring (importance + change risk), reviewers, gate
+  ownership/                 Per-file owners from git log (recency-weighted, .mailmap aware)
+  policy/                    Hot path collapsing, CODEOWNERS block, AI reviewer policy
   incidents/                 Incident tracking persistence
   tui/                       Bubbletea TUI (tree model + view)
   dashboard/                 HTML dashboard generator (treemap + explorer)
@@ -41,5 +44,5 @@ docs/                        User-facing documentation
 
 - CLI verbs follow agentic CLI vocabulary: get, list, create, check (not show, find, add)
 - Errors include valid values when an enum is the cause
-- Exit codes: 0=success, 1=internal, 2=invalid input, 3=external failure, 4=not found
+- Exit codes: 0=success, 1=internal, 2=invalid input, 3=external failure, 4=not found, 5=PR blocked by `pr check --fail-on`
 - Tests use table-driven patterns with t.Run subtests

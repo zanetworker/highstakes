@@ -18,6 +18,9 @@ import (
 const (
 	DefaultModel  = "deepseek/deepseek-v4-flash"
 	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
+
+	// PromptVersion is part of the cache key; bump it when buildPrompt changes.
+	PromptVersion = "1"
 )
 
 // Assessment holds the LLM's blast radius evaluation for a single file
@@ -54,6 +57,7 @@ type Assessor struct {
 	cacheDir    string
 	concurrency int
 	client      *http.Client
+	retryDelay  time.Duration // base backoff unit between retries
 }
 
 // Config holds assessor configuration
@@ -95,6 +99,7 @@ func NewAssessor(cfg Config) (*Assessor, error) {
 		cacheDir:    cfg.CacheDir,
 		concurrency: cfg.Concurrency,
 		client:      &http.Client{Timeout: 60 * time.Second},
+		retryDelay:  time.Second,
 	}, nil
 }
 
@@ -118,8 +123,7 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	// Count cached files first
 	var toAssess []FileInput
 	for _, f := range files {
-		hash := contentHash(f.Content)
-		if c, ok := a.loadCache(hash); ok {
+		if c, ok := a.loadCache(a.cacheKey(f.Content)); ok {
 			mu.Lock()
 			results[f.Path] = c
 			mu.Unlock()
@@ -135,9 +139,9 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	}
 
 	for _, f := range toAssess {
-		hash := contentHash(f.Content)
+		key := a.cacheKey(f.Content)
 		wg.Add(1)
-		go func(file FileInput, h string) {
+		go func(file FileInput, key string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -151,8 +155,8 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 				return
 			}
 
-			assessment.ContentHash = h
-			a.saveCache(h, assessment)
+			assessment.ContentHash = contentHash(file.Content)
+			a.saveCache(key, assessment)
 
 			mu.Lock()
 			results[file.Path] = assessment
@@ -162,7 +166,7 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 			if n%10 == 0 || int(n) == needAssess {
 				fmt.Fprintf(os.Stderr, "  [%d/%d] assessed\n", n, needAssess)
 			}
-		}(f, hash)
+		}(f, key)
 	}
 
 	wg.Wait()
@@ -198,8 +202,10 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	}
 
 	// Retry with backoff
+	const maxAttempts = 3
 	var resp *http.Response
-	for attempt := 0; attempt < 3; attempt++ {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		req, err := http.NewRequest("POST", a.apiURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -210,21 +216,24 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 		req.Header.Set("HTTP-Referer", "https://github.com/zanetworker/highstakes")
 		req.Header.Set("X-Title", "HighStakes")
 
-		resp, err = a.client.Do(req)
+		r, err := a.client.Do(req)
 		if err != nil {
-			time.Sleep(time.Duration(attempt+1) * time.Second)
+			lastErr = fmt.Errorf("API request failed after %d attempts: %w", maxAttempts, err)
+			time.Sleep(time.Duration(attempt+1) * a.retryDelay)
 			continue
 		}
-		if resp.StatusCode == 429 {
-			resp.Body.Close()
-			time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+		if r.StatusCode == http.StatusTooManyRequests {
+			r.Body.Close()
+			lastErr = fmt.Errorf("API rate limited (429) after %d attempts", maxAttempts)
+			time.Sleep(time.Duration(attempt+1) * 2 * a.retryDelay)
 			continue
 		}
+		resp = r
 		break
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+	if resp == nil {
+		return nil, lastErr
 	}
 	defer resp.Body.Close()
 
@@ -417,6 +426,12 @@ func contentHash(content string) string {
 	return fmt.Sprintf("%x", h[:16])
 }
 
+// cacheKey identifies an assessment by content, model and prompt version,
+// so switching models or prompts never reuses a stale assessment.
+func (a *Assessor) cacheKey(content string) string {
+	return contentHash(a.model + "\x00" + PromptVersion + "\x00" + content)
+}
+
 func (a *Assessor) cachePath(hash string) string {
 	return filepath.Join(a.cacheDir, hash+".json")
 }
@@ -463,9 +478,21 @@ func ShouldAssess(path string) bool {
 		return false
 	}
 
+	if strings.HasPrefix(base, "zz_generated") {
+		return false
+	}
+
+	// Lock files are generated; config files (YAML, TOML, JSON, Dockerfile, Terraform) are assessed.
+	lockFiles := map[string]bool{
+		"package-lock.json": true, "pnpm-lock.yaml": true, "yarn.lock": true,
+		"npm-shrinkwrap.json": true, "composer.lock": true,
+	}
+	if lockFiles[base] {
+		return false
+	}
+
 	skipExts := map[string]bool{
-		".md": true, ".yaml": true, ".yml": true, ".toml": true,
-		".json": true, ".lock": true, ".sum": true, ".mod": true,
+		".md": true, ".lock": true, ".sum": true, ".mod": true,
 	}
 
 	return !skipExts[ext]

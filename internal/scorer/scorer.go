@@ -33,8 +33,14 @@ func CalculateHeatScore(factors types.Factors) int {
 	} else {
 		// Static-only mode: normalize across available heuristic factors
 		active = append(active, weightedFactor{factors.DependencyCentrality.Score * 100, 20})
-		active = append(active, weightedFactor{float64(factors.UserImpact.Score), 20})
-		active = append(active, weightedFactor{float64(factors.DataSensitivity.Score), 15})
+		// Path keywords (user impact, data sensitivity) are a weak signal that
+		// matches on file names alone, so they count once, as the larger of
+		// the two, at a low weight. They used to weigh 35 and dominated.
+		keywords := factors.UserImpact.Score
+		if factors.DataSensitivity.Score > keywords {
+			keywords = factors.DataSensitivity.Score
+		}
+		active = append(active, weightedFactor{float64(keywords), 10})
 		active = append(active, weightedFactor{float64(factors.Complexity.Score), 15})
 		active = append(active, weightedFactor{float64(factors.TestCoverage.Score), 10})
 

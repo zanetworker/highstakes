@@ -3,9 +3,14 @@ package heatmap
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/zanetworker/highstakes/internal/analyzer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -226,5 +231,107 @@ func TestSaveAndLoadConfig(t *testing.T) {
 
 	if loaded.Tiers.Critical != original.Tiers.Critical {
 		t.Errorf("critical threshold: got %d, want %d", loaded.Tiers.Critical, original.Tiers.Critical)
+	}
+}
+
+func TestProcessFile_PersistsDependencies(t *testing.T) {
+	tests := []struct {
+		name           string
+		info           *analyzer.FileInfo
+		wantImports    []string
+		wantImportedBy []string
+	}{
+		{
+			name:           "imports and importers are both persisted",
+			info:           &analyzer.FileInfo{Path: "app/app.go", Imports: []string{"example.com/m/core"}, ImportedBy: []string{"main.go"}},
+			wantImports:    []string{"example.com/m/core"},
+			wantImportedBy: []string{"main.go"},
+		},
+		{
+			name:           "no dependencies yields empty lists",
+			info:           &analyzer.FileInfo{Path: "leaf.go"},
+			wantImports:    []string{},
+			wantImportedBy: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &Generator{config: DefaultConfig()}
+			heat := g.processFile(tt.info.Path, tt.info, analyzer.New("", nil, nil), nil)
+			gotImports := []string{}
+			for _, d := range heat.Dependencies.Imports {
+				gotImports = append(gotImports, d.Path)
+			}
+			gotImportedBy := []string{}
+			for _, d := range heat.Dependencies.ImportedBy {
+				gotImportedBy = append(gotImportedBy, d.Path)
+			}
+			if !reflect.DeepEqual(gotImports, tt.wantImports) {
+				t.Errorf("Imports = %v, want %v", gotImports, tt.wantImports)
+			}
+			if !reflect.DeepEqual(gotImportedBy, tt.wantImportedBy) {
+				t.Errorf("ImportedBy = %v, want %v", gotImportedBy, tt.wantImportedBy)
+			}
+		})
+	}
+}
+
+func TestGenerate_GitHistoryStatus(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	run := func(t *testing.T, dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=d", "GIT_AUTHOR_EMAIL=d@x.io", "GIT_COMMITTER_NAME=d", "GIT_COMMITTER_EMAIL=d@x.io")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	tests := []struct {
+		name        string
+		commits     int
+		wantStatus  string // prefix
+		wantCommits int
+	}{
+		{"history read for every file", 3, "complete", 3},
+		{"no commits: analyze still succeeds, metadata says why", 0, "unavailable", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			run(t, dir, "init", "-q")
+			for i := 0; i < tt.commits; i++ {
+				if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n// v"+strconv.Itoa(i)+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				run(t, dir, "add", "main.go")
+				run(t, dir, "commit", "-q", "-m", "c"+strconv.Itoa(i))
+			}
+			if tt.commits == 0 {
+				if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			g, err := New(dir, GenerateOptions{NoLLM: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hm, err := g.Generate()
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if !strings.HasPrefix(hm.Metadata.GitHistory, tt.wantStatus) {
+				t.Errorf("Metadata.GitHistory = %q, want prefix %q", hm.Metadata.GitHistory, tt.wantStatus)
+			}
+			f, ok := hm.Files["main.go"]
+			if !ok {
+				t.Fatal("main.go missing from heatmap")
+			}
+			if got := f.Factors.ChangeFrequency.CommitCount; got != tt.wantCommits {
+				t.Errorf("CommitCount = %d, want %d", got, tt.wantCommits)
+			}
+		})
 	}
 }

@@ -286,3 +286,52 @@ func TestCalculateComplexityScore(t *testing.T) {
 		t.Errorf("extreme should cap at 100, got %d", extreme)
 	}
 }
+
+// TestCalculateHeatScore_PathKeywordsCapped checks that, without an LLM
+// assessment, path keyword heuristics (user impact, data sensitivity) cannot
+// lift a file on their own: they count once, as the larger of the two.
+func TestCalculateHeatScore_PathKeywordsCapped(t *testing.T) {
+	plain := types.Factors{TestCoverage: types.TestCoverage{Score: 50}}
+	withKW := func(ui, ds int) types.Factors {
+		f := plain
+		f.UserImpact = types.UserImpact{Score: ui}
+		f.DataSensitivity = types.DataSensitivity{Score: ds}
+		return f
+	}
+	assessed := func(f types.Factors) types.Factors {
+		f.BlastRadius = types.BlastRadius{Score: 40, Assessed: true}
+		return f
+	}
+
+	tests := []struct {
+		name string
+		a, b types.Factors
+		want string // "<" a below b, "=" equal
+	}{
+		{"keyword-only file stays below MEDIUM", withKW(100, 100), types.Factors{Complexity: types.Complexity{Score: 100}, TestCoverage: types.TestCoverage{Score: 50}}, "<"},
+		{"keyword factors do not stack", withKW(100, 100), withKW(100, 0), "="},
+		{"no keywords is the floor", plain, withKW(30, 0), "<"},
+		{"LLM mode ignores keywords", assessed(withKW(100, 100)), assessed(plain), "="},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sa, sb := CalculateHeatScore(tt.a), CalculateHeatScore(tt.b)
+			switch tt.want {
+			case "<":
+				if sa >= sb {
+					t.Errorf("score a=%d, want below b=%d", sa, sb)
+				}
+			case "=":
+				if sa != sb {
+					t.Errorf("score a=%d, want equal to b=%d", sa, sb)
+				}
+			}
+		})
+	}
+
+	t.Run("keyword-only score is LOW tier", func(t *testing.T) {
+		if s := CalculateHeatScore(withKW(100, 100)); s >= DefaultTierThresholds().Medium {
+			t.Errorf("keyword-only score = %d, want < %d", s, DefaultTierThresholds().Medium)
+		}
+	})
+}

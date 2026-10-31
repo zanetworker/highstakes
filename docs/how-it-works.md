@@ -12,10 +12,10 @@ Code Heatmap solves this by asking an LLM to read each file and answer: "if this
 highstakes analyze
   │
   ├── 1. Static Analysis
-  │     ├── File discovery (respects .heatmap/config.yaml excludes)
-  │     ├── Language detection (Go, Python, Rust, TypeScript, Java, ...)
+  │     ├── File discovery (respects .heatmap/config.yaml excludes; .github/ is included)
+  │     ├── Language detection (Go, Python, Rust, TypeScript, Java, ..., plus YAML, TOML, JSON, Dockerfile, Terraform)
   │     ├── Complexity (cyclomatic + cognitive via AST for Go, heuristic for others)
-  │     ├── Dependency graph (import analysis, reverse dependency count)
+  │     ├── Dependency graph (Go: same-module imports resolved via go.mod; reverse dependency count)
   │     └── File size (lines, bytes)
   │
   ├── 2. Git Analysis
@@ -25,11 +25,11 @@ highstakes analyze
   │     └── Bug-fix detection (commit message heuristics)
   │
   ├── 3. LLM Blast Radius Assessment
-  │     ├── Filter: skip tests, config, docs, generated files
-  │     ├── Cache check: skip files with unchanged content hash
+  │     ├── Filter: skip tests, docs, lock files, generated files
+  │     ├── Cache check: skip files with unchanged content, model and prompt version
   │     ├── Send file + path to LLM via OpenRouter
   │     ├── Parse structured JSON response
-  │     └── Cache result by content SHA-256
+  │     └── Cache result by SHA-256 of model, prompt version and content
   │
   └── 4. Scoring
         ├── Combine factors with weights (LLM 40%, static 30%, git 20%, manual 10%)
@@ -81,7 +81,20 @@ Weights normalize against available data. If git history is unavailable, its wei
 
 ### Without LLM (`--no-llm`)
 
-Path-based heuristics replace the LLM assessment. Files with "auth", "token", "payment" in their path score higher on user impact and data sensitivity. This produces weaker differentiation.
+| Factor | Weight | Source |
+|--------|--------|--------|
+| Dependency Centrality | 20 | How many files import this one (normalized 0-1) |
+| Path Keywords | 10 | The larger of user impact and data sensitivity, both from path keywords |
+| Complexity | 15 | Cyclomatic + cognitive complexity |
+| Test Coverage Risk | 10 | 100 minus coverage percent |
+| Incident History | 25 | Manual incident records (if any) |
+| Change Frequency | 10 | Commits in last 90 days (if the file has history) |
+
+Weights are relative and normalize over the factors present. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier.
+
+## Git History
+
+Change frequency, unique authors and recent changes come from a single `git log --name-only` pass over the whole repository, so every file gets its history regardless of repo size. If the log cannot be read (no `git` binary, a repository without commits), `analyze` still runs, prints a warning on stderr and records the reason in the heatmap's `metadata.git_history` field (`"complete"` or `"unavailable: <reason>"`); change frequency is then 0 for every file.
 
 ## Tier Assignment
 
@@ -94,16 +107,32 @@ Path-based heuristics replace the LLM assessment. Files with "auth", "token", "p
 
 ## Caching
 
-LLM assessments are cached in `.heatmap/cache/` by SHA-256 hash of file content. If a file hasn't changed since last analysis, its cached assessment is reused. This makes re-analysis near-free.
+LLM assessments are cached in `.heatmap/cache/` by a SHA-256 hash of the model ID, the prompt version and the file content. If a file hasn't changed since last analysis and the model is the same, its cached assessment is reused. This makes re-analysis near-free. Switching `--model` re-assesses files instead of reusing another model's results.
 
 Cache files are JSON containing the four impact scores, summary, and critical reason. Delete `.heatmap/cache/` or run `highstakes analyze --force` to re-assess everything.
 
 ## File Filtering
 
+Infra and config files are assessed alongside source code: CI workflows under `.github/`, Helm charts and Kubernetes manifests (`.yaml`, `.yml`), `.toml`, `.json`, Dockerfiles and Terraform (`.tf`). A broken deploy manifest or CI workflow can have as much blast radius as code.
+
 Not all files are sent to the LLM. Skipped:
 
 - Test files (`*_test.go`, `test_*.py`, `*.spec.ts`, etc.)
-- Generated files (`*.pb.go`, `*.generated.*`)
-- Config/docs (`.yaml`, `.toml`, `.json`, `.md`)
-- Lock files (`go.sum`, `package-lock.json`)
+- Generated files (`*.pb.go`, `*.generated.*`, `zz_generated*`)
+- Docs (`.md`)
+- Lock files (`go.sum`, `go.mod`, `*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`)
 - Excluded directories (configured in `.heatmap/config.yaml`)
+
+## PR Risk: Importance and Change Risk
+
+`pr check` keeps two questions apart. Importance is the max heat of the files a PR touches: how bad a mistake there would be. Change risk scores the diff itself: how likely this particular change is to contain one (lines changed, new files, config or infra files, lines deleted from hot files, test ratio). The tier and any `--fail-on` gate follow importance; change risk tells a reviewer how much attention the diff needs. See the [CLI reference](cli-reference.md#two-axis-risk) for the formula.
+
+## Ownership
+
+Owners are derived from one `git log --numstat` pass. Each author's score for a file is the lines they changed in it, each commit weighted by `0.5^(age_days / 180)`, so recent work counts most. Scores are normalized to shares per file. `.mailmap` is applied, bots are skipped, and the `owners` config map turns emails into GitHub handles. `pr check` ranks reviewers by share times file heat; `create codeowners` ranks owners of a directory by their summed share across its hot files.
+
+## Is It Right?
+
+`highstakes check calibration` tests the scores against git history: did the files the heatmap calls hot attract reverts, bug fixes, security fixes and incidents? It reports per-tier event rates, precision@K, lift over random and rank correlation, for the heat score and for each factor on its own. See the [CLI reference](cli-reference.md#highstakes-check-calibration).
+
+Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve CRITICAL with no fixes at all, so expect blast radius to correlate weakly with fix counts. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.

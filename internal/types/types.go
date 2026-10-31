@@ -19,6 +19,9 @@ type Metadata struct {
 	Branch      string         `json:"branch"`
 	TotalFiles  int            `json:"total_files"`
 	Languages   map[string]int `json:"languages"`
+	// GitHistory is "complete" when churn factors were read from git, or
+	// "unavailable: <reason>" when they could not be (churn is then 0).
+	GitHistory string `json:"git_history,omitempty"`
 }
 
 // FileHeat represents heat data for a single file
@@ -193,6 +196,24 @@ type PRRisk struct {
 	FilesChanged          []FileChange       `json:"files_changed"`
 	ReviewRequirements    ReviewRequirements `json:"review_requirements"`
 	CircuitBreakerSignals []string           `json:"circuit_breaker_signals,omitempty"`
+
+	// Two-axis view: importance of the touched code vs risk of the change itself.
+	Importance         int        `json:"importance"`  // 0-100, max heat of touched files (same as heat_score)
+	ChangeRisk         int        `json:"change_risk"` // 0-100, size/new files/infra/hot deletions/test ratio
+	ChangeRiskLevel    string     `json:"change_risk_level"`
+	ChangeRiskFactors  []string   `json:"change_risk_factors,omitempty"`
+	SuggestedReviewers []Reviewer `json:"suggested_reviewers,omitempty"`
+	FailOn             Tier       `json:"fail_on,omitempty"`  // gate tier from --fail-on (or critical in shadow mode)
+	Decision           string     `json:"decision,omitempty"` // "pass" or "block" when a gate is set
+	Shadow             bool       `json:"shadow,omitempty"`   // decision logged, not enforced
+}
+
+// Reviewer is a suggested reviewer for a PR, ranked by ownership of the hottest changed files
+type Reviewer struct {
+	Handle string   `json:"handle"` // @github-handle when known, else email
+	Email  string   `json:"email"`
+	Score  float64  `json:"score"`
+	Files  []string `json:"files"`
 }
 
 // FileChange represents a changed file in a PR
@@ -203,6 +224,7 @@ type FileChange struct {
 	LinesAdded int   `json:"lines_added"`
 	LinesDeleted int `json:"lines_deleted"`
 	IsNew     bool   `json:"is_new"`
+	Unscored  bool   `json:"unscored,omitempty"` // Not in heatmap; heat inherited from nearest scored directory
 }
 
 // Config represents heatmap configuration
@@ -214,6 +236,7 @@ type Config struct {
 	Notifications   NotificationConfig            `yaml:"notifications"`
 	GitHub          GitHubConfig                  `yaml:"github"`
 	Exclude         ExcludeConfig                 `yaml:"exclude"`
+	Owners          map[string]string             `yaml:"owners,omitempty"` // git email -> @github-handle for reviewers and CODEOWNERS
 }
 
 // ExcludeConfig defines directories and patterns to skip during analysis

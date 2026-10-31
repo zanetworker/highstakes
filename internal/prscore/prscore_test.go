@@ -1,6 +1,7 @@
 package prscore
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/scorer"
@@ -66,16 +67,47 @@ func TestCalculatePRRisk_CriticalBlocksAutoMerge(t *testing.T) {
 	}
 }
 
-func TestCalculatePRRisk_UnknownFile(t *testing.T) {
-	hm := makeHeatmap()
-	changes := []FileChange{
-		{Path: "new_file.go", LinesAdded: 50, LinesDeleted: 0, IsNew: true},
+func TestCalculatePRRisk_UnscoredFiles(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		wantHeat     int
+		wantTier     types.Tier
+		wantUnscored bool
+		wantSignal   bool
+	}{
+		{"new file inherits max heat of its directory", "src/auth/oidc.go", 95, types.TierCritical, true, true},
+		{"new file in new subdirectory inherits nearest ancestor", "src/api/v2/routes.go", 45, types.TierMedium, true, true},
+		{"new file with no scored ancestor stays low but is flagged", "new_file.go", 0, types.TierLow, true, true},
+		{"documentation file is not scored", "src/auth/README.md", 0, types.TierLow, false, false},
+		{"known file is scored normally", "src/utils/format.go", 5, types.TierLow, false, false},
 	}
 
-	risk := CalculatePRRisk(1237, changes, hm, scorer.DefaultTierThresholds())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changes := []FileChange{{Path: tt.path, LinesAdded: 10, IsNew: true}}
+			risk := CalculatePRRisk(1237, changes, makeHeatmap(), scorer.DefaultTierThresholds())
 
-	if risk.Tier != types.TierLow {
-		t.Errorf("new file not in heatmap should be low, got %s", risk.Tier)
+			fc := risk.FilesChanged[0]
+			if fc.HeatScore != tt.wantHeat || fc.Tier != tt.wantTier {
+				t.Errorf("file heat/tier = %d/%s, want %d/%s", fc.HeatScore, fc.Tier, tt.wantHeat, tt.wantTier)
+			}
+			if fc.Unscored != tt.wantUnscored {
+				t.Errorf("Unscored = %v, want %v", fc.Unscored, tt.wantUnscored)
+			}
+			if risk.HeatScore != tt.wantHeat {
+				t.Errorf("PR heat = %d, want %d", risk.HeatScore, tt.wantHeat)
+			}
+			gotSignal := false
+			for _, s := range risk.CircuitBreakerSignals {
+				if strings.Contains(s, "Unscored new file") && strings.Contains(s, tt.path) {
+					gotSignal = true
+				}
+			}
+			if gotSignal != tt.wantSignal {
+				t.Errorf("unscored signal present = %v, want %v (signals: %v)", gotSignal, tt.wantSignal, risk.CircuitBreakerSignals)
+			}
+		})
 	}
 }
 
