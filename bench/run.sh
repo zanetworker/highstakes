@@ -9,10 +9,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bench/run.sh [--llm] [--include-disabled] [--bin PATH] [--cache-dir DIR] [--out-dir DIR]
+Usage: bench/run.sh [--llm [--model ID]] [--include-disabled] [--bin PATH] [--cache-dir DIR] [--out-dir DIR]
 
   --llm            Run analyze with the LLM (paid; needs OPENROUTER_API_KEY or
                    HIGHSTAKES_API_KEY). Default is --no-llm.
+  --model ID       OpenRouter model for --llm (default: the CLI default).
   --include-disabled
                    Also run repos marked `enabled: false` in repos.yaml.
   --bin PATH       highstakes binary to use (default: build from this tree into
@@ -38,19 +39,25 @@ default_cache() {
 LLM=0
 INCLUDE_DISABLED=0
 BIN=""
+MODEL=""
 CACHE_DIR="$(default_cache)"
 OUT_DIR="$BENCH_DIR/results"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --llm) LLM=1; shift ;;
+    --model) MODEL="${2:?--model needs an OpenRouter model ID}"; shift 2 ;;
     --include-disabled) INCLUDE_DISABLED=1; shift ;;
     --bin) BIN="${2:?--bin needs a path}"; shift 2 ;;
     --cache-dir) CACHE_DIR="${2:?--cache-dir needs a path}"; shift 2 ;;
     --out-dir) OUT_DIR="${2:?--out-dir needs a path}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "unknown argument: $1 (valid: --llm, --include-disabled, --bin, --cache-dir, --out-dir, --help)" >&2; exit 2 ;;
+    *) echo "unknown argument: $1 (valid: --llm, --model, --include-disabled, --bin, --cache-dir, --out-dir, --help)" >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$MODEL" && $LLM -eq 0 ]]; then
+  echo "--model only applies with --llm" >&2; exit 2
+fi
 
 for tool in git jq awk; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 3; }
@@ -176,6 +183,7 @@ while IFS=$'\t' read -r name url lang sha tier _mirror holdout_days; do
   start="$(date +%s)"
   analyze_flags=(--json)
   [[ $LLM -eq 1 ]] || analyze_flags+=(--no-llm)
+  [[ -n "$MODEL" ]] && analyze_flags+=(--model "$MODEL")
   mkdir -p "$dir/.heatmap"
   if ! (cd "$dir" && "$BIN" analyze "${analyze_flags[@]}") > "$RAW_DIR/$name-analyze.json" 2> "$RAW_DIR/$name-analyze.log"; then
     echo "analyze failed for $name; last lines of $RAW_DIR/$name-analyze.log:" >&2

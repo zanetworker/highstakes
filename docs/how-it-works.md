@@ -39,7 +39,7 @@ highstakes analyze
 
 ## LLM Assessment
 
-Each source file is sent to the LLM with a prompt asking it to score four impact dimensions on a 0-100 scale:
+Each source file is sent to the LLM with a prompt asking it to score four impact dimensions on a 0-100 scale. The request asks for structured output (a strict JSON schema) at temperature 0, so answers parse reliably and repeat; on OpenRouter it is routed only to providers that support both. Other OpenAI-compatible endpoints (vLLM, Ollama) need `response_format` JSON schema support:
 
 | Dimension | What It Measures | Example |
 |-----------|-----------------|---------|

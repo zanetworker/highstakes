@@ -20,7 +20,7 @@ const (
 	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
 
 	// PromptVersion is part of the cache key; bump it when buildPrompt changes.
-	PromptVersion = "1"
+	PromptVersion = "2"
 )
 
 // Assessment holds the LLM's blast radius evaluation for a single file
@@ -177,6 +177,32 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	return results, nil
 }
 
+// assessmentSchema is the structured-output contract for one assessment.
+var assessmentSchema = func() map[string]interface{} {
+	score := map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 100}
+	text := map[string]interface{}{"type": "string"}
+	return map[string]interface{}{
+		"type": "json_schema",
+		"json_schema": map[string]interface{}{
+			"name":   "blast_radius_assessment",
+			"strict": true,
+			"schema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"security_impact":      score,
+					"data_impact":          score,
+					"availability_impact":  score,
+					"user_impact":          score,
+					"blast_radius_summary": text,
+					"critical_reason":      text,
+				},
+				"required":             []string{"security_impact", "data_impact", "availability_impact", "user_impact", "blast_radius_summary", "critical_reason"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}()
+
 // assessFile sends a single file to the LLM via OpenRouter
 func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	content := file.Content
@@ -187,10 +213,15 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 
 	prompt := buildPrompt(file.Path, content)
 
-	// OpenAI-compatible request (works for all OpenRouter models)
+	// OpenAI-compatible request (works for all OpenRouter models). A strict
+	// JSON schema and temperature 0 make answers parseable and repeatable;
+	// require_parameters routes only to providers that honour both.
 	reqBody := map[string]interface{}{
-		"model":      a.model,
-		"max_tokens": 1024,
+		"model":           a.model,
+		"max_tokens":      1024,
+		"temperature":     0,
+		"response_format": assessmentSchema,
+		"provider":        map[string]interface{}{"require_parameters": true},
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},

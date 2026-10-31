@@ -1,10 +1,13 @@
 package llm
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -371,5 +374,55 @@ func TestAssessFiles_CacheKeyedByModel(t *testing.T) {
 				t.Errorf("API calls = %d, want %d", got, st.wantCalls)
 			}
 		})
+	}
+}
+
+func TestAssessFile_RequestsStructuredOutput(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var got map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got["temperature"] != float64(0) {
+		t.Errorf("temperature = %v, want 0", got["temperature"])
+	}
+	if p, _ := got["provider"].(map[string]interface{}); p["require_parameters"] != true {
+		t.Errorf("provider.require_parameters = %v, want true", got["provider"])
+	}
+	rf, _ := got["response_format"].(map[string]interface{})
+	if rf["type"] != "json_schema" {
+		t.Fatalf("response_format.type = %v, want json_schema", rf["type"])
+	}
+	js, _ := rf["json_schema"].(map[string]interface{})
+	if js["strict"] != true {
+		t.Errorf("json_schema.strict = %v, want true", js["strict"])
+	}
+	schema, _ := js["schema"].(map[string]interface{})
+	if schema["additionalProperties"] != false {
+		t.Errorf("additionalProperties = %v, want false", schema["additionalProperties"])
+	}
+	var required []string
+	for _, r := range schema["required"].([]interface{}) {
+		required = append(required, r.(string))
+	}
+	sort.Strings(required)
+	want := []string{"availability_impact", "blast_radius_summary", "critical_reason", "data_impact", "security_impact", "user_impact"}
+	if !reflect.DeepEqual(required, want) {
+		t.Errorf("required = %v, want %v", required, want)
+	}
+}
+
+func TestCacheKey_IncludesPromptVersion(t *testing.T) {
+	if PromptVersion == "1" {
+		t.Error("PromptVersion must be bumped: the request now asks for structured output, so old cached answers are stale")
 	}
 }
