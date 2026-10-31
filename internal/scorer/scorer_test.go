@@ -35,7 +35,10 @@ func TestCalculateHeatScore_MaxFactors(t *testing.T) {
 }
 
 func TestCalculateHeatScore_HighCoverageReducesScore(t *testing.T) {
+	// Coverage only counts in LLM mode; without the LLM it is a placeholder
+	// and carries no weight (see TestCalculateHeatScore_NoLLMWeights).
 	base := types.Factors{
+		BlastRadius:          types.BlastRadius{Score: 50, Assessed: true},
 		DependencyCentrality: types.DependencyCentrality{Score: 0.5},
 		IncidentHistory:      types.IncidentHistory{Score: 50},
 		ChangeFrequency:      types.ChangeFrequency{Score: 50},
@@ -334,4 +337,67 @@ func TestCalculateHeatScore_PathKeywordsCapped(t *testing.T) {
 			t.Errorf("keyword-only score = %d, want < %d", s, DefaultTierThresholds().Medium)
 		}
 	})
+}
+
+// TestCalculateHeatScore_NoLLMWeights pins the no-LLM weights chosen on the
+// bench/ calibration benchmark: churn 40, complexity 30, centrality 10,
+// keywords 5, coverage 0 (incidents 25 when present).
+func TestCalculateHeatScore_NoLLMWeights(t *testing.T) {
+	only := func(mod func(*types.Factors)) int {
+		f := types.Factors{}
+		mod(&f)
+		return CalculateHeatScore(f)
+	}
+	churn := only(func(f *types.Factors) { f.ChangeFrequency = types.ChangeFrequency{Score: 100, CommitCount: 5} })
+	complexity := only(func(f *types.Factors) { f.Complexity = types.Complexity{Score: 100} })
+	centrality := only(func(f *types.Factors) { f.DependencyCentrality = types.DependencyCentrality{Score: 1} })
+	keywords := only(func(f *types.Factors) { f.UserImpact = types.UserImpact{Score: 100} })
+
+	tests := []struct {
+		name string
+		got  int
+		want int
+	}{
+		// Weights normalize over active factors: churn is only active with history.
+		{"churn alone", churn, 47},           // 40 / 85 (history makes churn active)
+		{"complexity alone", complexity, 66}, // 30 / 45 (no history: churn inactive)
+		{"centrality alone", centrality, 22}, // 10 / 45
+		{"keywords alone", keywords, 11},     // 5 / 45
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("score = %d, want %d", tt.got, tt.want)
+			}
+		})
+	}
+	t.Run("coverage has no effect without LLM", func(t *testing.T) {
+		a := only(func(f *types.Factors) { f.Complexity = types.Complexity{Score: 60}; f.TestCoverage = types.TestCoverage{Score: 100} })
+		b := only(func(f *types.Factors) { f.Complexity = types.Complexity{Score: 60}; f.TestCoverage = types.TestCoverage{Score: 0} })
+		if a != b {
+			t.Errorf("coverage changed the no-LLM score: %d vs %d", a, b)
+		}
+	})
+}
+
+func TestCapTestFile(t *testing.T) {
+	th := types.TierThresholds{Critical: 86, High: 61, Medium: 31, Low: 0}
+	tests := []struct {
+		name   string
+		score  int
+		isTest bool
+		want   int
+	}{
+		{"test file capped below medium", 90, true, 30},
+		{"test file at boundary capped", 31, true, 30},
+		{"low test file unchanged", 12, true, 12},
+		{"source file unchanged", 90, false, 90},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CapTestFile(tt.score, tt.isTest, th); got != tt.want {
+				t.Errorf("CapTestFile(%d, %v) = %d, want %d", tt.score, tt.isTest, got, tt.want)
+			}
+		})
+	}
 }

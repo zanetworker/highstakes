@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/analyzer"
+	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -333,5 +334,29 @@ func TestGenerate_GitHistoryStatus(t *testing.T) {
 				t.Errorf("CommitCount = %d, want %d", got, tt.wantCommits)
 			}
 		})
+	}
+}
+
+func TestProcessFile_CapsTestFiles(t *testing.T) {
+	// High complexity and churn would put both files above MEDIUM; only the
+	// test file is capped.
+	hot := func(path string) *analyzer.FileInfo {
+		return &analyzer.FileInfo{Path: path, Cyclomatic: 40, Cognitive: 60, ImportedBy: []string{"a.go", "b.go"}}
+	}
+	history := map[string]*gitanalyzer.FileHistory{
+		"pay/charge.go":      {CommitCount: 80, CommitsLast90d: 60},
+		"pay/charge_test.go": {CommitCount: 80, CommitsLast90d: 60},
+	}
+	g := &Generator{config: DefaultConfig()}
+	medium := g.config.Tiers.Medium
+
+	src := g.processFile("pay/charge.go", hot("pay/charge.go"), analyzer.New("", nil, nil), history)
+	test := g.processFile("pay/charge_test.go", hot("pay/charge_test.go"), analyzer.New("", nil, nil), history)
+
+	if src.HeatScore < medium {
+		t.Fatalf("fixture too cold: source heat %d < medium %d", src.HeatScore, medium)
+	}
+	if test.HeatScore != medium-1 || test.Tier != types.TierLow {
+		t.Errorf("test file heat=%d tier=%s, want %d low", test.HeatScore, test.Tier, medium-1)
 	}
 }

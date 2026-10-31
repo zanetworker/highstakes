@@ -31,8 +31,11 @@ func CalculateHeatScore(factors types.Factors) int {
 			active = append(active, weightedFactor{float64(factors.ChangeFrequency.Score), 10})
 		}
 	} else {
-		// Static-only mode: normalize across available heuristic factors
-		active = append(active, weightedFactor{factors.DependencyCentrality.Score * 100, 20})
+		// Static-only mode: normalize across available heuristic factors.
+		// Weights chosen on the bench/ calibration benchmark (holdout, 7 repos
+		// in 5 languages): churn and complexity predict later fixes best,
+		// centrality adds a little, test coverage is a placeholder (weight 0).
+		active = append(active, weightedFactor{factors.DependencyCentrality.Score * 100, 10})
 		// Path keywords (user impact, data sensitivity) are a weak signal that
 		// matches on file names alone, so they count once, as the larger of
 		// the two, at a low weight. They used to weigh 35 and dominated.
@@ -40,15 +43,14 @@ func CalculateHeatScore(factors types.Factors) int {
 		if factors.DataSensitivity.Score > keywords {
 			keywords = factors.DataSensitivity.Score
 		}
-		active = append(active, weightedFactor{float64(keywords), 10})
-		active = append(active, weightedFactor{float64(factors.Complexity.Score), 15})
-		active = append(active, weightedFactor{float64(factors.TestCoverage.Score), 10})
+		active = append(active, weightedFactor{float64(keywords), 5})
+		active = append(active, weightedFactor{float64(factors.Complexity.Score), 30})
 
 		if factors.IncidentHistory.IncidentCount > 0 || factors.IncidentHistory.Score > 0 {
 			active = append(active, weightedFactor{float64(factors.IncidentHistory.Score), 25})
 		}
 		if factors.ChangeFrequency.CommitCount > 0 || factors.ChangeFrequency.Score > 0 {
-			active = append(active, weightedFactor{float64(factors.ChangeFrequency.Score), 10})
+			active = append(active, weightedFactor{float64(factors.ChangeFrequency.Score), 40})
 		}
 	}
 
@@ -75,6 +77,16 @@ func CalculateHeatScore(factors types.Factors) int {
 	}
 
 	return int(score)
+}
+
+// CapTestFile keeps test files below the MEDIUM tier: they import everything
+// and change often, but a broken test does not reach users. On the bench/
+// benchmark, ranking them alongside source made the heat ranking worse.
+func CapTestFile(score int, isTest bool, thresholds types.TierThresholds) int {
+	if isTest && score >= thresholds.Medium {
+		return thresholds.Medium - 1
+	}
+	return score
 }
 
 // CalculateTier determines tier from heat score

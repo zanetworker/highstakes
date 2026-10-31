@@ -12,6 +12,7 @@ import (
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/llm"
 	"github.com/zanetworker/highstakes/internal/scorer"
+	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -165,7 +166,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				Assessed:           true,
 			}
 			// Recalculate heat score with LLM data
-			heat.HeatScore = scorer.CalculateHeatScore(heat.Factors)
+			heat.HeatScore = scorer.CapTestFile(scorer.CalculateHeatScore(heat.Factors), tour.IsTestFile(path), g.config.Tiers)
 			heat.Tier = scorer.CalculateTier(heat.HeatScore, g.config.Tiers)
 			heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
 		}
@@ -256,7 +257,7 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 	}
 
 	// Calculate aggregate heat score
-	heatScore := scorer.CalculateHeatScore(factors)
+	heatScore := scorer.CapTestFile(scorer.CalculateHeatScore(factors), tour.IsTestFile(path), g.config.Tiers)
 	tier := scorer.CalculateTier(heatScore, g.config.Tiers)
 
 	// Build dependencies

@@ -7,6 +7,7 @@ import (
 
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/scorer"
+	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -96,6 +97,11 @@ func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.
 	// Population, rescored at the cutoff in holdout mode.
 	var files []*types.FileHeat
 	for path, fh := range hm.Files {
+		// Test files are capped below MEDIUM and are not shipped code; leave
+		// them out so they do not dilute the ranking being measured.
+		if tour.IsTestFile(path) {
+			continue
+		}
 		if opts.Holdout {
 			if opts.ExistingAtCutoff != nil && !opts.ExistingAtCutoff[path] {
 				continue

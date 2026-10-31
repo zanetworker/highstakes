@@ -192,17 +192,17 @@ func TestRescoreAtCutoff(t *testing.T) {
 		wantChurn int
 		wantTier  types.Tier
 	}{
-		// (50*20 + 0*10 keywords + 40*15 + 50*10 + 25*10) / 65 = 36.2
-		{"45 commits in the 90 days before", append([]gitanalyzer.CommitInfo{old, later}, in45...), nil, 36, 25, types.TierMedium},
-		// churn factor still counts (file has history) but scores 0: 2100/65 = 32.3
-		{"no recent commits", []gitanalyzer.CommitInfo{old, later}, nil, 32, 0, types.TierMedium},
+		// (50*10 centrality + 0*5 keywords + 40*30 complexity + 25*40 churn) / 85 = 31.8
+		{"45 commits in the 90 days before", append([]gitanalyzer.CommitInfo{old, later}, in45...), nil, 31, 25, types.TierMedium},
+		// churn factor still counts (file has history) but scores 0: 1700/85 = 20
+		{"no recent commits", []gitanalyzer.CommitInfo{old, later}, nil, 20, 0, types.TierLow},
 		// incident before cutoff: 20 + 20 recency + 5 high = 45 at weight 25; the later one is ignored.
-		// (2100 + 45*25) / 90 = 35.8
+		// (1700 + 45*25) / 110 = 25.7
 		{"incident before cutoff counts, after does not", nil, []types.Incident{
 			{File: "f.go", Severity: "high", Date: cutoff.AddDate(0, 0, -10)},
 			{File: "f.go", Severity: "critical", Date: cutoff.AddDate(0, 0, 5)},
 			{File: "other.go", Severity: "critical", Date: cutoff.AddDate(0, 0, -5)},
-		}, 35, 0, types.TierMedium},
+		}, 25, 0, types.TierLow},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -216,5 +216,19 @@ func TestRescoreAtCutoff(t *testing.T) {
 				t.Error("rescoreAtCutoff must not mutate its input")
 			}
 		})
+	}
+}
+
+func TestRun_ExcludesTestFiles(t *testing.T) {
+	hm := testHeatmap()
+	hm.Files["hot_test.go"] = fileHeat("hot_test.go", 95, types.TierCritical, 90, 90, 0.9)
+	commits := fixes("hot_test.go", 3, base.AddDate(0, 0, -30))
+
+	r := Run(hm, commits, nil, Options{From: base.AddDate(0, 0, -365), To: base, K: 2})
+	if r.Files != 5 {
+		t.Errorf("Files = %d, want 5 (test file left out)", r.Files)
+	}
+	if r.Events.Total != 0 {
+		t.Errorf("Events.Total = %d, want 0 (events on test files are not counted)", r.Events.Total)
 	}
 }

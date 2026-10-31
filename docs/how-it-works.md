@@ -83,14 +83,17 @@ Weights normalize against available data. If git history is unavailable, its wei
 
 | Factor | Weight | Source |
 |--------|--------|--------|
-| Dependency Centrality | 20 | How many files import this one (normalized 0-1) |
-| Path Keywords | 10 | The larger of user impact and data sensitivity, both from path keywords |
-| Complexity | 15 | Cyclomatic + cognitive complexity |
-| Test Coverage Risk | 10 | 100 minus coverage percent |
+| Change Frequency | 40 | Commits in last 90 days (if the file has history) |
+| Complexity | 30 | Cyclomatic + cognitive complexity |
 | Incident History | 25 | Manual incident records (if any) |
-| Change Frequency | 10 | Commits in last 90 days (if the file has history) |
+| Dependency Centrality | 10 | How many files import this one (normalized 0-1) |
+| Path Keywords | 5 | The larger of user impact and data sensitivity, both from path keywords |
 
-Weights are relative and normalize over the factors present. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier.
+Weights are relative and normalize over the factors present. They were chosen on the [calibration benchmark](../bench/README.md): across seven repos in five languages, churn and complexity predicted which files needed fixes later (holdout), centrality added a little, and test coverage is a placeholder today, so it carries no weight without the LLM. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier.
+
+### Test Files
+
+Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are capped just below the MEDIUM threshold in both modes. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
 
 ## Static Analysis by Language
 
