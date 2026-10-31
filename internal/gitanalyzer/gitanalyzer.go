@@ -3,6 +3,7 @@ package gitanalyzer
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -166,17 +167,12 @@ func extractPRNumber(message string) *int {
 }
 
 // detectBugFix returns true if the commit message indicates a bug fix
+// bugFixWords matches fix vocabulary as whole words, so "prefix", "debug",
+// "dispatch", "incorrect" and "resolver" do not count as fixes.
+var bugFixWords = regexp.MustCompile(`(?i)\b(fix(es|ed|ing)?|bug(s|fix|fixes)?|hotfix(es)?|patch(es|ed)?|repair(s|ed)?|correct(s|ed)?|resolve[sd]?)\b`)
+
 func detectBugFix(message string) bool {
-	lower := strings.ToLower(message)
-	keywords := []string{"fix", "bug", "patch", "hotfix", "repair", "correct", "resolve"}
-
-	for _, keyword := range keywords {
-		if strings.Contains(lower, keyword) {
-			return true
-		}
-	}
-
-	return false
+	return bugFixWords.MatchString(message)
 }
 
 // firstLine returns the first line of a multi-line string

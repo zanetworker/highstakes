@@ -81,6 +81,23 @@ func TestIsBugFix(t *testing.T) {
 		{"Hotfix for login", true},
 		{"feat: add dashboard", false},
 		{"", false},
+		{"fix(router): handle empty path", true},
+		{"Fixes #123", true},
+		{"fixed race in cache", true},
+		{"bugfix: wrong exit code", true},
+		{"Bug 4411: crash on start", true},
+		{"patch CVE-2026-1234", true},
+		{"repair broken symlink handling", true},
+		{"correct off-by-one in pager", true},
+		{"resolves #88", true},
+		// substrings of other words are not fixes
+		{"add DEBUG logging", false},
+		{"feat: url prefix support", false},
+		{"rename suffix helper", false},
+		{"refactor: event dispatch loop", false},
+		{"docs: incorrect example was confusing", false},
+		{"add DNS resolver option", false},
+		{"chore: bump fixture data", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.msg, func(t *testing.T) {
