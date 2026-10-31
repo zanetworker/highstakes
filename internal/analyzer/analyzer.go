@@ -639,23 +639,51 @@ func calculateCyclomatic(fn *ast.FuncDecl) int {
 	return complexity
 }
 
-// calculateCognitive computes cognitive complexity for a Go function
-// Simplified version - production would need full cognitive complexity rules
+// calculateCognitive computes cognitive complexity for a Go function with the
+// same rules as the tree-sitter walker: branches, loops and switches cost
+// 1 + nesting and nest their bodies, else-if costs 1 flat, closures nest
+// without an increment, and nesting drops again when a block ends.
 func calculateCognitive(fn *ast.FuncDecl) int {
-	cognitive := 0
-	nestingLevel := 0
+	if fn.Body == nil {
+		return 0
+	}
+	return cognitiveIn(fn.Body, 0)
+}
 
-	ast.Inspect(fn, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt:
-			cognitive += 1 + nestingLevel
-			nestingLevel++
+func cognitiveIn(root ast.Node, nesting int) int {
+	total := 0
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil || n == root {
+			return true
+		}
+		switch n := n.(type) {
+		case *ast.IfStmt:
+			total += 1 + nesting + cognitiveIf(n, nesting)
+			return false
+		case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			total += 1 + nesting + cognitiveIn(n, nesting+1)
+			return false
 		case *ast.FuncLit:
-			// Nested functions add cognitive load
-			cognitive += 1 + nestingLevel
+			total += cognitiveIn(n.Body, nesting+1)
+			return false
 		}
 		return true
 	})
+	return total
+}
 
-	return cognitive
+// cognitiveIf scores an if statement's parts; an else-if chain costs 1 per link.
+func cognitiveIf(n *ast.IfStmt, nesting int) int {
+	total := 0
+	if n.Init != nil {
+		total += cognitiveIn(n.Init, nesting+1)
+	}
+	total += cognitiveIn(n.Cond, nesting+1) + cognitiveIn(n.Body, nesting+1)
+	switch e := n.Else.(type) {
+	case *ast.IfStmt:
+		total += 1 + cognitiveIf(e, nesting)
+	case *ast.BlockStmt:
+		total += cognitiveIn(e, nesting+1)
+	}
+	return total
 }

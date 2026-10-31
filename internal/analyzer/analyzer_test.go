@@ -1,6 +1,9 @@
 package analyzer
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -392,6 +395,46 @@ func TestAnalyzer_GoModuleImports(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Errorf("%s Imports = %v, want %v", path, got, want)
 				}
+			}
+		})
+	}
+}
+
+func TestCalculateCognitive_MatchesTreeSitterRules(t *testing.T) {
+	// Each case is the same control flow written in Go and in JavaScript; the
+	// Go walker must score it like the tree-sitter walker does.
+	tests := []struct {
+		name   string
+		goBody string
+		jsBody string
+		want   int
+	}{
+		{"sequential ifs do not nest", "if a {}\n\tif b {}", "if (a) {}\n  if (b) {}", 2},
+		{"nested if", "if a {\n\t\tif b {}\n\t}", "if (a) {\n    if (b) {}\n  }", 3},
+		{"loop after nested block resets", "for a {\n\t\tif b {}\n\t}\n\tif c {}", "while (a) {\n    if (b) {}\n  }\n  if (c) {}", 4},
+		{"else if is flat", "if a {\n\t} else if b {\n\t}", "if (a) {\n  } else if (b) {\n  }", 2},
+		{"closure nests without increment", "run(func() {\n\t\tif a {}\n\t})", "run(() => {\n    if (a) {}\n  });", 2},
+		{"switch", "switch a {\n\tcase 1:\n\t\tif b {}\n\t}", "switch (a) {\n    case 1:\n      if (b) {}\n  }", 3},
+		{"empty", "", "", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := "package p\n\nfunc F() {\n\t" + tt.goBody + "\n}\n"
+			file, err := parser.ParseFile(token.NewFileSet(), "f.go", src, 0)
+			if err != nil {
+				t.Fatalf("parse go: %v", err)
+			}
+			got := calculateCognitive(file.Decls[0].(*ast.FuncDecl))
+
+			js, err := parseSource("JavaScript", "f.js", []byte("function F() {\n  "+tt.jsBody+"\n}\n"))
+			if err != nil {
+				t.Fatalf("parse js: %v", err)
+			}
+			if js.Cognitive != tt.want {
+				t.Fatalf("test assumption broken: tree-sitter JS cognitive = %d, want %d", js.Cognitive, tt.want)
+			}
+			if got != tt.want {
+				t.Errorf("Go cognitive = %d, want %d (same as JS)", got, tt.want)
 			}
 		})
 	}

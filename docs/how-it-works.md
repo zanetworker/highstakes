@@ -99,7 +99,7 @@ Go is parsed with `go/ast`. Rust, TypeScript, JavaScript, Java, Kotlin, C#, C, C
 Complexity is counted from decision nodes, the same way for every language:
 
 - **Cyclomatic**: 1 per function or method, plus 1 per `if`/`else if`, loop, `case`/match arm, `catch`/`rescue`, ternary, and each `&&`/`||`.
-- **Cognitive**: 1 plus the current nesting depth per `if`, loop, `switch`/`match`/`when`, `catch` and ternary; `else if` costs 1 without nesting; lambdas and blocks raise the nesting depth; nesting resets at each function.
+- **Cognitive**: 1 plus the current nesting depth per `if`, loop, `switch`/`match`/`when`, `catch` and ternary; `else if` costs 1 without nesting; lambdas and blocks raise the nesting depth; nesting resets at each function. Go (go/ast) follows the same rules, so the same code scores the same in every language.
 
 Both feed the same complexity score (cyclomatic capped at 20, cognitive at 30).
 

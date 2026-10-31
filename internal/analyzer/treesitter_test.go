@@ -575,3 +575,32 @@ func TestAnalyzer_TreeSitterComplexityReplacesHeuristic(t *testing.T) {
 			info.Cyclomatic, info.Cognitive, info.FunctionCount, info.ExportedSymbols)
 	}
 }
+
+func TestParseSource_ElseIfAndClosuresConsistentAcrossLanguages(t *testing.T) {
+	// if/else-if costs 2; a closure bound to a variable is a function, so an
+	// if inside it costs 1. JS used to differ because Node.Parent() returns a
+	// hidden supertype node in that grammar.
+	tests := []struct {
+		lang, path, src string
+		want            int
+	}{
+		{"JavaScript", "f.js", "function F() {\n  if (a) {\n  } else if (b) {\n  }\n}\n", 2},
+		{"JavaScript", "f.mjs", "function F() {\n  if (a) {\n  } else if (b) {\n  }\n}\n", 2},
+		{"TypeScript", "f.ts", "function F() {\n  if (a) {\n  } else if (b) {\n  }\n}\n", 2},
+		{"Java", "F.java", "class F { void f() { if (a) { } else if (b) { } } }", 2},
+		{"Rust", "f.rs", "fn f() { if a { } else if b { } }", 2},
+		{"JavaScript", "g.js", "const g = () => {\n  if (a) {}\n};\n", 1},
+		{"TypeScript", "g.ts", "const g = () => {\n  if (a) {}\n};\n", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			r, err := parseSource(tt.lang, tt.path, []byte(tt.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Cognitive != tt.want {
+				t.Errorf("cognitive = %d, want %d", r.Cognitive, tt.want)
+			}
+		})
+	}
+}

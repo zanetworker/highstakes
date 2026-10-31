@@ -20,6 +20,8 @@ cd highstakes
 go install ./cmd/highstakes
 ```
 
+The binary bundles parsers for every supported language (about 27 MB). Add `-ldflags="-s -w"` to either command to strip debug symbols and get about 19 MB.
+
 ## Set Up
 
 Export your OpenRouter API key:

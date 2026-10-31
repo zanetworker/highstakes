@@ -250,7 +250,7 @@ func parseSource(lang, path string, src []byte) (res *parseResult, err error) {
 	defer tree.Release()
 
 	w := &walker{spec: specs[key], lang: pool.Language(), src: src, res: &parseResult{}}
-	w.walk(tree.RootNode(), 0)
+	w.walk(tree.RootNode(), nil, 0)
 	return w.res, nil
 }
 
@@ -261,7 +261,9 @@ type walker struct {
 	res  *parseResult
 }
 
-func (w *walker) walk(n *ts.Node, nesting int) {
+// walk tracks the parent itself: Node.Parent() can return a hidden
+// supertype node (JS "statement") instead of the visible parent.
+func (w *walker) walk(n *ts.Node, parent *ts.Node, nesting int) {
 	if n == nil {
 		return
 	}
@@ -282,7 +284,7 @@ func (w *walker) walk(n *ts.Node, nesting int) {
 		childNesting = nesting + 1
 	case s.branches[t]:
 		w.res.Cyclomatic++
-		if s.elseIfs[t] || isElseIf(n, w.lang) {
+		if s.elseIfs[t] || isElseIf(n, parent, w.lang) {
 			w.res.Cognitive++
 		} else {
 			w.res.Cognitive += 1 + nesting
@@ -313,7 +315,7 @@ func (w *walker) walk(n *ts.Node, nesting int) {
 	}
 
 	for i := 0; i < n.ChildCount(); i++ {
-		w.walk(n.Child(i), childNesting)
+		w.walk(n.Child(i), n, childNesting)
 	}
 }
 
@@ -325,8 +327,7 @@ func isJSFunctionValue(n *ts.Node, l *ts.Language) bool {
 }
 
 // isElseIf reports whether an if node continues an else branch, which costs no nesting.
-func isElseIf(n *ts.Node, l *ts.Language) bool {
-	p := n.Parent()
+func isElseIf(n, p *ts.Node, l *ts.Language) bool {
 	if p == nil {
 		return false
 	}
