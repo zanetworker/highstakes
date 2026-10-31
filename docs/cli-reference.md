@@ -34,7 +34,7 @@ highstakes analyze [flags]
 |------|---------|-------------|
 | `--no-llm` | `false` | Skip LLM analysis, use static heuristics only |
 | `--force` | `false` | Re-assess all files, ignoring cache |
-| `--model` | `deepseek/deepseek-v4-flash` | OpenRouter model identifier |
+| `--model` | `openai/gpt-6-luna` | OpenRouter model identifier |
 | `--concurrency` | `10` | Number of parallel LLM requests |
 | `--json` | `false` | Output summary as JSON |
 

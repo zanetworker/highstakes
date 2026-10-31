@@ -106,18 +106,19 @@ highstakes analyze --no-llm
 Override the model per-run:
 
 ```sh
-highstakes analyze --model deepseek/deepseek-v4-pro
+highstakes analyze --model z-ai/glm-5.3-flash
 ```
 
 Available models:
 
 | Model | Cost / 500 files | Notes |
-|-------|-----------------|-------|
-| `deepseek/deepseek-v4-flash` | ~$0.15 | Default. Cheapest viable. |
-| `deepseek/deepseek-v4-pro` | ~$0.50 | Best accuracy per dollar. |
-| `z-ai/glm-5.2` | ~$3-5 | Frontier open-weights. |
-| `openai/gpt-5.4-mini` | ~$0.90 | Most reliable JSON output. |
-| `google/gemini-3-flash` | ~$0.50 | Fastest. |
+|-------|-----------------|----------|
+| `openai/gpt-6-luna` | ~$0.19 | Default. Best impact ranking on the benchmark |
+| `z-ai/glm-5.3-flash` | ~$0.04 | Cheapest; 2-3x slower |
+| `deepseek/deepseek-v4.1-flash` | ~$0.13 | Open weights, can be self-hosted |
+| `anthropic/claude-haiku-5.5` | ~$0.19 | Zero failed calls on the benchmark |
+
+Chosen on the [calibration benchmark](../bench/README.md) (7 repos, 6,240 files, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are estimates from token counts.
 
 ## Caching
 

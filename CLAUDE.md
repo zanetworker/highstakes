@@ -34,7 +34,7 @@ docs/                        User-facing documentation
 ## Key Patterns
 
 - Scoring: LLM blast radius (40%) + static analysis (30%) + git history (20%) + incidents (10%)
-- LLM calls go through OpenRouter (OpenAI-compatible format), default model is DeepSeek V4 Flash
+- LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
 - Assessments cached in .heatmap/cache/ by SHA-256 of file content
 - Analyzer excludes configurable in .heatmap/config.yaml (not hardcoded)
 - All CLI commands support --json for machine-readable output

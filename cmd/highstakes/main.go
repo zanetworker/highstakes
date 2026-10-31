@@ -636,7 +636,7 @@ var agentContextCmd = &cobra.Command{
 						"--json":        flagDef("bool", false, "Output as JSON"),
 						"--no-llm":      flagDef("bool", false, "Skip LLM, use static heuristics only"),
 						"--force":       flagDef("bool", false, "Re-assess all files (ignore cache)"),
-						"--model":       flagDef("string", "deepseek/deepseek-v4-flash", "OpenRouter model ID"),
+						"--model":       flagDef("string", "openai/gpt-6-luna", "OpenRouter model ID"),
 						"--concurrency": flagDef("int", 10, "Parallel LLM requests"),
 					},
 				},
@@ -758,12 +758,10 @@ var agentContextCmd = &cobra.Command{
 				"OPENROUTER_API_KEY": "Required for LLM blast radius analysis. Get from openrouter.ai",
 			},
 			"models": []string{
-				"deepseek/deepseek-v4-flash (default, cheapest)",
-				"deepseek/deepseek-v4-pro (best accuracy/cost)",
-				"z-ai/glm-5.2 (frontier open-weights)",
-				"openai/gpt-5.4-mini (safest JSON)",
-				"google/gemini-3-flash (fastest)",
-				"anthropic/claude-haiku-4.5 (best reasoning)",
+				"openai/gpt-6-luna (default, best impact ranking on the benchmark)",
+				"z-ai/glm-5.3-flash (cheapest, slower)",
+				"deepseek/deepseek-v4.1-flash (open weights, self-hostable)",
+				"anthropic/claude-haiku-5.5 (fewest failed calls)",
 			},
 			"exit_codes": map[string]interface{}{
 				"0": "Success",
@@ -934,7 +932,7 @@ func init() {
 
 	analyzeCmd.Flags().Bool("no-llm", false, "Skip LLM analysis, use static heuristics only")
 	analyzeCmd.Flags().Bool("force", false, "Re-assess all files (ignore cache)")
-	analyzeCmd.Flags().String("model", "", "OpenRouter model (default: deepseek/deepseek-v4-flash)")
+	analyzeCmd.Flags().String("model", "", "OpenRouter model (default: openai/gpt-6-luna)")
 	analyzeCmd.Flags().Int("concurrency", 10, "Parallel LLM requests")
 	analyzeCmd.Flags().Bool("json", false, "Output as JSON")
 	rootCmd.AddCommand(analyzeCmd)

@@ -42,7 +42,7 @@ highstakes analyze
 
 `highstakes init` creates a `.heatmap/` directory with a `config.yaml` file. `highstakes analyze` scans the repo, sends source files to the LLM for blast radius assessment, and writes results to `.heatmap/heatmap.json`.
 
-On a 300-file repo this takes about 1-2 minutes and costs roughly $0.15 with the default model (DeepSeek V4 Flash).
+On a 300-file repo this takes about 1-2 minutes and costs roughly $0.12 with the default model (GPT-6 Luna).
 
 ## View Results
 

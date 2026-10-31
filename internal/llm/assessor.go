@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultModel  = "deepseek/deepseek-v4-flash"
+	DefaultModel  = "openai/gpt-6-luna"
 	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
 
 	// PromptVersion is part of the cache key; bump it when buildPrompt changes.
