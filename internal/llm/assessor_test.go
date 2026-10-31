@@ -426,3 +426,139 @@ func TestCacheKey_IncludesPromptVersion(t *testing.T) {
 		t.Error("PromptVersion must be bumped: the request now asks for structured output, so old cached answers are stale")
 	}
 }
+
+// routingServer mimics OpenRouter: requests that carry a rejected parameter get
+// the 404 "No endpoints found that can handle the requested parameters".
+func routingServer(t *testing.T, rejected ...string) (*httptest.Server, *int32) {
+	t.Helper()
+	okBody := `{"choices":[{"finish_reason":"stop","message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, p := range rejected {
+			if _, ok := body[p]; ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}`))
+				return
+			}
+		}
+		_, _ = w.Write([]byte(okBody))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+func TestAssessFile_FallsBackOnUnsupportedParameters(t *testing.T) {
+	tests := []struct {
+		name          string
+		rejected      []string
+		wantFirst     int32 // requests for the first file
+		wantSecond    int32 // requests for the next file: the working variant is remembered
+		wantErrSubstr string
+	}{
+		{"all supported (DeepSeek-like)", nil, 1, 1, ""},
+		{"no temperature (GLM-like)", []string{"temperature"}, 2, 1, ""},
+		{"no temperature or reasoning (Haiku-like)", []string{"temperature", "reasoning"}, 3, 1, ""},
+		{"nothing works", []string{"response_format"}, 3, 3, "requested parameters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, calls := routingServer(t, tt.rejected...)
+			a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+				client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+			for i, want := range []int32{tt.wantFirst, tt.wantSecond} {
+				atomic.StoreInt32(calls, 0)
+				_, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+				if tt.wantErrSubstr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+						t.Fatalf("file %d: err = %v, want %q", i, err, tt.wantErrSubstr)
+					}
+				} else if err != nil {
+					t.Fatalf("file %d: %v", i, err)
+				}
+				if got := atomic.LoadInt32(calls); got != want {
+					t.Errorf("file %d: requests = %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAssessFile_FirstVariantDisablesReasoning(t *testing.T) {
+	var got map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"security_impact\":1,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := got["reasoning"].(map[string]interface{}); r["effort"] != "none" {
+		t.Errorf("reasoning = %v, want effort none", got["reasoning"])
+	}
+	if got["max_tokens"] != float64(4096) {
+		t.Errorf("max_tokens = %v, want 4096 (room for models that reason anyway)", got["max_tokens"])
+	}
+}
+
+func TestAssessFile_TruncatedByReasoning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":null,"reasoning":"thinking..."}}]}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	_, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+	if err == nil || !strings.Contains(err.Error(), "token limit") {
+		t.Errorf("err = %v, want a token limit error", err)
+	}
+}
+
+func TestAssessFile_FallsBackWhenReasoningIsMandatory(t *testing.T) {
+	okBody := `{"choices":[{"finish_reason":"stop","message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if _, ok := body["reasoning"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}`))
+			return
+		}
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatalf("err = %v, want fallback to the variant without reasoning", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Errorf("requests = %d, want 3", got)
+	}
+}
+
+func TestAssessFile_OtherBadRequestsDoNotFallBack(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid model ID","code":400}}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "nope", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err == nil || !strings.Contains(err.Error(), "Invalid model ID") {
+		t.Errorf("err = %v, want the original 400", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("requests = %d, want 1 (no fallback for unrelated errors)", got)
+	}
+}

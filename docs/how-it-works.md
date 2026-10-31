@@ -39,7 +39,7 @@ highstakes analyze
 
 ## LLM Assessment
 
-Each source file is sent to the LLM with a prompt asking it to score four impact dimensions on a 0-100 scale. The request asks for structured output (a strict JSON schema) at temperature 0, so answers parse reliably and repeat; on OpenRouter it is routed only to providers that support both. Other OpenAI-compatible endpoints (vLLM, Ollama) need `response_format` JSON schema support:
+Each source file is sent to the LLM with a prompt asking it to score four impact dimensions on a 0-100 scale. The request asks for structured output (a strict JSON schema), with reasoning off and temperature 0 where the model allows, so answers parse reliably, repeat, and are not cut off by reasoning using the token budget. On OpenRouter it is routed only to providers that support every parameter; when a model's providers reject temperature or disabling reasoning, HighStakes drops those parameters (keeping the schema) and remembers the working request for the rest of the run. Other OpenAI-compatible endpoints (vLLM, Ollama) need `response_format` JSON schema support:
 
 | Dimension | What It Measures | Example |
 |-----------|-----------------|---------|

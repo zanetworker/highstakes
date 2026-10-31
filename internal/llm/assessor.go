@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +21,7 @@ const (
 	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
 
 	// PromptVersion is part of the cache key; bump it when buildPrompt changes.
-	PromptVersion = "2"
+	PromptVersion = "3"
 )
 
 // Assessment holds the LLM's blast radius evaluation for a single file
@@ -58,6 +59,7 @@ type Assessor struct {
 	concurrency int
 	client      *http.Client
 	retryDelay  time.Duration // base backoff unit between retries
+	variant     int32         // index into requestVariants that last worked (atomic)
 }
 
 // Config holds assessor configuration
@@ -213,20 +215,64 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 
 	prompt := buildPrompt(file.Path, content)
 
-	// OpenAI-compatible request (works for all OpenRouter models). A strict
-	// JSON schema and temperature 0 make answers parseable and repeatable;
-	// require_parameters routes only to providers that honour both.
-	reqBody := map[string]interface{}{
-		"model":           a.model,
-		"max_tokens":      1024,
-		"temperature":     0,
+	// Try the strictest request the model's providers accept, starting from
+	// the variant that last worked; a variant is remembered once it succeeds.
+	start := int(atomic.LoadInt32(&a.variant))
+	var lastErr error
+	for v := start; v < len(requestVariants); v++ {
+		assessment, err := a.request(requestVariants[v](a.model, prompt))
+		if errors.Is(err, errUnsupportedParams) {
+			lastErr = err
+			continue
+		}
+		if err == nil && v != start {
+			atomic.StoreInt32(&a.variant, int32(v))
+		}
+		return assessment, err
+	}
+	return nil, lastErr
+}
+
+// errUnsupportedParams marks OpenRouter's 404 when no provider for the model
+// supports every requested parameter.
+var errUnsupportedParams = errors.New("no provider supports the requested parameters")
+
+// requestVariants go from strictest to most permissive. All ask for the JSON
+// schema and route only to providers that honour every parameter. Reasoning is
+// off where possible (it can use the whole token budget, leaving no answer);
+// temperature 0 keeps answers repeatable. Providers differ per model: DeepSeek
+// takes all three, GLM rejects temperature, Haiku and GPT Luna reject both.
+var requestVariants = []func(model, prompt string) map[string]interface{}{
+	func(model, prompt string) map[string]interface{} {
+		b := baseRequest(model, prompt)
+		b["temperature"] = 0
+		b["reasoning"] = map[string]interface{}{"effort": "none"}
+		return b
+	},
+	func(model, prompt string) map[string]interface{} {
+		b := baseRequest(model, prompt)
+		b["reasoning"] = map[string]interface{}{"effort": "none"}
+		return b
+	},
+	baseRequest,
+}
+
+// baseRequest is an OpenAI-compatible request (works for all OpenRouter
+// models). max_tokens leaves room for models that reason anyway.
+func baseRequest(model, prompt string) map[string]interface{} {
+	return map[string]interface{}{
+		"model":           model,
+		"max_tokens":      4096,
 		"response_format": assessmentSchema,
 		"provider":        map[string]interface{}{"require_parameters": true},
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 	}
+}
 
+// request sends one request body with retries and parses the assessment.
+func (a *Assessor) request(reqBody map[string]interface{}) (*Assessment, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
@@ -270,13 +316,18 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
+		if (resp.StatusCode == http.StatusNotFound && strings.Contains(string(respBody), "requested parameters")) ||
+			(resp.StatusCode == http.StatusBadRequest && strings.Contains(string(respBody), "cannot be disabled")) {
+			return nil, fmt.Errorf("%w: %s", errUnsupportedParams, string(respBody))
+		}
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// OpenAI-compatible response format
 	var apiResp struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -289,8 +340,12 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	if len(apiResp.Choices) == 0 {
 		return nil, fmt.Errorf("empty response")
 	}
+	choice := apiResp.Choices[0]
+	if choice.Message.Content == "" && choice.FinishReason == "length" {
+		return nil, fmt.Errorf("no answer: the model hit the token limit (likely spent on reasoning)")
+	}
 
-	return parseAssessment(apiResp.Choices[0].Message.Content)
+	return parseAssessment(choice.Message.Content)
 }
 
 func buildPrompt(path, content string) string {
