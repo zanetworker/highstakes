@@ -270,6 +270,8 @@ It reports the event rate per tier, precision@K and recall@K of the K hottest fi
 
 Churn comes from the same history as the fixes, so the default run flatters it. Use `--holdout` for an honest number. Blast radius measures impact if broken, not how often code breaks, so a weak correlation for it is expected. See [How It Works](docs/how-it-works.md#is-it-right).
 
+To judge a scoring change across projects and languages, run the pinned multi-repo benchmark in [bench/](bench/README.md).
+
 ## CI / PR Integration
 
 Run `highstakes github install` to generate the workflow, or add it manually:

@@ -14,8 +14,8 @@ highstakes analyze
   ├── 1. Static Analysis
   │     ├── File discovery (respects .heatmap/config.yaml excludes; .github/ is included)
   │     ├── Language detection (Go, Python, Rust, TypeScript, Java, ..., plus YAML, TOML, JSON, Dockerfile, Terraform)
-  │     ├── Complexity (cyclomatic + cognitive via AST for Go, heuristic for others)
-  │     ├── Dependency graph (Go: same-module imports resolved via go.mod; reverse dependency count)
+  │     ├── Complexity (cyclomatic + cognitive from a real parse: go/ast for Go, tree-sitter for Rust, TS/JS, Java, Kotlin, C#, C/C++, Ruby)
+  │     ├── Dependency graph (imports resolved to repo files per language; reverse dependency count)
   │     └── File size (lines, bytes)
   │
   ├── 2. Git Analysis
@@ -91,6 +91,31 @@ Weights normalize against available data. If git history is unavailable, its wei
 | Change Frequency | 10 | Commits in last 90 days (if the file has history) |
 
 Weights are relative and normalize over the factors present. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier.
+
+## Static Analysis by Language
+
+Go is parsed with `go/ast`. Rust, TypeScript, JavaScript, Java, Kotlin, C#, C, C++ and Ruby are parsed with [gotreesitter](https://github.com/odvcencio/gotreesitter), a pure-Go tree-sitter runtime, so `go install` needs no C toolchain. Each file is parsed once, in parallel. Python still uses line heuristics, as do files over 1 MB or files the parser rejects.
+
+Complexity is counted from decision nodes, the same way for every language:
+
+- **Cyclomatic**: 1 per function or method, plus 1 per `if`/`else if`, loop, `case`/match arm, `catch`/`rescue`, ternary, and each `&&`/`||`.
+- **Cognitive**: 1 plus the current nesting depth per `if`, loop, `switch`/`match`/`when`, `catch` and ternary; `else if` costs 1 without nesting; lambdas and blocks raise the nesting depth; nesting resets at each function.
+
+Both feed the same complexity score (cyclomatic capped at 20, cognitive at 30).
+
+Imports are resolved to files in the repo. Anything that does not name a repo file (standard library, third-party packages) is dropped; nothing is fuzzy-matched.
+
+| Language | Resolved |
+|---|---|
+| Go | Same-module imports via `go.mod`; a package import credits every non-test file in that directory |
+| Rust | `mod x;` (`x.rs` or `x/mod.rs`), `use crate::`, `use self::`, `use super::`, and `use other_crate::` for crates in the same repo (by `Cargo.toml` name) |
+| TypeScript / JavaScript | Relative specifiers with extension and `index` resolution (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`), TypeScript's `./x.js` to `x.ts` convention, `require()` and dynamic `import()`, and `tsconfig.json`/`jsconfig.json` `paths` and `baseUrl` (nearest config, relative `extends` followed) |
+| Java / Kotlin | `import a.b.C` to the file `C.java`/`C.kt` declaring `package a.b`; wildcard imports credit the whole package; static imports resolve to their class |
+| C# | `using A.B` credits every file declaring namespace `A.B` |
+| C / C++ | `#include` paths relative to the file, the repo root, `include/` and `src/` |
+| Ruby | `require_relative`, and `require` under `lib/` |
+
+Known gaps: Java and Kotlin classes in the same package reference each other without imports, so those edges are missing; npm workspace packages resolve only when `tsconfig` `paths` map them.
 
 ## Git History
 

@@ -1,0 +1,64 @@
+# Calibration benchmark repos, pinned for reproducibility.
+#
+# tier: primary   the real use cases HighStakes is tuned for (listed first)
+# tier: general   language-diverse public repos that guard against overfitting
+#                 (300 to 3,000 analyzable files, 3+ years of history, many fix
+#                 commits, permissive license, no monorepos)
+# tier: later     candidates not run yet; set enabled: false
+#
+# Optional fields:
+#   local_mirror  local clone used as a fast, read-only clone source; the
+#                 cache clone still points its origin at url
+#   holdout_days  holdout cutoff in days before the pinned commit (default
+#                 180); young repos need a shorter one
+#   enabled       false skips the entry unless run.sh --include-disabled
+#
+# Keep this flat format (one "- name:" entry, indented keys): bench/run.sh
+# parses it with awk, not a YAML library.
+repos:
+  - name: openshell
+    tier: primary
+    url: https://github.com/NVIDIA/OpenShell.git
+    local_mirror: ~/go/src/github.com/zanetworker/OpenShell
+    language: Rust
+    commit: 4d4c15c133d40a50234ce9d2d198e5ba79b9553e
+    holdout_days: 45
+  - name: openclaw-enterprise
+    tier: primary
+    url: https://github.com/openclaw/openclaw-enterprise.git
+    local_mirror: ~/go/src/github.com/zanetworker/openclaw-enterprise
+    language: TypeScript
+    commit: 20133c2b8bc14ebed5e774ffd20e3d58420d0ffc
+    holdout_days: 30
+  - name: caddy
+    tier: general
+    url: https://github.com/caddyserver/caddy.git
+    language: Go
+    commit: eb04ed52be5e66c467e9e614bd917b8bb4150d1b
+  - name: tokio
+    tier: general
+    url: https://github.com/tokio-rs/tokio.git
+    language: Rust
+    commit: 6470b5e4b8e943ad014383a5bf6a93ba415678a3
+  - name: hono
+    tier: general
+    url: https://github.com/honojs/hono.git
+    language: TypeScript
+    commit: 17ad0e21f5a91c939eeafa3df05793a8ea60f016
+  - name: scrapy
+    tier: general
+    url: https://github.com/scrapy/scrapy.git
+    language: Python
+    commit: 51c10b14fca6d272587a5c23cf3ae8effdff16cd
+  - name: commons-lang
+    tier: general
+    url: https://github.com/apache/commons-lang.git
+    language: Java
+    commit: 61837eb4472dac790a69f5f34b7b89ddfaf43db0
+  - name: openclaw
+    tier: later
+    enabled: false
+    url: https://github.com/openclaw/openclaw.git
+    local_mirror: ~/go/src/github.com/zanetworker/openclaw
+    language: TypeScript
+    commit: 90a06b5c4cdd6a8a1f8660e976ad8f8ea6e68ace

@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -34,6 +36,11 @@ type FileInfo struct {
 	Cyclomatic      int
 	Cognitive       int
 	FunctionCount   int
+
+	// parsed holds the tree-sitter result until imports are resolved.
+	parsed *parseResult
+	// importsResolved marks Imports as exact repo paths (tree-sitter languages).
+	importsResolved bool
 }
 
 // New creates a new analyzer for the given repository path
@@ -59,13 +66,29 @@ func (a *Analyzer) Analyze() error {
 		return fmt.Errorf("discover files: %w", err)
 	}
 
-	// Second pass: analyze each file
-	for path := range a.files {
-		if err := a.analyzeFile(path); err != nil {
-			// Log error but continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to analyze %s: %v\n", path, err)
-		}
+	// Second pass: analyze each file (parse once per file, in parallel)
+	paths := make(chan string)
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range paths {
+				if err := a.analyzeFile(path); err != nil {
+					// Log error but continue
+					fmt.Fprintf(os.Stderr, "Warning: failed to analyze %s: %v\n", path, err)
+				}
+			}
+		}()
 	}
+	for path := range a.files {
+		paths <- path
+	}
+	close(paths)
+	wg.Wait()
+
+	// Map tree-sitter import specs to repo files now that every file is known
+	a.resolveImports()
 
 	// Third pass: build reverse dependencies (imported_by)
 	a.buildReverseDependencies()
@@ -181,12 +204,10 @@ func (a *Analyzer) analyzeFile(relPath string) error {
 	switch info.Language {
 	case "Go":
 		return a.analyzeGoFile(absPath, info)
-	case "TypeScript", "JavaScript":
-		return a.analyzeJSFile(absPath, info)
 	case "Python":
 		return a.analyzePythonFile(absPath, info)
-	case "Rust", "C", "C++", "Java", "Ruby", "C#":
-		return a.analyzeGenericFile(absPath, info)
+	case "TypeScript", "JavaScript", "Rust", "C", "C++", "Java", "Ruby", "C#", "Kotlin":
+		return a.analyzeTreeSitterFile(absPath, info)
 	default:
 		return nil
 	}
@@ -246,6 +267,28 @@ func (a *Analyzer) analyzeGoFile(absPath string, info *FileInfo) error {
 		return true
 	})
 
+	return nil
+}
+
+// analyzeTreeSitterFile parses a file once with tree-sitter. Files the parser cannot
+// handle (oversized, parser failure) fall back to the line heuristics.
+func (a *Analyzer) analyzeTreeSitterFile(absPath string, info *FileInfo) error {
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return err
+	}
+	res, err := parseSource(info.Language, info.Path, content)
+	if err != nil {
+		if info.Language == "TypeScript" || info.Language == "JavaScript" {
+			return a.analyzeJSFile(absPath, info)
+		}
+		return a.analyzeGenericFile(absPath, info)
+	}
+	info.Cyclomatic = res.Cyclomatic
+	info.Cognitive = res.Cognitive
+	info.FunctionCount = res.Functions
+	info.ExportedSymbols = res.Exported
+	info.parsed = res
 	return nil
 }
 
@@ -453,6 +496,12 @@ func (a *Analyzer) goImportDir(importPath string) (string, bool) {
 
 // resolveImport returns the repo files an import refers to.
 func (a *Analyzer) resolveImport(importer *FileInfo, imp string) []string {
+	if importer.importsResolved {
+		if _, ok := a.files[imp]; ok {
+			return []string{imp}
+		}
+		return nil
+	}
 	if importer.Language == "Go" {
 		dir, ok := a.goImportDir(imp)
 		if !ok {
@@ -516,9 +565,9 @@ func detectLanguage(path string) string {
 	switch ext {
 	case ".go":
 		return "Go"
-	case ".ts", ".tsx":
+	case ".ts", ".tsx", ".mts", ".cts":
 		return "TypeScript"
-	case ".js", ".jsx":
+	case ".js", ".jsx", ".mjs", ".cjs":
 		return "JavaScript"
 	case ".py":
 		return "Python"
@@ -528,10 +577,12 @@ func detectLanguage(path string) string {
 		return "Ruby"
 	case ".rs":
 		return "Rust"
-	case ".cpp", ".cc", ".cxx":
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx":
 		return "C++"
-	case ".c":
+	case ".c", ".h":
 		return "C"
+	case ".kt", ".kts":
+		return "Kotlin"
 	case ".cs":
 		return "C#"
 	case ".yaml", ".yml":

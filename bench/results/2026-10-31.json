@@ -1,0 +1,826 @@
+{
+  "generated_at": "2026-10-31T10:36:09Z",
+  "llm": false,
+  "highstakes": "highstakes version 1.0.0",
+  "repos": [
+    {
+      "name": "openshell",
+      "tier": "primary",
+      "url": "https://github.com/NVIDIA/OpenShell.git",
+      "language": "Rust",
+      "commit": "4d4c15c133d40a50234ce9d2d198e5ba79b9553e",
+      "commit_date": "2026-10-29",
+      "llm": false,
+      "estimated_files": 1562,
+      "wall_seconds": 34,
+      "holdout_cutoff": "2026-09-14",
+      "holdout_days": 45,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-29T11:33:35.016368+01:00",
+        "to": "2026-10-31T11:33:35.016368+01:00",
+        "k": 10,
+        "files": 1567,
+        "files_with_events": 643,
+        "base_rate": 0.41033822590938096,
+        "events": 2070,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.29179838731299734,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.012441679626749611,
+            "lift": 1.9496111975116643,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5906099084404749,
+            "precision_at_k": 1,
+            "recall_at_k": 0.015552099533437015,
+            "lift": 2.43701399688958,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.24460770235191281,
+            "precision_at_k": 0.6947368421052632,
+            "recall_at_k": 0.010804616517966768,
+            "lift": 1.6930834083653927,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.1897040452188228,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.012441679626749611,
+            "lift": 1.9496111975116643,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-09-14T00:00:00Z",
+        "to": "2026-10-31T11:33:50.652216+01:00",
+        "k": 10,
+        "files": 1045,
+        "files_with_events": 322,
+        "base_rate": 0.30813397129186604,
+        "events": 784,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.2971577067970026,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.024844720496894408,
+            "lift": 2.596273291925466,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.4435243022280983,
+            "precision_at_k": 1,
+            "recall_at_k": 0.031055900621118012,
+            "lift": 3.2453416149068324,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.25782546576568544,
+            "precision_at_k": 0.6212121212121212,
+            "recall_at_k": 0.019292301900997552,
+            "lift": 2.0160455486542443,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.23072517380675772,
+            "precision_at_k": 0.65,
+            "recall_at_k": 0.020186335403726708,
+            "lift": 2.109472049689441,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "openclaw-enterprise",
+      "tier": "primary",
+      "url": "https://github.com/openclaw/openclaw-enterprise.git",
+      "language": "TypeScript",
+      "commit": "20133c2b8bc14ebed5e774ffd20e3d58420d0ffc",
+      "commit_date": "2026-10-29",
+      "llm": false,
+      "estimated_files": 829,
+      "wall_seconds": 94,
+      "holdout_cutoff": "2026-09-29",
+      "holdout_days": 30,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-29T11:34:09.944541+01:00",
+        "to": "2026-10-31T11:34:09.944541+01:00",
+        "k": 10,
+        "files": 1711,
+        "files_with_events": 1133,
+        "base_rate": 0.6621858562244302,
+        "events": 9246,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.4477257278267258,
+            "precision_at_k": 1,
+            "recall_at_k": 0.0088261253309797,
+            "lift": 1.5101500441306266,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.8378933538439495,
+            "precision_at_k": 1,
+            "recall_at_k": 0.0088261253309797,
+            "lift": 1.5101500441306266,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.40348245707556457,
+            "precision_at_k": 0.8651079136690647,
+            "recall_at_k": 0.007635550870865532,
+            "lift": 1.3064427540050925,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.006055148529100224,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.00706090026478376,
+            "lift": 1.2081200353045014,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-09-29T00:00:00Z",
+        "to": "2026-10-31T11:34:56.10407+01:00",
+        "k": 10,
+        "files": 723,
+        "files_with_events": 454,
+        "base_rate": 0.627939142461964,
+        "events": 5154,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.4650461215204,
+            "precision_at_k": 1,
+            "recall_at_k": 0.022026431718061675,
+            "lift": 1.592511013215859,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.534825622282008,
+            "precision_at_k": 0.9,
+            "recall_at_k": 0.019823788546255508,
+            "lift": 1.4332599118942733,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.439227691575451,
+            "precision_at_k": 0.8983739837398375,
+            "recall_at_k": 0.019787973210128578,
+            "lift": 1.4306704630922962,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.13784088454339236,
+            "precision_at_k": 1,
+            "recall_at_k": 0.022026431718061675,
+            "lift": 1.592511013215859,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "caddy",
+      "tier": "general",
+      "url": "https://github.com/caddyserver/caddy.git",
+      "language": "Go",
+      "commit": "eb04ed52be5e66c467e9e614bd917b8bb4150d1b",
+      "commit_date": "2026-10-30",
+      "llm": false,
+      "estimated_files": 419,
+      "wall_seconds": 4,
+      "holdout_cutoff": "2026-05-03",
+      "holdout_days": 180,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-29T11:35:37.979986+01:00",
+        "to": "2026-10-31T11:35:37.979986+01:00",
+        "k": 10,
+        "files": 419,
+        "files_with_events": 125,
+        "base_rate": 0.29832935560859186,
+        "events": 194,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.2969764455137848,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.032,
+            "lift": 1.3408000000000002,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.49408481324250614,
+            "precision_at_k": 0.8866666666666667,
+            "recall_at_k": 0.07093333333333333,
+            "lift": 2.972106666666667,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.32244622279257595,
+            "precision_at_k": 0.43499999999999994,
+            "recall_at_k": 0.0348,
+            "lift": 1.4581199999999999,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.14485058874941248,
+            "precision_at_k": 0.19230769230769232,
+            "recall_at_k": 0.015384615384615385,
+            "lift": 0.6446153846153847,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-10-31T11:35:39.523916+01:00",
+        "k": 10,
+        "files": 325,
+        "files_with_events": 72,
+        "base_rate": 0.22153846153846155,
+        "events": 106,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.288041516440549,
+            "precision_at_k": 0.3,
+            "recall_at_k": 0.041666666666666664,
+            "lift": 1.3541666666666665,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.32307087074068597,
+            "precision_at_k": 0.65,
+            "recall_at_k": 0.09027777777777778,
+            "lift": 2.9340277777777777,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.3284882089264769,
+            "precision_at_k": 0.3496932515337423,
+            "recall_at_k": 0.04856850715746421,
+            "lift": 1.5784764826175868,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.1465363949346079,
+            "precision_at_k": 0.15384615384615385,
+            "recall_at_k": 0.021367521367521368,
+            "lift": 0.6944444444444444,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "tokio",
+      "tier": "general",
+      "url": "https://github.com/tokio-rs/tokio.git",
+      "language": "Rust",
+      "commit": "6470b5e4b8e943ad014383a5bf6a93ba415678a3",
+      "commit_date": "2026-10-29",
+      "llm": false,
+      "estimated_files": 844,
+      "wall_seconds": 5,
+      "holdout_cutoff": "2026-05-02",
+      "holdout_days": 180,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-29T11:35:41.649206+01:00",
+        "to": "2026-10-31T11:35:41.649206+01:00",
+        "k": 10,
+        "files": 844,
+        "files_with_events": 124,
+        "base_rate": 0.14691943127962084,
+        "events": 167,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.23585485670641498,
+            "precision_at_k": 0.4947368421052632,
+            "recall_at_k": 0.039898132427843805,
+            "lift": 3.3674023769100176,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.3471718688677173,
+            "precision_at_k": 0.825,
+            "recall_at_k": 0.06653225806451613,
+            "lift": 5.615322580645161,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.2058217975280667,
+            "precision_at_k": 0.4666666666666667,
+            "recall_at_k": 0.03763440860215054,
+            "lift": 3.1763440860215058,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.15366865962105908,
+            "precision_at_k": 0.2,
+            "recall_at_k": 0.016129032258064516,
+            "lift": 1.3612903225806454,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-05-02T00:00:00Z",
+        "to": "2026-10-31T11:35:44.355941+01:00",
+        "k": 10,
+        "files": 805,
+        "files_with_events": 75,
+        "base_rate": 0.09316770186335403,
+        "events": 93,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.23270602170766086,
+            "precision_at_k": 0.2125,
+            "recall_at_k": 0.028333333333333332,
+            "lift": 2.2808333333333333,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.24687391030935696,
+            "precision_at_k": 0.7277777777777777,
+            "recall_at_k": 0.09703703703703703,
+            "lift": 7.811481481481482,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.20790745646271716,
+            "precision_at_k": 0.3488372093023256,
+            "recall_at_k": 0.046511627906976744,
+            "lift": 3.7441860465116283,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.1689004244214815,
+            "precision_at_k": 0.1,
+            "recall_at_k": 0.013333333333333334,
+            "lift": 1.0733333333333335,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "hono",
+      "tier": "general",
+      "url": "https://github.com/honojs/hono.git",
+      "language": "TypeScript",
+      "commit": "17ad0e21f5a91c939eeafa3df05793a8ea60f016",
+      "commit_date": "2026-10-30",
+      "llm": false,
+      "estimated_files": 488,
+      "wall_seconds": 6,
+      "holdout_cutoff": "2026-05-03",
+      "holdout_days": 180,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-30T11:35:47.509839+01:00",
+        "to": "2026-10-31T11:35:47.509839+01:00",
+        "k": 10,
+        "files": 516,
+        "files_with_events": 165,
+        "base_rate": 0.31976744186046513,
+        "events": 419,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3904211919270848,
+            "precision_at_k": 0.7857142857142858,
+            "recall_at_k": 0.04761904761904762,
+            "lift": 2.4571428571428573,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5814937449855516,
+            "precision_at_k": 0.9,
+            "recall_at_k": 0.05454545454545454,
+            "lift": 2.8145454545454545,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.4032935947261388,
+            "precision_at_k": 0.8913043478260869,
+            "recall_at_k": 0.054018445322793145,
+            "lift": 2.7873517786561264,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.06878087276576783,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.024242424242424242,
+            "lift": 1.250909090909091,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-10-31T11:35:49.883528+01:00",
+        "k": 10,
+        "files": 408,
+        "files_with_events": 125,
+        "base_rate": 0.30637254901960786,
+        "events": 284,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.46917905716355374,
+            "precision_at_k": 0.8444444444444444,
+            "recall_at_k": 0.06755555555555556,
+            "lift": 2.7562666666666664,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.3444206190300227,
+            "precision_at_k": 0.8724137931034482,
+            "recall_at_k": 0.06979310344827586,
+            "lift": 2.847558620689655,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.5036896607046347,
+            "precision_at_k": 0.8666666666666666,
+            "recall_at_k": 0.06933333333333333,
+            "lift": 2.8287999999999993,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.058173078845486,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.032,
+            "lift": 1.3055999999999999,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "scrapy",
+      "tier": "general",
+      "url": "https://github.com/scrapy/scrapy.git",
+      "language": "Python",
+      "commit": "51c10b14fca6d272587a5c23cf3ae8effdff16cd",
+      "commit_date": "2026-10-30",
+      "llm": false,
+      "estimated_files": 552,
+      "wall_seconds": 8,
+      "holdout_cutoff": "2026-05-03",
+      "holdout_days": 180,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-30T11:35:52.761346+01:00",
+        "to": "2026-10-31T11:35:52.761346+01:00",
+        "k": 10,
+        "files": 552,
+        "files_with_events": 202,
+        "base_rate": 0.36594202898550726,
+        "events": 387,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3850500859899693,
+            "precision_at_k": 0.6666666666666667,
+            "recall_at_k": 0.03300330033003301,
+            "lift": 1.8217821782178218,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5181026912310442,
+            "precision_at_k": 1,
+            "recall_at_k": 0.04950495049504951,
+            "lift": 2.7326732673267324,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.37952786123561383,
+            "precision_at_k": 0.5909090909090909,
+            "recall_at_k": 0.029252925292529253,
+            "lift": 1.6147614761476148,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.10387420621554781,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.019801980198019802,
+            "lift": 1.0930693069306932,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-10-31T11:35:56.553916+01:00",
+        "k": 10,
+        "files": 432,
+        "files_with_events": 156,
+        "base_rate": 0.3611111111111111,
+        "events": 270,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.4045216475238662,
+            "precision_at_k": 0.65,
+            "recall_at_k": 0.041666666666666664,
+            "lift": 1.8,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.38491753716424243,
+            "precision_at_k": 0.9333333333333333,
+            "recall_at_k": 0.05982905982905983,
+            "lift": 2.5846153846153848,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.417813393325449,
+            "precision_at_k": 0.5405405405405406,
+            "recall_at_k": 0.03465003465003465,
+            "lift": 1.496881496881497,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.11014239849600417,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.02564102564102564,
+            "lift": 1.1076923076923078,
+            "note": null
+          }
+        }
+      }
+    },
+    {
+      "name": "commons-lang",
+      "tier": "general",
+      "url": "https://github.com/apache/commons-lang.git",
+      "language": "Java",
+      "commit": "61837eb4472dac790a69f5f34b7b89ddfaf43db0",
+      "commit_date": "2026-10-30",
+      "llm": false,
+      "estimated_files": 636,
+      "wall_seconds": 9,
+      "holdout_cutoff": "2026-05-03",
+      "holdout_days": 180,
+      "in_sample": {
+        "mode": "in-sample",
+        "from": "2025-10-30T11:36:01.895794+01:00",
+        "to": "2026-10-31T11:36:01.895794+01:00",
+        "k": 10,
+        "files": 636,
+        "files_with_events": 114,
+        "base_rate": 0.1792452830188679,
+        "events": 231,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.43169981046907263,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.05263157894736842,
+            "lift": 3.3473684210526318,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5189438715663977,
+            "precision_at_k": 0.7857142857142857,
+            "recall_at_k": 0.06892230576441102,
+            "lift": 4.383458646616542,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.4316198274215062,
+            "precision_at_k": 0.6363636363636364,
+            "recall_at_k": 0.05582137161084529,
+            "lift": 3.550239234449761,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.16990188240388066,
+            "precision_at_k": 0.5,
+            "recall_at_k": 0.043859649122807015,
+            "lift": 2.7894736842105265,
+            "note": null
+          }
+        }
+      },
+      "holdout": {
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-10-31T11:36:05.8789+01:00",
+        "k": 10,
+        "files": 540,
+        "files_with_events": 72,
+        "base_rate": 0.13333333333333333,
+        "events": 137,
+        "signals": {
+          "heat": {
+            "available": true,
+            "spearman": 0.427719209939076,
+            "precision_at_k": 0.5,
+            "recall_at_k": 0.06944444444444445,
+            "lift": 3.75,
+            "note": null
+          },
+          "blast_radius": {
+            "available": false,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0,
+            "note": "no LLM assessment in this heatmap (analyzed with --no-llm or no API key)"
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.2145875487817137,
+            "precision_at_k": 0.45,
+            "recall_at_k": 0.0625,
+            "lift": 3.375,
+            "note": null
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.4318369255984734,
+            "precision_at_k": 0.5681818181818181,
+            "recall_at_k": 0.07891414141414141,
+            "lift": 4.261363636363636,
+            "note": null
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.08663205049165473,
+            "precision_at_k": 0.3,
+            "recall_at_k": 0.041666666666666664,
+            "lift": 2.25,
+            "note": null
+          }
+        }
+      }
+    }
+  ]
+}
