@@ -445,8 +445,8 @@ func TestApplyAxes_SetsQuadrantsAndMetadata(t *testing.T) {
 	if hm.Files["b.go"].Tier != types.TierLow {
 		t.Errorf("b.go tier = %s, want low", hm.Files["b.go"].Tier)
 	}
-	if hm.Metadata.LikelyCutoff != 80 || hm.Metadata.ImpactThreshold != th.High {
-		t.Errorf("metadata cutoff=%d threshold=%d, want 80 %d", hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold, th.High)
+	if hm.Metadata.LikelyCutoff != 80 || hm.Metadata.ImpactThreshold != 70 {
+		t.Errorf("metadata cutoff=%d threshold=%d, want 80 70 (top 20%% of impact, above the %d floor)", hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold, th.High)
 	}
 }
 

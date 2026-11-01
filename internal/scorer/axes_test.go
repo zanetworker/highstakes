@@ -1,6 +1,7 @@
 package scorer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -105,6 +106,29 @@ func TestLikelihoodCutoff(t *testing.T) {
 	}
 }
 
+func TestImpactCutoff(t *testing.T) {
+	tests := []struct {
+		name    string
+		impacts []int
+		floor   int
+		want    int
+	}{
+		{"empty uses the floor", nil, 61, 61},
+		{"generous scorer raises the cutoff to the top 20 percent", []int{95, 90, 85, 80, 75, 72, 70, 70, 68, 65}, 61, 90},
+		{"modest scorer keeps the floor", []int{80, 70, 50, 40, 30, 20, 10, 10, 10, 10}, 61, 70},
+		{"small repo below the floor keeps the floor", []int{40, 30}, 61, 61},
+		{"ties at the percentile are inclusive", []int{90, 80, 80, 80, 10, 10, 10, 10, 10, 10}, 61, 80},
+		{"percentile exactly at the floor", []int{61, 61, 10, 10, 10}, 61, 61},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ImpactCutoff(tt.impacts, tt.floor); got != tt.want {
+				t.Errorf("ImpactCutoff(%v, %d) = %d, want %d", tt.impacts, tt.floor, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestQuadrantOf(t *testing.T) {
 	tests := []struct {
 		likely, impactful bool
@@ -147,9 +171,12 @@ func TestApplyQuadrants(t *testing.T) {
 			"j.go":      file("j.go", 70, 20, true, types.TierLow),       // neither
 			"x_test.go": file("x_test.go", 100, 30, true, types.TierLow), // test: excluded from the percentile and never likely
 		}
-		cutoff := ApplyQuadrants(files, th, isTest)
+		cutoff, impactCutoff := ApplyQuadrants(files, th, isTest)
 		if cutoff != 85 {
 			t.Fatalf("cutoff = %d, want 85 (top 2 of 10 non-test files)", cutoff)
+		}
+		if impactCutoff != 61 {
+			t.Fatalf("impact cutoff = %d, want the 61 floor (top 20%% of impact is 61)", impactCutoff)
 		}
 		want := map[string]struct {
 			q    types.Quadrant
@@ -172,6 +199,26 @@ func TestApplyQuadrants(t *testing.T) {
 		}
 	})
 
+	t.Run("generous impact scores raise the impactful cutoff", func(t *testing.T) {
+		files := map[string]*types.FileHeat{}
+		for i, impact := range []int{95, 90, 85, 80, 75, 72, 70, 70, 68, 65} {
+			p := fmt.Sprintf("f%d.go", i)
+			files[p] = file(p, 0, impact, true, types.TierLow)
+		}
+		files["u.go"] = file("u.go", 0, 99, false, types.TierLow)          // unassessed: not in the population
+		files["z_test.go"] = file("z_test.go", 0, 99, true, types.TierLow) // test: not in the population
+		_, impactCutoff := ApplyQuadrants(files, th, isTest)
+		if impactCutoff != 90 {
+			t.Fatalf("impact cutoff = %d, want 90", impactCutoff)
+		}
+		if f := files["f1.go"]; f.Quadrant != types.QuadrantProtect {
+			t.Errorf("impact 90: quadrant = %s, want protect", f.Quadrant)
+		}
+		if f := files["f2.go"]; f.Quadrant != types.QuadrantLow {
+			t.Errorf("impact 85 (above 61, below the repo cutoff): quadrant = %s, want low", f.Quadrant)
+		}
+	})
+
 	t.Run("unassessed files keep the heat tier and no quadrant", func(t *testing.T) {
 		files := map[string]*types.FileHeat{
 			"a.go": file("a.go", 90, 70, false, types.TierHigh),
@@ -187,8 +234,8 @@ func TestApplyQuadrants(t *testing.T) {
 	})
 
 	t.Run("empty map", func(t *testing.T) {
-		if got := ApplyQuadrants(map[string]*types.FileHeat{}, th, isTest); got != 101 {
-			t.Errorf("cutoff = %d, want 101", got)
+		if got, impact := ApplyQuadrants(map[string]*types.FileHeat{}, th, isTest); got != 101 || impact != th.High {
+			t.Errorf("cutoffs = %d/%d, want 101/%d", got, impact, th.High)
 		}
 	})
 }

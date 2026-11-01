@@ -23,7 +23,8 @@ type Metadata struct {
 	// "unavailable: <reason>" when they could not be (churn is then 0).
 	GitHistory string `json:"git_history,omitempty"`
 	// LikelyCutoff is the lowest likelihood counted as "likely" (top 20% of
-	// non-test files); ImpactThreshold is the impact counted as "impactful".
+	// non-test files); ImpactThreshold is the lowest impact counted as
+	// "impactful": max(tiers.high, top 20% of assessed non-test files).
 	LikelyCutoff    int `json:"likely_cutoff,omitempty"`
 	ImpactThreshold int `json:"impact_threshold,omitempty"`
 	// Units are the deployable entry points (binaries, scripts) found in the
@@ -89,7 +90,7 @@ type DeclaredPlacement struct {
 // Placement is one deployment hint for a unit.
 type Placement struct {
 	Kind     string `json:"kind"`     // dockerfile, helm, k8s
-	Detail   string `json:"detail"`   // e.g. "ENTRYPOINT of deploy/docker/Dockerfile.sandbox"
+	Detail   string `json:"detail"`   // e.g. "ENTRYPOINT of deploy/docker/Dockerfile.worker"
 	Evidence string `json:"evidence"` // file:line
 }
 

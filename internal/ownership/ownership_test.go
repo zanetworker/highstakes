@@ -193,6 +193,7 @@ func TestFileOwners_TempRepo(t *testing.T) {
 	commitAs(t, repo, dir, "core/auth.go", "a\nb\nc\nd\ne\nf\n", "Bob", "bob@x.com", recent)
 	commitAs(t, repo, dir, "core/auth.go", "a\nb\nc\nd\ne\nf\ng\nh\ni\n", "Alice", "alice@new.com", recent)
 	commitAs(t, repo, dir, "docs.txt", "x\n", "Bob", "bob@x.com", recent)
+	commitAs(t, repo, dir, "core/café.go", "x\n", "Carol", "carol@x.com", recent)
 	// .mailmap folds alice@old.com into alice@new.com
 	commitAs(t, repo, dir, ".mailmap", "Alice <alice@new.com> <alice@old.com>\n", "Bob", "bob@x.com", recent)
 
@@ -230,6 +231,17 @@ func TestFileOwners_TempRepo(t *testing.T) {
 		}
 		if len(got["docs.txt"]) != 1 {
 			t.Errorf("docs.txt owners = %v, want 1", got["docs.txt"])
+		}
+	})
+
+	t.Run("non-ASCII path keeps its owner", func(t *testing.T) {
+		got, err := FileOwners(dir, []string{"core/café.go"}, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owners := got["core/café.go"]
+		if len(owners) != 1 || owners[0].Email != "carol@x.com" {
+			t.Errorf("core/café.go owners = %+v, want carol@x.com (got keys %v)", owners, got)
 		}
 	})
 

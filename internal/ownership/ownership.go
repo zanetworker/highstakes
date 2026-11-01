@@ -49,7 +49,8 @@ type Options struct {
 // FileOwners returns owners per file, ranked by share, for the repo at repoPath.
 // paths limits results; nil means every file in history.
 func FileOwners(repoPath string, paths []string, opts Options) (map[string][]Owner, error) {
-	args := []string{"-C", repoPath, "log", "--no-merges", "--no-renames", "--numstat",
+	// core.quotePath=false keeps non-ASCII paths verbatim instead of "\303\251"-quoted.
+	args := []string{"-C", repoPath, "-c", "core.quotePath=false", "log", "--no-merges", "--no-renames", "--numstat",
 		"--format=%x1e%aN%x1f%aE%x1f%at"}
 	if len(paths) > 0 && len(paths) <= maxPathspecs {
 		args = append(args, "--")

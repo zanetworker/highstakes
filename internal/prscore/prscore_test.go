@@ -80,6 +80,9 @@ func TestCalculatePRRisk_UnscoredFiles(t *testing.T) {
 		{"new file in new subdirectory inherits nearest ancestor", "src/api/v2/routes.go", 45, types.TierMedium, true, true},
 		{"new file with no scored ancestor stays low but is flagged", "new_file.go", 0, types.TierLow, true, true},
 		{"documentation file is not scored", "src/auth/README.md", 0, types.TierLow, false, false},
+		{"plain text file is documentation", "src/auth/NOTES.txt", 0, types.TierLow, false, false},
+		{"requirements.txt inherits directory heat", "src/auth/requirements.txt", 95, types.TierCritical, true, true},
+		{"Cargo.lock inherits directory heat", "src/auth/Cargo.lock", 95, types.TierCritical, true, true},
 		{"known file is scored normally", "src/utils/format.go", 5, types.TierLow, false, false},
 	}
 

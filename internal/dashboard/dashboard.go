@@ -488,7 +488,7 @@ function _squarify(items,x,y,w,h){
 
 function getModuleName(path){
   const parts=path.split('/');
-  // Group by top 2 levels: crates/openshell-server, python/openshell, e2e/rust
+  // Group by top 2 levels: crates/core, services/api, packages/web
   if(parts.length>=2)return parts[0]+'/'+parts[1];
   return parts[0];
 }

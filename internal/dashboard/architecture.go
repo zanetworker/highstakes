@@ -29,7 +29,7 @@ type archNode struct {
 	Likely     int    `json:"likely"`
 	// Unit view only: Kind is "unit" or "shared", Label the display name,
 	// Members the components drawn in the box, Placement a short inferred
-	// placement ("Dockerfile.sandbox, helm sandboxRuntime").
+	// placement ("Dockerfile.worker, helm worker").
 	Kind      string   `json:"kind,omitempty"`
 	Label     string   `json:"label,omitempty"`
 	Members   []string `json:"members,omitempty"`

@@ -38,7 +38,7 @@ Together they place each file in a 2x2 that sets its tier and review guidance:
 
 |  | Low likelihood | High likelihood (top 20% of the repo) |
 |---|---|---|
-| **High impact (>= 61)** | **Protect** (HIGH): stable but costly if broken; keep owners on review, never auto-merge | **Fragile and critical** (CRITICAL): senior review, add tests first |
+| **High impact (top 20% of the repo, at least 61)** | **Protect** (HIGH): stable but costly if broken; keep owners on review, never auto-merge | **Fragile and critical** (CRITICAL): senior review, add tests first |
 | **Low impact** | **Low stakes** (LOW): light review | **Watch** (MEDIUM): changes and breaks often, limited damage; refactor or add tests |
 
 ## Quick Start
@@ -97,9 +97,9 @@ Four views, one detail panel. Click any file to see its impact and likelihood, q
 
 All views respond to tier filters (Critical / High / Medium / Low) and search; the treemap also has the size toggle (Lines vs Heat).
 
-**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `supervisor-network/src/host.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
+**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `api/src/routes.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
 
-**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. On NVIDIA/OpenShell this shows `openshell-sandbox` and `openshell-supervisor` as separate binaries (separate pods), `openshell-supervisor-network` inside the supervisor and `openshell-server` inside the gateway. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Supporting units (examples, scripts, helper bins) stay hidden until **Supporting units** is on, and links declared in `.heatmap/architecture.yaml` draw dashed. Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
+**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. A sandbox runtime and its supervisor built as two binaries show as two boxes, each with the libraries only it links. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Supporting units (examples, scripts, helper bins) stay hidden until **Supporting units** is on, and links declared in `.heatmap/architecture.yaml` draw dashed. Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
 
 **Quadrant**: every file as a dot, likelihood on x and impact on y, with the two thresholds drawn and each quadrant labelled with its review guidance. Click a dot to open the file in the detail panel.
 
@@ -158,7 +158,7 @@ highstakes analyze --no-llm                             # Static only, no API ke
 
 ```sh
 highstakes dashboard                                    # HTML dashboard (browser)
-heatmap                                              # Terminal TUI
+highstakes                                              # Terminal TUI
 ```
 
 ### Query
@@ -179,26 +179,25 @@ All commands support `--json` for machine-readable output.
 `get` says why a file is impactful, why it is likely to break and what to do, quoting the file's numbers and where they rank in the repo:
 
 ```
-$ highstakes get crates/openshell-supervisor-network/src/proxy.rs        # NVIDIA/OpenShell
+$ highstakes get src/utils/jwt/jwt.ts        # honojs/hono, owners trimmed
 
-crates/openshell-supervisor-network/src/proxy.rs  🔥🔥🔥 CRITICAL  (score: 92)
+src/utils/jwt/jwt.ts  🔥🔥🔥 CRITICAL  (score: 92)
 
-FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)
-Why impact is high: security 92 · availability 85 · user 85 · data 70
-  "Core sandbox egress proxy; bugs can block traffic or bypass network policy."
-  "Enforces sandbox network access and identity-bound policy"
+FRAGILE AND CRITICAL (impact 92, likelihood 37; impactful starts at 61, likely at 20 in this repo)
+Why impact is high: security 92 · user 75 · availability 65
+  "JWT signing and verification failures can disrupt authentication across dependent services."
+  "JWT verification is a security boundary"
 Why it's likely to break:
-  55 commits in the last 90 days, 28 authors overall (top 1% of this repo)
-  479 functions, cyclomatic 1092 in one file (top 1%)
-  11 files import it (top 5%)
-  4 recent fixes; latest: "fix(network): align destination checks for direct connections (#5004)" (2026-10-28)
+  18 authors overall (top 4% of this repo)
+  9 functions, cyclomatic 70 in one file (top 4%)
+  5 files import it (top 14%)
+  4 recent fixes; latest: "fix(jwt): throw JwtTokenInvalid when the signature is not valid base64ur..." (2026-09-20)
 What to do:
-  • Every PR: senior review and sign-off from a top owner (@johntmyers, rrhubenov@gmail.com)
+  • Every PR: senior review and sign-off from a top owner (@calloc134, ...)
   • Add to CODEOWNERS; never auto-merge
-  • Split it: 479 functions in one file
+  • Split it: cyclomatic 70 in one file
   • Add regression tests around the 4 recent fixes
-  • Keep its public interface stable: 11 importers; add contract tests
-  • Spread knowledge: 28 authors change it; document its invariants and keep an owner on review
+  • Spread knowledge: 18 authors change it; document its invariants and keep an owner on review
 
 Review: 2 reviewers (senior), security scan, ~60 min, auto-merge blocked
 ```
@@ -223,31 +222,6 @@ Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the
 
 </details>
 
-<details><summary><b>Example: highstakes list units</b></summary>
-
-```
-$ highstakes list units        # NVIDIA/OpenShell, trimmed
-
-openshell-supervisor  [rust-bin]  crates/openshell-supervisor/src/main.rs (crates/openshell-supervisor/Cargo.toml:13)
-  impact 95  61 fragile-critical  242 files
-  own: crates/openshell-supervisor, crates/openshell-otel-test-support, crates/openshell-supervisor-network, crates/openshell-supervisor-process
-  links units: openshell-driver-vm (crates/openshell-driver-vm)
-  shared: crates/openshell-core, crates/openshell-policy, crates/openshell-sandbox-backend, ...
-  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.supervisor [deploy/docker/Dockerfile.supervisor:18]
-  inferred placement: helm chart deploy/helm/openshell: supervisor image openshell/supervisor [deploy/helm/openshell/values.yaml:63]
-
-openshell-sandbox  [rust-bin]  crates/openshell-sandbox/src/main.rs (crates/openshell-sandbox/Cargo.toml:13)
-  impact 95  29 fragile-critical  177 files
-  own: crates/openshell-sandbox
-  shared: crates/openshell-core, crates/openshell-sandbox-backend, ...
-  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.sandbox [deploy/docker/Dockerfile.sandbox:22]
-  inferred placement: helm chart deploy/helm/openshell: sandboxRuntime image openshell/sandbox [deploy/helm/openshell/values.yaml:49]
-```
-
-`own` is code only this unit links, `links units` is another binary's crate it links in-process, `shared` is linked by two or more units. Units are sorted by max impact.
-
-</details>
-
 ### Tour
 
 A reading path for newcomers, auditors and agents learning the codebase. The most important product code comes first (highest impact, then the most fragile-critical files), and whatever it depends on is read just before it. Examples, scripts, CI, deployment manifests, docs, tests, benchmarks and vendored code are supporting components: hidden by default, shown in a final part with `--include-supporting`. Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
@@ -259,6 +233,70 @@ highstakes get tour --limit 10                          # 10 most impactful file
 highstakes get tour --focus internal/llm                # One directory
 highstakes get tour --json > tour.json                  # Feed /show-me walkthrough or an agent
 ```
+
+A component is a Rust crate, JS/TS package, Python package or Go module (the shallowest directory with its marker file), else the top two segments under `cmd/`, `internal/` and `pkg/`, else the top-level directory. See [the CLI reference](docs/cli-reference.md#highstakes-get-tour).
+
+`--format walkthrough --out tour.data.json` writes the same tour as data for the show-me rich step-through (see [Generated Pictures and Walkthroughs](#generated-pictures-and-walkthroughs)).
+
+The tour is a starting draft. Add expert guidance through the `annotations` map in `.heatmap/heatmap.json` (`owner`, `notes`); both appear on each stop.
+
+### Generated Pictures and Walkthroughs
+
+Hand-drawn architecture diagrams drift and get topology wrong (a sandbox runtime and its supervisor drawn as one box when they run in separate pods). HighStakes generates the picture and the walkthrough from the heatmap instead, and every box links to its files.
+
+```sh
+highstakes get architecture --format seecode --out arch.json      # SeeCode architecture spec: top units, imports, placements
+node <seecode skill>/scripts/seecode.mjs render arch.json          # arch.html: animated, explorable diagram
+highstakes get architecture --json                                 # Same diagram as plain data
+highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out tour.data.json
+python3 <show-me skill>/scripts/walkthrough_build.py tour.data.json   # tour.html: step-through, one step per stop
+```
+
+The architecture spec holds the top product units by max impact (9 boxes by default, the rest folded into one "other units" box), the library most units import, import arrows labelled with importing-file counts, placement groups, and per box its top 3 files with quadrant and first action as evidence. Supporting units (examples, scripts, tests, helper bins) are left out unless `--include-supporting`.
+
+Imports cannot see runtime links such as a gRPC session between two binaries. Declare those, with evidence, in `.heatmap/architecture.yaml`; they draw dashed and marked "declared", apart from what was inferred:
+
+```yaml
+links:
+  - {from: worker, to: api, label: gRPC job stream, both: true,
+     evidence: "docs/architecture.md:42"}
+placement:
+  - {unit: worker, runs_in: worker pod,
+     evidence: "deploy/helm/app/templates/worker.yaml:12"}
+```
+
+See [the CLI reference](docs/cli-reference.md#highstakes-get-architecture) and [Configuration](docs/configuration.md#architecture-declarations).
+
+### Case study: a multi-pod Rust project (NVIDIA/OpenShell)
+
+[NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) is a Rust workspace of 39 crates that ships several binaries into separate pods: a gateway, a supervisor, a sandbox runtime and compute drivers, plus helper binaries. It shows what runtime units, the tour and architecture declarations add on a repo where the deployment shape is not obvious from the directory tree.
+
+On this repo the LLM scores impact generously, so a fixed bar would call about a third of the files impactful. The repo-relative cutoff puts "impactful" at 78 instead of 61, which leaves 108 CRITICAL and 146 HIGH files out of 1,567 (was 178 and 353 with the fixed bar).
+
+<details><summary><b>Example: highstakes list units</b></summary>
+
+```
+$ highstakes list units        # NVIDIA/OpenShell, trimmed
+
+openshell-supervisor  [rust-bin]  crates/openshell-supervisor/src/main.rs (crates/openshell-supervisor/Cargo.toml:13)
+  impact 95  41 fragile-critical  242 files
+  own: crates/openshell-supervisor, crates/openshell-otel-test-support, crates/openshell-supervisor-network, crates/openshell-supervisor-process
+  links units: openshell-driver-vm (crates/openshell-driver-vm)
+  shared: crates/openshell-core, crates/openshell-policy, crates/openshell-sandbox-backend, ...
+  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.supervisor [deploy/docker/Dockerfile.supervisor:18]
+  inferred placement: helm chart deploy/helm/openshell: supervisor image openshell/supervisor [deploy/helm/openshell/values.yaml:63]
+
+openshell-sandbox  [rust-bin]  crates/openshell-sandbox/src/main.rs (crates/openshell-sandbox/Cargo.toml:13)
+  impact 95  22 fragile-critical  177 files
+  own: crates/openshell-sandbox
+  shared: crates/openshell-core, crates/openshell-sandbox-backend, ...
+  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.sandbox [deploy/docker/Dockerfile.sandbox:22]
+  inferred placement: helm chart deploy/helm/openshell: sandboxRuntime image openshell/sandbox [deploy/helm/openshell/values.yaml:49]
+```
+
+`own` is code only this unit links, `links units` is another binary's crate it links in-process, `shared` is linked by two or more units. Units are sorted by max impact.
+
+</details>
 
 <details><summary><b>Example: highstakes get tour --per-component 1 --min-impact 85 (first three sections, neighbour and owner lines trimmed)</b></summary>
 
@@ -286,40 +324,9 @@ Tour: 27 stops across 27 product components, dependencies first
 
 The first sections are the foundations that `crates/openshell-sandbox-backend` (impact 95, section 5) builds on. `deploy`, `scripts`, `.github`, `e2e` and `examples` appear only with `--include-supporting`, after section 27.
 
-A component is a Rust crate, JS/TS package, Python package or Go module (the shallowest directory with its marker file), else the top two segments under `cmd/`, `internal/` and `pkg/`, else the top-level directory. See [the CLI reference](docs/cli-reference.md#highstakes-get-tour).
-
 </details>
 
-`--format walkthrough --out tour.data.json` writes the same tour as data for the show-me rich step-through (see [Generated Pictures and Walkthroughs](#generated-pictures-and-walkthroughs)).
-
-The tour is a starting draft. Add expert guidance through the `annotations` map in `.heatmap/heatmap.json` (`owner`, `notes`); both appear on each stop.
-
-### Generated Pictures and Walkthroughs
-
-Hand-drawn architecture diagrams drift and get topology wrong (a sandbox runtime and its supervisor drawn as one box when they run in separate pods). HighStakes generates the picture and the walkthrough from the heatmap instead, and every box links to its files.
-
-```sh
-highstakes get architecture --format seecode --out arch.json      # SeeCode architecture spec: top units, imports, placements
-node <seecode skill>/scripts/seecode.mjs render arch.json          # arch.html: animated, explorable diagram
-highstakes get architecture --json                                 # Same diagram as plain data
-highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out tour.data.json
-python3 <show-me skill>/scripts/walkthrough_build.py tour.data.json   # tour.html: step-through, one step per stop
-```
-
-The architecture spec holds the top product units by max impact (9 boxes by default, the rest folded into one "other units" box), the library most units import, import arrows labelled with importing-file counts, placement groups, and per box its top 3 files with quadrant and first action as evidence. Supporting units (examples, scripts, tests, helper bins) are left out unless `--include-supporting`.
-
-Imports cannot see runtime links such as a gRPC session between two binaries. Declare those, with evidence, in `.heatmap/architecture.yaml`; they draw dashed and marked "declared", apart from what was inferred:
-
-```yaml
-links:
-  - {from: openshell-supervisor, to: openshell-gateway, label: gRPC control session, both: true,
-     evidence: "docs/how-it-works/sandboxes/overview.mdx:1070"}
-placement:
-  - {unit: openshell-sandbox, runs_in: workload pod,
-     evidence: "crates/openshell-driver-kubernetes/src/shared_supervisor.rs:47"}
-```
-
-On NVIDIA/OpenShell this yields the supervisor in its own pod talking to the gateway (control session) and to the sandbox runtime in the workload pod (boundary protocol), the gateway calling four compute drivers, and all of them importing `openshell-core`. See [the CLI reference](docs/cli-reference.md#highstakes-get-architecture) and [Configuration](docs/configuration.md#architecture-declarations).
+With its runtime links declared in `.heatmap/architecture.yaml`, `get architecture` shows the supervisor in its own pod talking to the gateway (control session) and to the sandbox runtime in the workload pod (boundary protocol), the gateway calling four compute drivers, and all of them importing `openshell-core`.
 
 ### PR Risk
 
@@ -514,7 +521,7 @@ Machine-readable JSON of all commands, flags, exit codes, and models. Built for 
 
 ## Models
 
-One [OpenRouter](https://openrouter.ai) API key, any model. Assessments cached by content hash; re-runs only re-assess changed files.
+One [OpenRouter](https://openrouter.ai) API key, any model. Assessments are cached by file content, model and prompt version: re-runs only re-assess changed files, and switching `--model` or upgrading to a HighStakes release with a new prompt version re-assesses everything.
 
 | Model | Cost / 500 files | Best For |
 |-------|-----------------|----------|
@@ -523,7 +530,7 @@ One [OpenRouter](https://openrouter.ai) API key, any model. Assessments cached b
 | `deepseek/deepseek-v4.1-flash` | ~$0.13 | Open weights, can be self-hosted |
 | `anthropic/claude-haiku-5.5` | ~$0.19 | Zero failed calls on the benchmark |
 
-Chosen on the [calibration benchmark](bench/README.md) (7 repos, 6,240 files, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are estimates from token counts.
+Chosen on the [calibration benchmark](bench/README.md) (7 repos, about 5,500 files assessed per model, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are upper estimates from token counts.
 
 ## Exit Codes
 

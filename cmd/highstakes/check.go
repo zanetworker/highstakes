@@ -15,8 +15,6 @@ import (
 	"github.com/zanetworker/highstakes/internal/calibration"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/incidents"
-	"github.com/zanetworker/highstakes/internal/scorer"
-	"github.com/zanetworker/highstakes/pkg/heatmap"
 )
 
 // --- check ---
@@ -97,10 +95,7 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 			return err
 		}
 
-		opts.Tiers = scorer.DefaultTierThresholds()
-		if cfg, err := heatmap.LoadConfig(filepath.Join(".heatmap", "config.yaml")); err == nil && cfg.Tiers.Critical > 0 {
-			opts.Tiers = cfg.Tiers
-		}
+		opts.Tiers = configuredTiers()
 
 		store, err := incidents.NewStore(filepath.Join(".heatmap", "incidents.json"))
 		if err != nil {

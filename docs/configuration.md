@@ -14,6 +14,8 @@ tiers:
   low: 0          # score >= 0
 ```
 
+These thresholds apply to the **heat score**, which sets the tier of files without an LLM assessment (`--no-llm`, no API key, or files the LLM skips). Files with an LLM assessment get their tier from the impact/likelihood quadrant instead: impactful means impact at or above `max(high, the repo's top-20% impact)`, and likely means the top 20% of the repo by likelihood (see [How It Works](how-it-works.md#the-quadrant)). So `high` is also the floor for "impactful"; `critical` and `medium` only affect unassessed files.
+
 Lower the thresholds to be more aggressive (more files flagged as high risk). Raise them to be more conservative.
 
 ## Excluded Directories
@@ -77,18 +79,18 @@ A malformed glob makes `get tour` exit with code 2.
 
 ```yaml
 links:
-  - from: openshell-supervisor
-    to: openshell-gateway
-    label: gRPC control session          # arrow label (SeeCode shows up to 28 characters)
+  - from: worker
+    to: api
+    label: gRPC job stream               # arrow label (SeeCode shows up to 28 characters)
     both: true                           # two-way arrow
-    evidence: docs/how-it-works/sandboxes/overview.mdx:1070
-  - from: openshell-gateway
-    to: openshell-driver-kubernetes
-    label: creates sandboxes
+    evidence: docs/architecture.md:42
+  - from: api
+    to: scheduler
+    label: enqueues jobs
 placement:
-  - unit: openshell-sandbox
-    runs_in: workload pod                # group label (up to 21 characters fit beside "(declared)")
-    evidence: crates/openshell-driver-kubernetes/src/shared_supervisor.rs:47
+  - unit: worker
+    runs_in: worker pod                  # group label (up to 21 characters fit beside "(declared)")
+    evidence: deploy/helm/app/templates/worker.yaml:12
 ```
 
 | Field | Required | Meaning |
@@ -163,11 +165,11 @@ Available models:
 | `deepseek/deepseek-v4.1-flash` | ~$0.13 | Open weights, can be self-hosted |
 | `anthropic/claude-haiku-5.5` | ~$0.19 | Zero failed calls on the benchmark |
 
-Chosen on the [calibration benchmark](../bench/README.md) (7 repos, 6,240 files, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are estimates from token counts.
+Chosen on the [calibration benchmark](../bench/README.md) (7 repos, about 5,500 files assessed per model, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are upper estimates from token counts.
 
 ## Caching
 
-LLM assessments are cached in `.heatmap/cache/` by file content hash (SHA-256). On re-analysis, only files whose content changed since last run are re-assessed. This makes subsequent runs near-free.
+LLM assessments are cached in `.heatmap/cache/` by a SHA-256 hash of the model ID, the prompt version and the file content. On re-analysis, only files whose content changed since last run are re-assessed, which makes subsequent runs near-free. Switching `--model`, or a HighStakes release that changes the assessment prompt (and bumps its version), invalidates the cache, so those runs re-assess every file.
 
 Force a full re-assessment with:
 
@@ -183,7 +185,7 @@ Skip LLM analysis entirely (no API key needed):
 highstakes analyze --no-llm
 ```
 
-This uses only static signals (complexity, dependency centrality, path heuristics). Produces less accurate results but is free and fast.
+This skips the LLM blast radius only. Scores still use complexity, dependency centrality, path keywords, git history (churn, authors) and recorded incidents; impact is an estimate and tiers come from the heat score thresholds. Less accurate but free and fast.
 
 ## Concurrency
 

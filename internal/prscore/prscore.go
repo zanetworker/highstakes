@@ -152,7 +152,11 @@ func inheritedHeat(path string, hm *types.Heatmap) int {
 }
 
 // isDocFile reports whether a path is documentation, which carries no runtime risk.
+// Dependency manifests such as requirements.txt are not documentation.
 func isDocFile(path string) bool {
+	if isDependencyManifest(filepath.Base(path)) {
+		return false
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".mdx", ".rst", ".txt":
 		return true
@@ -257,8 +261,23 @@ func ChangeRisk(changes []FileChange, hm *types.Heatmap) (int, []string) {
 	return min(100, score), factors
 }
 
+// dependencyManifests are files that change what a build pulls in.
+var dependencyManifests = map[string]bool{
+	"go.mod": true, "package.json": true, "requirements.txt": true, "pyproject.toml": true,
+	"Pipfile": true, "Cargo.toml": true, "Gemfile": true, "pom.xml": true,
+	"build.gradle": true, "build.gradle.kts": true, "settings.gradle": true, "settings.gradle.kts": true,
+	"Cargo.lock": true, "package-lock.json": true, "yarn.lock": true, "pnpm-lock.yaml": true,
+	"poetry.lock": true, "Pipfile.lock": true, "uv.lock": true, "Gemfile.lock": true,
+}
+
+// isDependencyManifest reports dependency manifests and lock files, including
+// requirements variants such as requirements-dev.txt.
+func isDependencyManifest(base string) bool {
+	return dependencyManifests[base] || (strings.HasPrefix(base, "requirements") && strings.HasSuffix(base, ".txt"))
+}
+
 // isInfraFile reports CI, container, deployment, IaC and dependency manifests.
-// Lock files and test fixtures are excluded as noise.
+// go.sum (a checksum list that moves with go.mod) and test fixtures are excluded as noise.
 func isInfraFile(p string) bool {
 	p = filepath.ToSlash(p)
 	if strings.Contains(p, "testdata/") || strings.Contains(p, "fixtures/") {
@@ -268,8 +287,11 @@ func isInfraFile(p string) bool {
 		return true
 	}
 	base := filepath.Base(p)
+	if isDependencyManifest(base) {
+		return true
+	}
 	switch base {
-	case "Dockerfile", "Containerfile", "Makefile", "go.mod", "package.json", "requirements.txt", "Chart.yaml":
+	case "Dockerfile", "Containerfile", "Makefile", "Chart.yaml":
 		return true
 	}
 	if strings.HasPrefix(base, "Dockerfile.") || strings.HasPrefix(base, "Containerfile.") {

@@ -371,6 +371,15 @@ func sortListEntries(files []listEntry, by string) error {
 	return nil
 }
 
+// configuredTiers returns the tier thresholds from .heatmap/config.yaml, or the
+// defaults when the file is missing, unreadable or sets no tiers.
+func configuredTiers() types.TierThresholds {
+	if cfg, err := heatmap.LoadConfig(filepath.Join(".heatmap", "config.yaml")); err == nil && cfg.Tiers.Critical > 0 {
+		return cfg.Tiers
+	}
+	return scorer.DefaultTierThresholds()
+}
+
 // --- pr ---
 
 var prCmd = &cobra.Command{
@@ -424,7 +433,7 @@ var prCheckCmd = &cobra.Command{
 			return nil
 		}
 
-		risk := prscore.CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
+		risk := prscore.CalculatePRRisk(0, changes, hm, configuredTiers())
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
 		attachActions(&risk, hm)
 		gateErr := applyGate(&risk, failOn, shadow)

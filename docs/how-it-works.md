@@ -94,7 +94,7 @@ With the LLM, impact is the blast radius score (`impact_assessed: true`). Withou
 After every file is scored, two thresholds split the grid:
 
 - **Likely**: likelihood in the top 20% of the repo's non-test files. The cutoff is repo-relative (the likelihood of the file at the 20% rank, at least one file, ties included, never 0) because churn levels differ widely between repos. It is stored as `metadata.likely_cutoff`.
-- **Impactful**: impact at or above the HIGH threshold (61 by default, `tiers.high` in the config), stored as `metadata.impact_threshold`.
+- **Impactful**: impact at or above `max(tiers.high, the impact at the top-20% rank of assessed non-test files)`, ties included. The percentile keeps the quadrant meaningful when the LLM scores generously and most files would clear a fixed bar; the `tiers.high` floor (61 by default) keeps small or low-stakes repos from calling modest impact impactful. The effective cutoff is stored as `metadata.impact_threshold` and shown in each explanation headline ("impactful starts at N in this repo").
 
 | Quadrant | `quadrant` | Tier | Review guidance |
 |---|---|---|---|
@@ -164,7 +164,7 @@ Entry points, per language (test files and excluded directories are skipped):
 
 | Language | Entry point | Name |
 |----------|-------------|------|
-| Rust | `[[bin]]` tables in `Cargo.toml`, else `src/main.rs` and `src/bin/*.rs` | the bin name |
+| Rust | `[[bin]]` tables in `Cargo.toml`, else `src/main.rs`, `src/bin/*.rs` and `src/bin/*/main.rs` | the bin name |
 | Go | a directory whose files declare `package main` and `func main()` | the directory (the module for a root `main`) |
 | JS/TS | `package.json` `bin` (string or object), else the file a `start` script runs; `dist/x.js` maps to `src/x.ts` when only the source exists | the bin key or package name |
 | Python | `[project.scripts]` or `[tool.poetry.scripts]` in `pyproject.toml`, and `__main__.py` | the script name or directory |
@@ -174,17 +174,17 @@ Each unit links every non-test file reachable from its entry file through the im
 Placement is inferred, best effort, and tagged with `file:line` evidence:
 
 - a Dockerfile or Containerfile whose `ENTRYPOINT` or `CMD` runs a program named like the unit (shell wrappers such as `sh -c` are skipped);
-- a Helm values file (any YAML under a directory with `Chart.yaml`) or Kubernetes manifest whose `image:` or `repository:` names the unit: the image name equals the unit name or the unit name ends with `-<image name>` (`openshell/sandbox` matches `openshell-sandbox`). Templated values (`{{ ... }}`) and files under `tests/` are skipped.
+- a Helm values file (any YAML under a directory with `Chart.yaml`) or Kubernetes manifest whose `image:` or `repository:` names the unit: the image name equals the unit name or the unit name ends with `-<image name>` (`acme/worker` matches `acme-worker`). Templated values (`{{ ... }}`) and files under `tests/` are skipped.
 
 Units are stored in the heatmap `metadata.units`; every file gets `component` and `units` (the units that link it).
 
-A unit is **supporting** (`supporting: true`) when its entry point sits in a supporting component (the same rule as the tour: `examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ... and `tour.supporting` globs) or it is a helper bin: a Rust bin under `src/bin/` of a crate that also has its own main. `list units`, `get architecture` and the dashboard unit view hide supporting units unless asked.
+A unit is **supporting** (`supporting: true`) when its entry point sits in a supporting component (the same rule as the tour: `examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ... and `tour.supporting` globs) or it is a helper bin: a Rust bin under `src/bin/` whose name or path has a tooling word (`perf`, `bench`, `gen`, `codegen`, `xtask`, `tool`, `dev`, `debug`, `test`, `fixture`, or their plurals, as a whole word between `/`, `-`, `_` or `.`). Other `src/bin/` targets stay product units, since they can be real runtime entry points (an init process inside a VM). `list units`, `get architecture` and the dashboard unit view hide supporting units unless asked.
 
 **Declared links.** What imports cannot show (a gRPC session between two binaries, a driver the gateway calls over a socket, which pod runs what) a human declares in `.heatmap/architecture.yaml`, each claim with `file:line` evidence (see [Configuration](configuration.md#architecture-declarations)). Every output keeps declared links and placements apart from inferred ones: dashed and marked "declared".
 
 **Generated pictures.** `get architecture --format seecode` turns units, imports and declarations into a SeeCode architecture spec: the top product units by max impact (ties: more fragile-critical files), the shared library the most units import directly, and one "other units" box for the rest, within SeeCode's budget (9 boxes, 12 arrows by default). Arrows are declared links first, then imports by importing-file count. Rows follow dependency levels (callers above what they use); placement groups are the declared placement, else the first inferred hint. Every box lists its top 3 files by impact as evidence, with the quadrant and the first action. `get tour --format walkthrough` turns the tour into data for the show-me step-through: one box per component, one step per stop. Neither is hand-drawn, so a regenerated picture follows the code.
 
-**Limits.** Units come from entry points and imports, not from runtime truth. A unit lists what a binary can execute, not what a deployment actually starts: feature flags, `cfg` gates, dynamic loading, plugins, RPC between processes and configuration-selected drivers are invisible, and an import the resolver misses drops the code it leads to. Placement says where a binary is packaged, not where or how many copies run; a Helm chart that picks images at install time, or a Dockerfile that runs a script, yields no hint. Examples and helper binaries are units too when they declare an entry point; they are flagged supporting, which can also hide a helper that does run in production (an init binary in a VM image): check with `--include-supporting`. Treat units as a map to check against the deployment, not as the deployment.
+**Limits.** Units come from entry points and imports, not from runtime truth. A unit lists what a binary can execute, not what a deployment actually starts: feature flags, `cfg` gates, dynamic loading, plugins, RPC between processes and configuration-selected drivers are invisible, and an import the resolver misses drops the code it leads to. Placement says where a binary is packaged, not where or how many copies run; a Helm chart that picks images at install time, or a Dockerfile that runs a script, yields no hint. Examples and helper binaries are units too when they declare an entry point; they are flagged supporting by name, which can still hide a production helper whose name sounds like tooling, or show a tool whose name does not: check with `--include-supporting`. Treat units as a map to check against the deployment, not as the deployment.
 
 ## Static Analysis by Language
 

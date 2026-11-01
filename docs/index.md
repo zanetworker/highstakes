@@ -37,7 +37,7 @@ highstakes dashboard
 | MEDIUM | Likely, low impact | 1 reviewer |
 | LOW | Neither | Auto-merge safe |
 
-Likely means the top 20% of the repo by likelihood; impactful means impact of 61 or more. Without an LLM, tiers come from the heat score (86, 61 and 31 thresholds).
+Likely means the top 20% of the repo by likelihood; impactful means impact in the top 20% of the repo's assessed files, and never below 61. Without an LLM, tiers come from the heat score (86, 61 and 31 thresholds).
 
 ## Three ways to see it
 

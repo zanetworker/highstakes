@@ -13,7 +13,7 @@ Listed in [repos.yaml](repos.yaml), each pinned to a commit SHA and given a tier
 | Repo | Tier | Language | Why |
 |---|---|---|---|
 | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | primary | Rust | Real use case. Young repo (about 3 months of history), so it uses a 45-day holdout. |
-| [openclaw/openclaw-enterprise](https://github.com/openclaw/openclaw-enterprise) | primary | TypeScript | Real use case. About 2 months of history, so it uses a 30-day holdout. Most of its code is `.mjs`, which the analyzer does not scan yet. |
+| [openclaw/openclaw-enterprise](https://github.com/openclaw/openclaw-enterprise) | primary | TypeScript | Real use case. About 2 months of history, so it uses a 30-day holdout. |
 | [caddyserver/caddy](https://github.com/caddyserver/caddy) | general | Go | About 420 files, history since 2015, steady "fix" commits per module, Apache-2.0. |
 | [tokio-rs/tokio](https://github.com/tokio-rs/tokio) | general | Rust | About 840 files, history since 2016, conventional `fix:` style messages, MIT. |
 | [honojs/hono](https://github.com/honojs/hono) | general | TypeScript | About 490 files, history since 2021, conventional commits (`fix(...)`), MIT. |

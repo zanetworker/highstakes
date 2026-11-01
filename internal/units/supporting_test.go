@@ -32,20 +32,38 @@ func TestMarkSupporting(t *testing.T) {
 			want: map[string]bool{"demo": true, "tool": true},
 		},
 		{
-			name: "helper bin next to the crate main is supporting",
+			name: "tooling bin next to the crate main is supporting, runtime bin stays product",
 			units: []types.Unit{
 				u("sbx", KindRustBin, "crates/sbx/src/main.rs", "crates/sbx"),
-				u("perf", KindRustBin, "crates/sbx/src/bin/perf.rs", "crates/sbx"),
+				u("seccomp-perf", KindRustBin, "crates/sbx/src/bin/seccomp-perf.rs", "crates/sbx"),
+				u("openshell-vm-init", KindRustBin, "crates/sbx/src/bin/openshell-vm-init.rs", "crates/sbx"),
 			},
-			want: map[string]bool{"sbx": false, "perf": true},
+			want: map[string]bool{"sbx": false, "seccomp-perf": true, "openshell-vm-init": false},
+		},
+		{
+			name: "tooling words in the bin path or name mark it supporting",
+			units: []types.Unit{
+				u("bench_alloc", KindRustBin, "crates/x/src/bin/bench_alloc.rs", "crates/x"),
+				u("codegen", KindRustBin, "crates/x/src/bin/codegen/main.rs", "crates/x"),
+				u("xtask", KindRustBin, "src/bin/xtask.rs", "."),
+				u("run", KindRustBin, "crates/dev-tools/src/bin/run.rs", "crates/dev-tools"),
+				u("gateway", KindRustBin, "crates/x/src/bin/gateway.rs", "crates/x"),
+				u("generator", KindRustBin, "crates/x/src/bin/generator.rs", "crates/x"),
+			},
+			want: map[string]bool{"bench_alloc": true, "codegen": true, "xtask": true, "run": true, "gateway": false, "generator": false},
 		},
 		{
 			name: "src/bin bins of a crate without a main stay product",
 			units: []types.Unit{
-				u("a", KindRustBin, "crates/tools/src/bin/a.rs", "crates/tools"),
-				u("b", KindRustBin, "crates/tools/src/bin/b.rs", "crates/tools"),
+				u("a", KindRustBin, "crates/runner/src/bin/a.rs", "crates/runner"),
+				u("b", KindRustBin, "crates/runner/src/bin/b.rs", "crates/runner"),
 			},
 			want: map[string]bool{"a": false, "b": false},
+		},
+		{
+			name:  "tooling words outside src/bin do not hide a unit",
+			units: []types.Unit{u("perf", KindGoMain, "cmd/perf/main.go", "cmd")},
+			want:  map[string]bool{"perf": false},
 		},
 		{
 			name: "root crate helper bin (boundary: no directory prefix)",

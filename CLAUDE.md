@@ -35,7 +35,7 @@ docs/                        User-facing documentation
 
 - Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score = max of the two for compatibility
 - LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
-- Assessments cached in .heatmap/cache/ by SHA-256 of file content
+- Assessments cached in .heatmap/cache/ by SHA-256 of model ID, prompt version (llm.PromptVersion) and file content
 - Analyzer excludes configurable in .heatmap/config.yaml (not hardcoded)
 - All CLI commands support --json for machine-readable output
 - Dashboard is self-contained HTML embedded as a Go string constant

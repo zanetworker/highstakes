@@ -72,7 +72,7 @@ func Explain(f *types.FileHeat, rs RepoStats, owners []ownership.Owner) types.Ex
 		}
 	}
 	return types.Explanation{
-		Headline:          headline(f, rs.LikelyCutoff),
+		Headline:          headline(f, rs.LikelyCutoff, rs.ImpactThreshold),
 		ImpactHigh:        f.Impact >= rs.ImpactThreshold,
 		Likely:            !isTest && f.Likelihood >= rs.LikelyCutoff,
 		ImpactReasons:     impactReasons(f),
@@ -88,13 +88,20 @@ var quadrantLabels = map[types.Quadrant]string{
 	types.QuadrantLow:             "LOW STAKES",
 }
 
-func headline(f *types.FileHeat, cutoff int) string {
+// headline names the quadrant and both scores, then the repo's cutoffs so
+// the numbers read relative to this repo. A zero cutoff is left out.
+func headline(f *types.FileHeat, cutoff, impactCutoff int) string {
 	label, impact := quadrantLabels[f.Quadrant], fmt.Sprintf("impact %d", f.Impact)
 	if !f.ImpactAssessed || label == "" {
 		label, impact = "IMPACT NOT ASSESSED", fmt.Sprintf("impact ~%d estimate", f.Impact)
 	}
 	tail := ""
-	if cutoff > 0 {
+	switch {
+	case impactCutoff > 0 && cutoff > 0:
+		tail = fmt.Sprintf("; impactful starts at %d, likely at %d in this repo", impactCutoff, cutoff)
+	case impactCutoff > 0:
+		tail = fmt.Sprintf("; impactful starts at %d in this repo", impactCutoff)
+	case cutoff > 0:
 		tail = fmt.Sprintf("; likely starts at %d in this repo", cutoff)
 	}
 	return fmt.Sprintf("%s (%s, likelihood %d%s)", label, impact, f.Likelihood, tail)

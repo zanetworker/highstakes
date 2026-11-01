@@ -53,7 +53,7 @@ Three ways to see the heatmap:
 highstakes dashboard
 
 # Terminal TUI
-heatmap
+highstakes
 
 # CLI queries
 highstakes list --tier high

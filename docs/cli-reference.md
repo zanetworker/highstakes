@@ -2,12 +2,12 @@
 
 All commands support `--json` for machine-readable output.
 
-## heatmap
+## highstakes
 
-Launch the interactive TUI explorer.
+Launch the interactive TUI explorer (run with no subcommand).
 
 ```sh
-heatmap
+highstakes
 ```
 
 Keyboard: `↑↓` navigate, `Enter` expand, `f` filter by tier, `s` sort, `/` search, `q` quit.
@@ -38,7 +38,9 @@ highstakes analyze [flags]
 | `--concurrency` | `10` | Number of parallel LLM requests |
 | `--json` | `false` | Output summary as JSON |
 
-## heatmap get
+Analysis continues without git history (no `git` binary, a repository without commits): `analyze` prints a warning on stderr, change frequency is 0 for every file, and the heatmap records it in `metadata.git_history` (`"complete"`, or `"unavailable: <reason>"`).
+
+## highstakes get
 
 Get why a file is impactful, why it is likely to break, and what to do about it.
 
@@ -64,7 +66,7 @@ highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--i
 |------|---------|-------------|
 | `--per-component` | `0` | Keep the N most important files of every component, one section per component (0 = off). Takes precedence over `--limit` |
 | `--min-impact` | `0` | Skip files whose impact is below this (0-100); components left without files drop out. Applies before `--per-component` picks, so every stop shown reaches it |
-| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/openshell-core,internal/tour`). A supporting component named here is shown without `--include-supporting` |
+| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/core,internal/api`). A supporting component named here is shown without `--include-supporting` |
 | `--include-supporting` | `false` | Add supporting components (see below) in a final part titled "Supporting: CI, deployment, scripts and examples" |
 | `--limit` | `0` | Keep the N most impactful files across the repo (0 = all). Selection happens before ordering. Ignored with `--per-component` |
 | `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
@@ -184,19 +186,21 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 `--format walkthrough` writes the data file of the show-me rich step-through (the `/show-me walkthrough` skill's `walkthrough_build.py` turns it into one self-contained HTML page):
 
 ```sh
-highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out openshell-walkthrough.data.json
-python3 <show-me skill>/scripts/walkthrough_build.py openshell-walkthrough.data.json   # writes openshell-walkthrough.html
+highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out tour-walkthrough.data.json
+python3 <show-me skill>/scripts/walkthrough_build.py tour-walkthrough.data.json   # writes tour-walkthrough.html
 ```
 
 | Walkthrough element | From the tour |
 |---------------------|---------------|
 | Box (node) | One per component, in tour order, left to right and top to bottom; name without the `<repo>-` prefix; sub line = max impact of its stops and its role (owning unit, or "N units" for a shared library, drawn darker) |
-| Flow | One per part: `product`, and `supporting` with `--include-supporting` |
+| Flow | One per part: `product`, and `supporting` with `--include-supporting`; plus "How components connect" (`wiring`) |
+| Link (wiring step) | One per import link between drawn boxes, from the importing component to its dependency, payload = number of importing non-test files; the strongest 30 links |
 | Step (hop) | One per stop, travelling from the previous stop's box (a self step when it stays in one component) |
 | Payload chip | The stop's `file:line` anchor |
 | Rail gist | `do:` the first action, else `read <file>` |
 | Caption | The anchor, both axes and quadrant, why it matters (critical reason or summary) and the first likelihood reason |
 | Color | The stop's quadrant (fragile-critical, protect, watch, low; grey for an impact estimate) |
+| Key | HighStakes' own legend: the quadrant colors in use, reading order, imports, shared library. The template's network channel labels (browser, server to server, refused) are hidden through `legendExtra` |
 
 All heatmap text is HTML-escaped. The map holds 28 boxes; further components are left out and counted in the intro (narrow with `--components`, `--focus` or `--min-impact`). **Exit code 4** when the tour has no stops.
 
@@ -267,7 +271,7 @@ Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axe
 | `component` | The crate, package or module the file belongs to |
 | `units` | Runtime units that link the file (see `list units`); omitted when none does |
 
-The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (impact counted as impactful: `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
+The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (lowest impact counted as impactful: the top 20% of assessed non-test files, never below `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
 
 ## highstakes list units
 
@@ -279,7 +283,7 @@ highstakes list units [--include-supporting] [--json]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--include-supporting` | `false` | Show supporting units too: entry points in a supporting component (`examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ..., plus `tour.supporting` globs) and helper bins (Rust bins under `src/bin/` of a crate with its own main). Hidden ones are counted on the last line |
+| `--include-supporting` | `false` | Show supporting units too: entry points in a supporting component (`examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ..., plus `tour.supporting` globs) and helper bins (Rust `src/bin/` targets named like tooling: `perf`, `bench`, `gen`, `codegen`, `xtask`, `tool`, `dev`, `debug`, `test`, `fixture`). Hidden ones are counted on the last line |
 | `--json` | `false` | Output as JSON |
 
 Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when estimated), fragile-critical file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), each declared link (`declared link: -> | <- | <-> <unit>: <label> [evidence]`) and declared placement from `.heatmap/architecture.yaml`, and each inferred placement with its evidence (`none found` when there is none).
@@ -305,9 +309,9 @@ highstakes pr check [flags]
 | `--author` | HEAD commit author | Email or handle excluded from suggested reviewers |
 | `--reviewers` | `3` | Max suggested reviewers; `0` skips the git history lookup |
 
-Uses `git diff --numstat` to identify changed files, then looks up their heat scores. The PR inherits the tier of its highest-scoring file.
+Uses `git diff --numstat` to identify changed files, then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
 
-A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score of scored files in its directory, or the nearest parent directory that has any, is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW.
+A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score of scored files in its directory, or the nearest parent directory that has any, is tiered with the repo's `tiers` from `.heatmap/config.yaml`, is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW, except dependency manifests and lock files (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...), which inherit heat and count as config/infra changes in change risk.
 
 Each HIGH or CRITICAL changed file is followed by its top three actions (from its `explanation`); in `--json` they are under `files_changed[].actions`.
 
@@ -320,7 +324,7 @@ The tier (the most severe tier among touched files) and importance answer "how i
 | JSON field | Meaning |
 |------------|---------|
 | `importance` | 0-100, max impact of touched files; files without an LLM assessment count with their heat |
-| `change_risk` | 0-100, sum of: lines changed (up to 30), new files (5 each, up to 15), config or infra files such as CI workflows, Dockerfiles, Helm, Terraform, `go.mod` (20), lines deleted from high or critical files (up to 20), low test ratio (up to 15) |
+| `change_risk` | 0-100, sum of: lines changed (up to 30), new files (5 each, up to 15), config or infra files such as CI workflows, Dockerfiles, Helm, Terraform, dependency manifests and lock files (20), lines deleted from high or critical files (up to 20), low test ratio (up to 15) |
 | `change_risk_level` | `low` (<30), `medium` (30-59), `high` (60+) |
 | `change_risk_factors` | Components worth 5 or more points, in plain words |
 

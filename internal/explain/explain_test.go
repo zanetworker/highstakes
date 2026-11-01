@@ -74,18 +74,23 @@ func TestExplain_Headline(t *testing.T) {
 		edit func(*types.FileHeat)
 		want string
 	}{
-		{"fragile-critical", func(*types.FileHeat) {}, "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)"},
+		{"fragile-critical", func(*types.FileHeat) {}, "FRAGILE AND CRITICAL (impact 92, likelihood 50; impactful starts at 61, likely at 33 in this repo)"},
 		{"protect", func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect }, "PROTECT (impact 92"},
 		{"watch", func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch }, "WATCH (impact 92"},
 		{"low", func(f *types.FileHeat) { f.Quadrant = types.QuadrantLow }, "LOW STAKES (impact 92"},
 		{"not assessed", func(f *types.FileHeat) { f.ImpactAssessed = false; f.Quadrant = ""; f.Impact = 20 },
-			"IMPACT NOT ASSESSED (impact ~20 estimate, likelihood 50; likely starts at 33 in this repo)"},
+			"IMPACT NOT ASSESSED (impact ~20 estimate, likelihood 50; impactful starts at 61, likely at 33 in this repo)"},
+		{"only a likely cutoff", func(f *types.FileHeat) {}, "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := hot()
 			tt.edit(f)
-			got := Explain(f, repo(f), nil).Headline
+			rs := repo(f)
+			if tt.name == "only a likely cutoff" {
+				rs.ImpactThreshold = 0 // heatmaps saved before the impact cutoff existed
+			}
+			got := Explain(f, rs, nil).Headline
 			if !strings.HasPrefix(got, tt.want) {
 				t.Errorf("Headline = %q, want prefix %q", got, tt.want)
 			}

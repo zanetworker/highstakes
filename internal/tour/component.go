@@ -2,7 +2,10 @@ package tour
 
 import (
 	"path"
+	"sort"
 	"strings"
+
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // markerNames are files that make their directory a component: a Rust
@@ -86,4 +89,52 @@ func IsSupporting(component string, globs []string) bool {
 		}
 	}
 	return false
+}
+
+// Link is an import dependency between two components: files in From
+// import files in To. Files counts the distinct non-test importing files.
+type Link struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Files int    `json:"files"`
+}
+
+// ComponentLinks folds the file import graph into component links, sorted
+// by Files (strongest first), then From, then To. Test files and imports
+// within one component are ignored.
+func ComponentLinks(hm *types.Heatmap, markers map[string]bool) []Link {
+	count := map[[2]string]int{}
+	for p, f := range hm.Files {
+		if IsTestFile(p) {
+			continue
+		}
+		from := Component(p, markers)
+		seen := map[string]bool{}
+		for _, d := range f.Dependencies.Imports {
+			to := Component(d.Path, markers)
+			if to != from && !seen[to] {
+				seen[to] = true
+				count[[2]string{from, to}]++
+			}
+		}
+	}
+	links := make([]Link, 0, len(count))
+	for k, n := range count {
+		links = append(links, Link{From: k[0], To: k[1], Files: n})
+	}
+	sortLinks(links)
+	return links
+}
+
+func sortLinks(links []Link) {
+	sort.Slice(links, func(i, j int) bool {
+		a, b := links[i], links[j]
+		if a.Files != b.Files {
+			return a.Files > b.Files
+		}
+		if a.From != b.From {
+			return a.From < b.From
+		}
+		return a.To < b.To
+	})
 }

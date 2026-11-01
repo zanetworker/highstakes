@@ -210,14 +210,16 @@ func rustBins(dir string, data []byte, exists map[string]bool, read func(string)
 		if name == "" {
 			name = pkg
 		}
-		p := b.path
-		if p == "" {
-			p = "src/bin/" + name + ".rs"
+		entry := join(dir, b.path)
+		if b.path == "" {
+			entry = join(dir, "src/bin/"+name+".rs")
+			if !exists[entry] {
+				entry = join(dir, "src/bin/"+name+"/main.rs")
+			}
 			if name == pkg {
-				p = "src/main.rs"
+				entry = join(dir, "src/main.rs")
 			}
 		}
-		entry := join(dir, p)
 		explicit[entry] = true
 		if exists[entry] {
 			out = append(out, Entry{Name: name, Kind: KindRustBin, Entry: entry, Evidence: fmt.Sprintf("%s:%d", join(dir, "Cargo.toml"), b.header)})
@@ -226,8 +228,15 @@ func rustBins(dir string, data []byte, exists map[string]bool, read func(string)
 	auto := []struct{ name, entry string }{{pkg, join(dir, "src/main.rs")}}
 	prefix := join(dir, "src/bin") + "/"
 	for f := range exists {
-		if strings.HasPrefix(f, prefix) && path.Ext(f) == ".rs" && !strings.Contains(f[len(prefix):], "/") {
-			auto = append(auto, struct{ name, entry string }{strings.TrimSuffix(path.Base(f), ".rs"), f})
+		if !strings.HasPrefix(f, prefix) || path.Ext(f) != ".rs" {
+			continue
+		}
+		// Cargo auto-discovers src/bin/<name>.rs and src/bin/<name>/main.rs.
+		rest := f[len(prefix):]
+		if !strings.Contains(rest, "/") {
+			auto = append(auto, struct{ name, entry string }{strings.TrimSuffix(rest, ".rs"), f})
+		} else if name, ok := strings.CutSuffix(rest, "/main.rs"); ok && !strings.Contains(name, "/") {
+			auto = append(auto, struct{ name, entry string }{name, f})
 		}
 	}
 	for _, a := range auto {

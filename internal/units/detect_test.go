@@ -40,6 +40,20 @@ func TestDetect(t *testing.T) {
 			want: []Entry{{Name: "extra", Kind: KindRustBin, Entry: "src/bin/extra.rs", Evidence: "src/bin/extra.rs:1"}},
 		},
 		{
+			name: "rust src/bin/<name>/main.rs directories are bins",
+			fs: fstest.MapFS{
+				"Cargo.toml":                  file("[package]\nname = \"tool\"\n\n[[bin]]\nname = \"named\"\n"),
+				"src/bin/vm-init/main.rs":     file("mod util;\n\nfn main() {}\n"),
+				"src/bin/vm-init/util.rs":     file("pub fn f() {}\n"),
+				"src/bin/named/main.rs":       file("fn main() {}\n"),
+				"src/bin/deep/nested/main.rs": file("fn main() {}\n"),
+			},
+			want: []Entry{
+				{Name: "named", Kind: KindRustBin, Entry: "src/bin/named/main.rs", Evidence: "Cargo.toml:4"},
+				{Name: "vm-init", Kind: KindRustBin, Entry: "src/bin/vm-init/main.rs", Evidence: "src/bin/vm-init/main.rs:3"},
+			},
+		},
+		{
 			name: "go main packages, tests and libraries ignored",
 			fs: fstest.MapFS{
 				"go.mod":                file("module example.com/m\n"),

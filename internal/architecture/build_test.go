@@ -14,11 +14,11 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-// fixtureHeatmap is a small OpenShell-like repo: a gateway, a supervisor and
+// fixtureHeatmap is a small multi-pod Rust repo: a gateway, a supervisor and
 // a sandbox runtime, two compute drivers, a CLI, a helper bin and a shared
 // core library everything links.
 func fixtureHeatmap() *types.Heatmap {
-	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}, Metadata: types.Metadata{RepoPath: "/src/openshell", CommitSHA: "abcdef1234567"}}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}, Metadata: types.Metadata{RepoPath: "/src/acme", CommitSHA: "abcdef1234567"}}
 	add := func(p, comp string, impact, likelihood int, q types.Quadrant, us []string, imports ...string) {
 		hm.Files[p] = &types.FileHeat{Path: p, Component: comp, Units: us, Impact: impact, Likelihood: likelihood,
 			ImpactAssessed: true, Quadrant: q,
@@ -285,7 +285,7 @@ func TestSeeCode_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden := filepath.Join("testdata", "openshell-like.seecode.json")
+	golden := filepath.Join("testdata", "multi-unit.seecode.json")
 	if *update {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)

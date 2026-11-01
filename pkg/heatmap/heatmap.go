@@ -320,11 +320,10 @@ func scoreFile(heat *types.FileHeat, isTest bool, tiers types.TierThresholds) {
 	heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
 }
 
-// applyAxes derives quadrant tiers from the repo-relative likelihood cutoff
-// and records the cutoff and impact threshold in the metadata.
+// applyAxes derives quadrant tiers from the repo-relative likelihood and
+// impact cutoffs and records both effective cutoffs in the metadata.
 func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
-	hm.Metadata.LikelyCutoff = scorer.ApplyQuadrants(hm.Files, tiers, tour.IsTestFile)
-	hm.Metadata.ImpactThreshold = tiers.High
+	hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold = scorer.ApplyQuadrants(hm.Files, tiers, tour.IsTestFile)
 }
 
 // applyExplanations attaches reasons and actions to every file. It runs

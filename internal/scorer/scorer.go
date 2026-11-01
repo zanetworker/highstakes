@@ -114,28 +114,47 @@ func QuadrantOf(likely, impactful bool) (types.Quadrant, types.Tier) {
 	}
 }
 
+// ImpactCutoff returns the lowest impact counted as impactful: the impact at
+// the repo's top-20% rank (ties inclusive), but never below floor (the High
+// tier threshold). The percentile keeps the quadrant meaningful when an LLM
+// scores generously and most files clear a fixed bar; the floor keeps small
+// or low-stakes repos from calling modest impact "impactful". Empty input
+// returns floor.
+func ImpactCutoff(impacts []int, floor int) int {
+	if len(impacts) == 0 {
+		return floor
+	}
+	return max(LikelihoodCutoff(impacts), floor)
+}
+
 // ApplyQuadrants sets quadrant, tier and review requirements for every file
 // whose impact was assessed. A file is likely when its likelihood is at or
 // above the cutoff computed over non-test files (test files are never
-// likely) and impactful when impact >= the High threshold. Unassessed files
-// keep their heat tier. It returns the likelihood cutoff.
-func ApplyQuadrants(files map[string]*types.FileHeat, thresholds types.TierThresholds, isTest func(string) bool) int {
-	var pop []int
+// likely) and impactful when impact is at or above ImpactCutoff over assessed
+// non-test files. Unassessed files keep their heat tier. It returns the
+// likelihood cutoff and the impact cutoff.
+func ApplyQuadrants(files map[string]*types.FileHeat, thresholds types.TierThresholds, isTest func(string) bool) (int, int) {
+	var pop, impacts []int
 	for p, f := range files {
-		if !isTest(p) {
-			pop = append(pop, f.Likelihood)
+		if isTest(p) {
+			continue
+		}
+		pop = append(pop, f.Likelihood)
+		if f.ImpactAssessed {
+			impacts = append(impacts, f.Impact)
 		}
 	}
 	cutoff := LikelihoodCutoff(pop)
+	impactCutoff := ImpactCutoff(impacts, thresholds.High)
 	for p, f := range files {
 		if !f.ImpactAssessed {
 			continue
 		}
 		likely := !isTest(p) && f.Likelihood >= cutoff
-		f.Quadrant, f.Tier = QuadrantOf(likely, f.Impact >= thresholds.High)
+		f.Quadrant, f.Tier = QuadrantOf(likely, f.Impact >= impactCutoff)
 		f.ReviewRequirements = CalculateReviewRequirements(f.Tier)
 	}
-	return cutoff
+	return cutoff, impactCutoff
 }
 
 // CapTestFile keeps test files below the MEDIUM tier: they import everything

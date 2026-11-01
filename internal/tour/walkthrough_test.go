@@ -26,13 +26,13 @@ func wtStop(order int, p string, q types.Quadrant, why, likelyWhy string, action
 }
 
 func wtTour() *Tour {
-	return &Tour{Repo: "/src/openshell", Commit: "abcdef1234", TotalStops: 4, ProductComponents: 3, Sections: []Section{
-		{Order: 1, Component: "crates/openshell-core", Kind: KindProduct, Stops: []Stop{
-			wtStop(1, "crates/openshell-core/src/policy.rs", types.QuadrantFragileCritical, "Every unit loads policy <here>", "Changed 40 times", "Add tests", "Pair review"),
+	return &Tour{Repo: "/src/acme", Commit: "abcdef1234", TotalStops: 4, ProductComponents: 3, Sections: []Section{
+		{Order: 1, Component: "crates/acme-core", Kind: KindProduct, Stops: []Stop{
+			wtStop(1, "crates/acme-core/src/policy.rs", types.QuadrantFragileCritical, "Every unit loads policy <here>", "Changed 40 times", "Add tests", "Pair review"),
 		}},
-		{Order: 2, Component: "crates/openshell-gateway", Kind: KindProduct, Stops: []Stop{
-			wtStop(2, "crates/openshell-gateway/src/grpc.rs", types.QuadrantProtect, "Serves every RPC", ""),
-			wtStop(3, "crates/openshell-gateway/src/auth.rs", "", "", "Complex"),
+		{Order: 2, Component: "crates/acme-gateway", Kind: KindProduct, Stops: []Stop{
+			wtStop(2, "crates/acme-gateway/src/grpc.rs", types.QuadrantProtect, "Serves every RPC", ""),
+			wtStop(3, "crates/acme-gateway/src/auth.rs", "", "", "Complex"),
 		}},
 		{Order: 3, Component: "examples/demo", Kind: KindSupporting, Stops: []Stop{
 			wtStop(4, "examples/demo/src/main.rs", types.QuadrantLow, "Demo only", "Rarely changed", "Leave it"),
@@ -41,8 +41,13 @@ func wtTour() *Tour {
 }
 
 func TestWalkthrough(t *testing.T) {
-	roles := map[string]string{"crates/openshell-gateway": "openshell-gateway", "crates/openshell-core": "shared by 7 units"}
-	p, err := Walkthrough(wtTour(), roles)
+	roles := map[string]string{"crates/acme-gateway": "acme-gateway", "crates/acme-core": "shared by 7 units"}
+	links := []Link{
+		{From: "crates/acme-gateway", To: "crates/acme-core", Files: 12},
+		{From: "examples/demo", To: "crates/acme-gateway", Files: 1},
+		{From: "crates/acme-gateway", To: "crates/not-drawn", Files: 30}, // no node: left out
+	}
+	p, err := Walkthrough(wtTour(), roles, links)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,11 +61,11 @@ func TestWalkthrough(t *testing.T) {
 				t.Errorf("node %s at (%v, %v) is outside the 1280x680 map with padding", id, n.X, n.Y)
 			}
 		}
-		gw := p.Nodes[p.NodeOf["crates/openshell-gateway"]]
+		gw := p.Nodes[p.NodeOf["crates/acme-gateway"]]
 		if gw.Name != "gateway" || gw.Sub != "impact 90 · gateway" {
 			t.Errorf("gateway node = %+v, want the repo-name prefix stripped from the name and the owning unit", gw)
 		}
-		if core := p.Nodes[p.NodeOf["crates/openshell-core"]]; !core.Tp {
+		if core := p.Nodes[p.NodeOf["crates/acme-core"]]; !core.Tp {
 			t.Errorf("core = %+v, want tp (shared library)", core)
 		}
 	})
@@ -70,7 +75,7 @@ func TestWalkthrough(t *testing.T) {
 		if len(prod.Hops) != 3 || len(sup.Hops) != 1 || p.Start != "product" {
 			t.Fatalf("flows = %+v, want 3 product hops and 1 supporting", p.Flows)
 		}
-		core, gw := p.NodeOf["crates/openshell-core"], p.NodeOf["crates/openshell-gateway"]
+		core, gw := p.NodeOf["crates/acme-core"], p.NodeOf["crates/acme-gateway"]
 		h := prod.Hops
 		if h[0].F != core || h[0].T != core || h[0].Ch != "s" {
 			t.Errorf("hop 1 = %+v, want a self hop on core", h[0])
@@ -96,6 +101,50 @@ func TestWalkthrough(t *testing.T) {
 		}
 	})
 
+	t.Run("import links become a flow between drawn components", func(t *testing.T) {
+		f, ok := p.Flows[linksFlowID]
+		if !ok {
+			t.Fatalf("flows = %v, want a links flow", p.Flows)
+		}
+		if f.Label != "How components connect (2 links)" || len(f.Hops) != 2 {
+			t.Fatalf("links flow = %+v, want 2 hops (the link to an undrawn component dropped)", f)
+		}
+		gw, core := p.NodeOf["crates/acme-gateway"], p.NodeOf["crates/acme-core"]
+		h := f.Hops[0]
+		if h.F != gw || h.T != core || h.Ch != "f" || h.Pay != "12 files" || h.Plane != "imports" {
+			t.Errorf("first link hop = %+v, want gateway -> core (importer to dependency), thin wire, 12 files", h)
+		}
+		if !strings.Contains(h.Short, "gateway imports core") {
+			t.Errorf("short = %q, want it to name the direction", h.Short)
+		}
+		if f.Hops[1].Pay != "1 file" {
+			t.Errorf("second hop payload = %q, want singular", f.Hops[1].Pay)
+		}
+		if p.Start != "product" {
+			t.Errorf("start = %q, want the product tour first", p.Start)
+		}
+		// The build renders flow buttons in JSON key order, which encoding/json sorts.
+		if linksFlowID <= KindProduct || linksFlowID <= KindSupporting {
+			t.Errorf("links flow id %q sorts before the tour flows; its button would come first", linksFlowID)
+		}
+	})
+
+	t.Run("legend is HighStakes' own, not the template's channel key", func(t *testing.T) {
+		for _, want := range []string{"shared library", "imports", "reading order", `.legend .lcol > span:not(.hs){display:none}`, `.caption .chan{display:none}`} {
+			if !strings.Contains(p.LegendExtra, want) {
+				t.Errorf("legendExtra = %q, missing %q", p.LegendExtra, want)
+			}
+		}
+		for _, k := range p.PlaneKey {
+			if k[0] == "imports" {
+				t.Errorf("planeKey %v: imports is a wire, keyed in legendExtra, not a quadrant dot", k)
+			}
+		}
+		if p.Colors["imports"] == "" {
+			t.Error("imports plane has no color")
+		}
+	})
+
 	t.Run("every plane used has a color and a key entry", func(t *testing.T) {
 		keys := map[string]bool{}
 		for _, k := range p.PlaneKey {
@@ -103,7 +152,7 @@ func TestWalkthrough(t *testing.T) {
 		}
 		for _, f := range p.Flows {
 			for _, h := range f.Hops {
-				if p.Colors[h.Plane] == "" || !keys[h.Plane] {
+				if p.Colors[h.Plane] == "" || (!keys[h.Plane] && h.Plane != "imports") {
 					t.Errorf("plane %q has no color or key", h.Plane)
 				}
 			}
@@ -131,7 +180,7 @@ func TestWalkthrough(t *testing.T) {
 }
 
 func TestWalkthrough_Errors(t *testing.T) {
-	if _, err := Walkthrough(&Tour{}, nil); !errors.Is(err, ErrNoFiles) {
+	if _, err := Walkthrough(&Tour{}, nil, nil); !errors.Is(err, ErrNoFiles) {
 		t.Errorf("empty tour: err = %v, want ErrNoFiles", err)
 	}
 }
@@ -142,7 +191,7 @@ func TestWalkthrough_Capacity(t *testing.T) {
 		c := fmt.Sprintf("crates/c%02d", i)
 		tr.Sections = append(tr.Sections, Section{Component: c, Kind: KindProduct, Stops: []Stop{wtStop(i+1, c+"/lib.rs", types.QuadrantLow, "r", "l")}})
 	}
-	p, err := Walkthrough(tr, nil)
+	p, err := Walkthrough(tr, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,14 +245,75 @@ func TestGridCells(t *testing.T) {
 
 func TestRoleText(t *testing.T) {
 	tests := []struct{ role, want string }{
-		{"openshell-gateway", "gateway"},
+		{"acme-gateway", "gateway"},
 		{"shared by 16 units", "16 units"},
-		{"openshell", "openshell"}, // the repo-named unit keeps its name
-		{"", ""},                   // no unit links the component
+		{"acme", "acme"}, // the repo-named unit keeps its name
+		{"", ""},         // no unit links the component
 	}
 	for _, tt := range tests {
-		if got := roleText(tt.role, "openshell"); got != tt.want {
+		if got := roleText(tt.role, "acme"); got != tt.want {
 			t.Errorf("roleText(%q) = %q, want %q", tt.role, got, tt.want)
 		}
+	}
+}
+
+func TestComponentLinks(t *testing.T) {
+	imp := func(ps ...string) types.Dependencies {
+		var d types.Dependencies
+		for _, p := range ps {
+			d.Imports = append(d.Imports, types.Dependency{Path: p})
+		}
+		return d
+	}
+	markers := map[string]bool{"crates/api/Cargo.toml": true, "crates/core/Cargo.toml": true, "crates/db/Cargo.toml": true}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"crates/api/src/a.rs":        {Dependencies: imp("crates/core/src/x.rs", "crates/core/src/y.rs", "crates/api/src/b.rs")},
+		"crates/api/src/b.rs":        {Dependencies: imp("crates/core/src/x.rs", "crates/db/src/d.rs")},
+		"crates/db/src/d.rs":         {Dependencies: imp("crates/core/src/x.rs")},
+		"crates/api/tests/t_test.rs": {Dependencies: imp("crates/db/src/d.rs")}, // tests do not link components
+		"crates/core/src/x.rs":       {},
+		"crates/core/src/y.rs":       {},
+	}}
+	for p, f := range hm.Files {
+		f.Path = p
+	}
+	got := ComponentLinks(hm, markers)
+	want := []Link{
+		{From: "crates/api", To: "crates/core", Files: 2}, // importing files, not import lines
+		{From: "crates/api", To: "crates/db", Files: 1},
+		{From: "crates/db", To: "crates/core", Files: 1},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("ComponentLinks =\n%v\nwant\n%v", got, want)
+	}
+	if got := ComponentLinks(&types.Heatmap{}, nil); len(got) != 0 {
+		t.Errorf("empty heatmap: %v, want none", got)
+	}
+}
+
+func TestWalkthrough_LinkCap(t *testing.T) {
+	tr := &Tour{Repo: "r"}
+	var links []Link
+	for i := 0; i < 12; i++ {
+		c := fmt.Sprintf("c%02d", i)
+		tr.Sections = append(tr.Sections, Section{Component: c, Kind: KindProduct, Stops: []Stop{wtStop(i+1, c+"/lib.rs", types.QuadrantLow, "r", "l")}})
+	}
+	for i := 0; i < 12; i++ {
+		for j := 0; j < 12; j++ {
+			if i != j {
+				links = append(links, Link{From: fmt.Sprintf("c%02d", i), To: fmt.Sprintf("c%02d", j), Files: 200 - i*12 - j})
+			}
+		}
+	}
+	p, err := Walkthrough(tr, nil, links)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hops := p.Flows[linksFlowID].Hops
+	if len(hops) != maxWalkthroughLinks {
+		t.Fatalf("link hops = %d, want capped at %d", len(hops), maxWalkthroughLinks)
+	}
+	if hops[0].Pay != "199 files" {
+		t.Errorf("first link = %+v, want the strongest (199 files)", hops[0])
 	}
 }

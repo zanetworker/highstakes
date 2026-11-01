@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,9 @@ func writeArchHeatmap(t *testing.T, decl string) string {
 		mk("crates/sup/src/bin/perf.rs", "crates/sup", 10, types.QuadrantLow, []string{"perf"}),
 	} {
 		hm.Files[f.Path] = f
+	}
+	for _, p := range []string{"crates/gw/src/main.rs", "crates/sup/src/main.rs"} { // mirror ImportedBy, as analyze does
+		hm.Files[p].Dependencies.Imports = []types.Dependency{{Path: "crates/core/src/lib.rs"}}
 	}
 	hm.Metadata.Units = []types.Unit{
 		{Name: "gw", Kind: "rust-bin", Entry: "crates/gw/src/main.rs", Evidence: "crates/gw/Cargo.toml:1", Home: "crates/gw",
@@ -228,6 +232,13 @@ func TestGetTour_Walkthrough(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "Why it matters: Every RPC passes here") || !strings.Contains(string(b), "impact 90 · 3 units") {
 		t.Errorf("page missing the impact reason or the library role:\n%s", b)
+	}
+	links, _ := flows["wiring"].(map[string]any)
+	if hops, _ := links["hops"].([]any); len(hops) != 2 {
+		t.Errorf("links flow = %v, want 2 hops (gw and sup import core)", flows["wiring"])
+	}
+	if !strings.Contains(fmt.Sprint(page["legendExtra"]), "shared library") {
+		t.Errorf("legendExtra = %v, want the HighStakes key", page["legendExtra"])
 	}
 
 	_, err = runCLI(t, dir, "get", "tour", "--format", "html")

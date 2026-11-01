@@ -23,7 +23,23 @@ const (
 	boxHalfWidth        = 125
 	maxNodeName         = 20
 	maxNodeSub          = 26
+	maxWalkthroughLinks = 30 // strongest component links drawn; more turn the map into a hairball
+	importsColor        = "#9aa3b2"
+	// linksFlowID sorts after "product" and "supporting": the page lists
+	// flow buttons in JSON key order, and the tour should come first.
+	linksFlowID = "wiring"
 )
+
+// walkthroughLegend replaces the template's channel key (browser, server to
+// server, refused), which a code tour does not use, with HighStakes' own:
+// legendExtra is the template's only key slot, so a scoped style hides the
+// built-in entries (and their emptied column) and keeps the .hs ones. It
+// also hides the caption's channel label ("SERVER TO SERVER"), which names
+// network channels a tour does not have.
+const walkthroughLegend = `<style>.legend .lcol > span:not(.hs){display:none}.legend .lcol:not(:has(.hs)){display:none}.caption .chan{display:none}</style>` +
+	`<span class="hs"><span class="sw b"></span>reading order</span>` +
+	`<span class="hs"><span class="sw" style="border-color:` + importsColor + `"></span>imports (A to B)</span>` +
+	`<span class="hs"><i class="dsw" style="background:#22252c;border:1px solid #373c47;border-radius:2px"></i>shared library</span>`
 
 // WalkthroughPage is the data file of the show-me rich step-through
 // (development-tools show-me references/walkthrough/data-model.md), built
@@ -40,7 +56,9 @@ type WalkthroughPage struct {
 	Frames   []any               `json:"frames"`
 	Flows    map[string]WalkFlow `json:"flows"`
 	Start    string              `json:"start"`
-	NodeOf   map[string]string   `json:"-"` // component -> node id
+	// LegendExtra is raw HTML for the key (walkthroughLegend).
+	LegendExtra string            `json:"legendExtra"`
+	NodeOf      map[string]string `json:"-"` // component -> node id
 }
 
 // WalkNode is one component box; X and Y are its center on the map.
@@ -68,6 +86,7 @@ type WalkHop struct {
 	Short string `json:"short"`
 	Txt   string `json:"txt"`
 	Plane string `json:"plane"`
+	Brisk int    `json:"brisk,omitempty"` // 1: faster travel, shorter dwell
 }
 
 // quadrantPlanes maps quadrants to walkthrough planes and colors.
@@ -92,8 +111,11 @@ var nonNodeID = regexp.MustCompile(`[^a-z0-9]+`)
 // reason or summary) and first likelihood reason; the payload is its file anchor and the gist its
 // first action. roles labels components (owning unit, "shared by N units");
 // a role starting with "shared" draws a darker box. Components past
-// maxWalkthroughNodes are left out and counted in the intro.
-func Walkthrough(tr *Tour, roles map[string]string) (*WalkthroughPage, error) {
+// maxWalkthroughNodes are left out and counted in the intro. links (from
+// ComponentLinks) become a third flow, "How components connect": one hop
+// per link from the importing component to its dependency, the strongest
+// maxWalkthroughLinks among drawn components.
+func Walkthrough(tr *Tour, roles map[string]string, links []Link) (*WalkthroughPage, error) {
 	var comps []string
 	seen := map[string]bool{}
 	stops := 0
@@ -118,6 +140,7 @@ func Walkthrough(tr *Tour, roles map[string]string) (*WalkthroughPage, error) {
 		Title: repo + " code tour", Heading: html.EscapeString(repo) + " code tour: where the stakes are",
 		Colors: map[string]string{}, PlaneKey: [][2]string{}, Zones: [][3]any{}, Frames: []any{},
 		Nodes: map[string]WalkNode{}, Flows: map[string]WalkFlow{}, NodeOf: map[string]string{},
+		LegendExtra: walkthroughLegend,
 	}
 	used := map[string]bool{}
 	cells := gridCells(len(comps))
@@ -173,6 +196,10 @@ func Walkthrough(tr *Tour, roles map[string]string) (*WalkthroughPage, error) {
 			p.Start = kind
 		}
 	}
+	if f, ok := linkFlow(links, p.NodeOf, repo); ok {
+		p.Flows[linksFlowID] = f
+		p.Colors["imports"] = importsColor
+	}
 	for _, qp := range quadrantPlanes {
 		if planes[qp.plane] {
 			p.Colors[qp.plane] = qp.color
@@ -184,14 +211,12 @@ func Walkthrough(tr *Tour, roles map[string]string) (*WalkthroughPage, error) {
 	if len(commit) > 7 {
 		commit = commit[:7]
 	}
-	hops := 0
-	for _, f := range p.Flows {
-		hops += len(f.Hops)
-	}
+	hops := len(p.Flows[KindProduct].Hops) + len(p.Flows[KindSupporting].Hops)
 	p.Kicker = fmt.Sprintf("HIGHSTAKES TOUR · %d STOPS · %d COMPONENTS", hops, len(comps))
 	p.Intro = []string{
 		"<b>Order:</b> dependencies first; within a component, the files that matter most if they break.",
 		"<b>Color</b> is the file's quadrant: impact if it breaks against likelihood it needs fixes. Darker boxes are libraries several units share.",
+		"<b>How components connect</b> draws the import graph: each link runs from the importing component to its dependency, labelled with the number of importing files.",
 		"<b>Each step</b> says why the file is impactful, why it is likely to break, and what to do first.",
 		fmt.Sprintf("<b>Generated</b> by highstakes from %s@%s; nothing here is hand-written.", html.EscapeString(repo), html.EscapeString(commit)),
 	}
@@ -199,6 +224,35 @@ func Walkthrough(tr *Tour, roles map[string]string) (*WalkthroughPage, error) {
 		p.Intro = append(p.Intro, fmt.Sprintf("<b>%d more components</b> are not drawn (map holds %d). Narrow with --components, --focus or --min-impact.", left, maxWalkthroughNodes))
 	}
 	return p, nil
+}
+
+// linkFlow is one brisk hop per link between drawn components, strongest
+// first, capped at maxWalkthroughLinks. ok is false when no link is drawn.
+func linkFlow(links []Link, nodeOf map[string]string, repo string) (WalkFlow, bool) {
+	drawn := make([]Link, 0, len(links))
+	for _, l := range links {
+		if nodeOf[l.From] != "" && nodeOf[l.To] != "" && l.From != l.To {
+			drawn = append(drawn, l)
+		}
+	}
+	sortLinks(drawn)
+	drawn = drawn[:min(len(drawn), maxWalkthroughLinks)]
+	if len(drawn) == 0 {
+		return WalkFlow{}, false
+	}
+	hops := make([]WalkHop, 0, len(drawn))
+	for _, l := range drawn {
+		from, to := html.EscapeString(nodeName(l.From, repo)), html.EscapeString(nodeName(l.To, repo))
+		files := fmt.Sprintf("%d %s", l.Files, plural(l.Files, "file"))
+		hops = append(hops, WalkHop{
+			F: nodeOf[l.From], T: nodeOf[l.To], Ch: "f", Plane: "imports", Brisk: 1,
+			Pay:   files,
+			Short: from + " imports " + to,
+			Txt: fmt.Sprintf("<b>%s</b> depends on <b>%s</b>: %s in %s import it. A break in %s can reach %s.",
+				html.EscapeString(l.From), html.EscapeString(l.To), files, html.EscapeString(l.From), to, from),
+		})
+	}
+	return WalkFlow{Label: fmt.Sprintf("How components connect (%d %s)", len(hops), plural(len(hops), "link")), Plane: "imports", Hops: hops}, true
 }
 
 // stopHop is the hop arriving at one stop.

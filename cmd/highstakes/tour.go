@@ -84,7 +84,7 @@ var tourCmd = &cobra.Command{
 		case "json":
 			return writeOutput(tr, out)
 		case "walkthrough":
-			page, err := tour.Walkthrough(tr, componentRoles(hm.Metadata.Units))
+			page, err := tour.Walkthrough(tr, componentRoles(hm.Metadata.Units), tour.ComponentLinks(hm, markers))
 			if err != nil {
 				return cliError(4, "%v", err)
 			}
@@ -210,7 +210,7 @@ func init() {
 	tourCmd.Flags().Int("per-component", 0, "Keep the N most important files of each component, one section per component (0 = off)")
 	tourCmd.Flags().Int("min-impact", 0, "Skip files whose impact is below this, and components left without files (0-100)")
 	tourCmd.Flags().Bool("include-supporting", false, "Add supporting components (examples, scripts, .github, docs, deploy, tests, benchmarks, vendor; tour.supporting in config) in a final part")
-	tourCmd.Flags().StringSlice("components", nil, "Only these components, comma-separated (e.g. crates/openshell-core,internal/tour)")
+	tourCmd.Flags().StringSlice("components", nil, "Only these components, comma-separated (e.g. crates/core,internal/api)")
 	tourCmd.Flags().String("focus", "", "Only files under this repo-relative directory or file")
 	scoreCmd.AddCommand(tourCmd)
 }
