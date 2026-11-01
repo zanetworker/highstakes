@@ -155,7 +155,9 @@ func Checklist(files []FileActions) (before, worth, backlog []types.Action) {
 			if a.ID == "light-review" {
 				continue
 			}
-			worthOnly := a.Scope != types.ScopeBacklog && !fa.Blocking
+			// single-owner asks for a second person, which no step in the PR
+			// can complete, so it never blocks the merge.
+			worthOnly := a.Scope != types.ScopeBacklog && (!fa.Blocking || a.ID == "single-owner")
 			key := fmt.Sprint(a.Scope, "\x00", a.Text, "\x00", a.Command, "\x00", worthOnly)
 			if a.ID == "no-auto-merge" {
 				// Auto-merge is one PR-wide switch: one item, worded by the

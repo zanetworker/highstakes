@@ -14,7 +14,7 @@ Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/hig
 4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
 5. Fails the `triage` job when `pr check` exited 5.
 
-The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run, and on `labeled`/`unlabeled`, so the sign-off label does too. `AUTO_MERGE` comes from `github.event.pull_request`, which both events carry. `SIGNED_OFF` must come from the workflow's **Verify sign-off** step (copy it from `highstakes github install`): passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core step:
+The workflow also runs on `pull_request_review`, so an owner's approval of the current head commit ticks the checklist on the next run (an approval of an earlier commit does not), on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`. The auto-merge state is read live from the API (`gh api repos/$REPO/pulls/$PR`), not from the event payload, since it may have changed since the run was queued. `SIGNED_OFF` must come from the workflow's **Verify sign-off** step (copy it from `highstakes github install`): passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core step:
 
 ```yaml
       - name: Assess PR risk
@@ -24,18 +24,30 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
           SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # from the Verify sign-off step: never the label alone
-          AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set +e
+          # Live auto-merge state, not the event snapshot.
+          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
+          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
           signed=
           if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
 ### Sign-off label
 
-Review items ask for an owner's approval, but GitHub does not let authors approve their own PRs, so a sole maintainer could never tick them. A maintainer with write access reviews the change and adds the label `highstakes:signed-off` to the PR; the next run ticks the sign-off and owner-review items ("signed off with the highstakes:signed-off label"). Removing the label reopens them. Create the label once in **Issues > Labels**. The workflow trusts the label only when the person who last added it has write, maintain or admin access (triage collaborators can add labels too, so it checks), and only for the commit it was given on: when an authorized person adds the label, the workflow records a `highstakes/signed-off/pr-<number>` commit status on the PR's head commit (scoped to the PR, so another PR on the same commit cannot borrow it), and later runs trust the label only when the current head carries that status set by the workflow's own bot (`github-actions[bot]`). Commenters cannot forge it, and overlapping runs cannot erase it. Removing the label withdraws the sign-off: the workflow records a newer failing status, and only the latest such status for the head counts. Runs for one PR are serialized (a `concurrency` group) and read the PR's live labels, so quick add-then-remove sequences are applied in order. This needs `statuses: write` in the workflow permissions. A new push also removes the label, so new commits need a fresh review and the label added again. The workflow also re-runs when auto-merge is turned on or off, so the auto-merge item follows the PR's state, but only as of the last run: if someone enables auto-merge after the check turned green, GitHub may merge before the re-run finishes. A workflow cannot block that at merge time, so to really forbid auto-merge on these PRs, turn off **Allow auto-merge** in the repository settings or require a review in branch protection. This needs `issues: write` in the workflow permissions.
+Review items ask for an owner's approval, but GitHub does not let authors approve their own PRs, so a sole maintainer could never tick them. A maintainer with write access reviews the change and adds the label `highstakes:signed-off` to the PR; the run that the labeling triggers ticks the sign-off and owner-review items ("signed off with the highstakes:signed-off label"). Create the label once in **Issues > Labels**. The label is a sign-off for one commit, not a standing pass:
+
+- **Who:** only the run triggered by adding the label can sign, and only when the person who added it has write, maintain or admin access (triage collaborators can add labels too, so it checks).
+- **Which commit:** that run records a `highstakes/signed-off/pr-<number>` success status on the PR's head at the moment of labeling (scoped to the PR, so another PR on the same commit cannot borrow it). The status names the label event it was minted for (who added the label, and when), and every run trusts the label only when the current head carries that status from the workflow's own bot (`github-actions[bot]`) for the latest addition, and the person behind it still has write access. A sign-off from an earlier addition never stands in for a newer one. After a push the new head has no such status, so it is unsigned whatever order the runs finish in; commenters cannot forge the status.
+- **Withdrawal:** GitHub's label history decides whether the label still stands (the latest add or remove wins). Removing it reopens the items, and the workflow records a newer failing status; only the latest status for the head counts.
+- **New pushes:** a push also removes the label, so new commits need a fresh review and the label added again. The sign-off check runs before the analysis, so a failed analysis cannot leave a stale label in place.
+- **Auto-merge:** the run reads the PR's auto-merge state live from the API, not from the event that queued it, and reads it again before the gate passes; if it changed during the run, the gate fails and the run triggered by the change decides. The same goes for the sign-off label: before posting the comment the run checks the head, the auto-merge state and the latest label change again, and before passing it checks the auto-merge state, the latest label change and the approvals again; a run that saw an older state leaves the comment or the decision to the newer run (a run for an older head only affects that commit's check). GitHub can still merge between the last run and the merge itself, and a workflow cannot block that, so to really forbid auto-merge on these PRs, turn off **Allow auto-merge** in the repository settings or require a review in branch protection.
+
+This needs `issues: write` and `statuses: write` in the workflow permissions.
 
 The comment is built to act on at a glance. It leads with the verdict (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize` or `✅ Routine`), the changed files per posture (`🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`) and one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels. Then come **Do before merge (N of M done)**, a checklist of the Harden now and Protect files' items with an emoji per kind (👀 review, 🧪 tests, ✂️ split, 🚫 auto-merge off, 📝 docs, 👥 ownership; `[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved, the sign-off label is on, auto-merge is off) with the gate's state under the heading (`⛔ Merge blocked: 2 before-merge items open` or `✅ All before-merge items done: ready to merge`), a short file table in plain words (posture emoji, File, If it breaks, Breaks often? as 🔴 with the strongest signal or 🟢 rarely, and Next step), a fold that groups further files by next step, **⚡ One-click actions** (a smaller-PR ask once for the whole PR; prefilled GitHub issues for split, complexity, test and invariant work, each a full brief with why it matters, why now, a suggested approach, a done-when checklist and context, previewed in a folded **What's in this issue** under the link; a CODEOWNERS edit link; and the circuit breakers as things to do), a folded Mermaid quadrant chart of where the PR lands (numbered points with a legend), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items and the backlog. `--repo "$REPO"` makes the issue and CODEOWNERS actions links; without a repo they stay plain text. The issues link back to the PR, whose number `pr check` reads from `$GITHUB_REF` in Actions (pass `--pr N` elsewhere). See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
@@ -58,7 +70,7 @@ heatmap:
     - go install github.com/zanetworker/highstakes/cmd/highstakes@latest
     - '[ -f .heatmap/config.yaml ] || highstakes init'
     - highstakes analyze
-    # Markdown for a merge request note; exit 5 fails the job on Harden now files.
+    # Markdown for a merge request note; exit 5 fails the job while a Harden now file has open before-merge items.
     - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --format markdown --fail-on critical > risk.md
   variables:
     OPENROUTER_API_KEY: $OPENROUTER_API_KEY
@@ -79,7 +91,7 @@ export OPENROUTER_API_KEY="$YOUR_KEY"
 [ -f .heatmap/config.yaml ] || highstakes init
 highstakes analyze
 
-# The PR comment body; exit 5 blocks Harden now files
+# The PR comment body; exit 5 while a Harden now file has open before-merge items
 highstakes pr check --base origin/main --format markdown --fail-on critical > comment.md
 
 # Or read the JSON: verdict, checklist (each with done) and backlog

@@ -241,3 +241,17 @@ func TestChecklist_OneAutoMergeItem(t *testing.T) {
 		t.Errorf("auto-merge item = %+v, want Keep auto-merge off for both files", got)
 	}
 }
+
+func TestChecklist_SingleOwnerNeverBlocks(t *testing.T) {
+	files := []FileActions{{Path: "core/h.go", Blocking: true, Actions: []types.Action{
+		{ID: "single-owner", Scope: types.ScopeBeforeMerge, Text: "Add a second reviewer: one author wrote 90% of it"},
+		{ID: "senior-review", Scope: types.ScopeBeforeMerge, Text: "Get sign-off"},
+	}}}
+	before, worth, _ := Checklist(files)
+	if len(before) != 1 || before[0].ID != "senior-review" {
+		t.Errorf("blocking checklist = %+v, want only the senior review", before)
+	}
+	if len(worth) != 1 || worth[0].ID != "single-owner" {
+		t.Errorf("worth doing = %+v, want the single-owner item (no PR step can complete it)", worth)
+	}
+}

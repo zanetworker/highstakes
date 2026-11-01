@@ -26,8 +26,8 @@ func TestGithubInstall_WritesTriageWorkflow(t *testing.T) {
 		"BASE: origin/${{ github.event.pull_request.base.ref }}",
 		"types: [opened, synchronize, reopened, labeled, unlabeled, auto_merge_enabled, auto_merge_disabled]",
 		"SIGNED_OFF: ${{ steps.signoff.outputs.signed }}",
-		"AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}",
-		`--auto-merge-enabled "$AUTO_MERGE"`,
+		"auto_merge=$auto",
+		`--auto-merge-enabled "$auto"`,
 		`if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi`,
 	} {
 		if !strings.Contains(wf, want) {
@@ -69,22 +69,34 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 	for name, wf := range map[string]string{"template": triageWorkflow, "repo copy": string(repoCopy)} {
 		for _, want := range []string{
 			"auto_merge_enabled", "auto_merge_disabled", // re-run when auto-merge changes
-			"issues: write",                              // to remove the label
-			`"$ACTION" = "synchronize"`,                  // a new push clears the sign-off
-			"labels/highstakes:signed-off",               // ... by deleting the label
-			"collaborators/$SENDER/permission",           // only write access signs off
+			"issues: write",                        // to remove the label
+			`"$ACTION" = "synchronize"`,            // a new push clears the sign-off
+			"labels/highstakes:signed-off",         // ... by deleting the label
+			"collaborators/$last_actor/permission", // only write access signs off
 			"admin|maintain|write",
 			"statuses: write",                              // sign-off recorded as a commit status
 			"statuses/$HEAD_SHA",                           // ... on the reviewed head commit
 			"commits/$HEAD_SHA/statuses",                   // ... read back for that commit only
-			`"success github-actions[bot]"`,                 // ... only the workflow's own, latest status counts
+			`"success github-actions[bot] Signed off by`,   // only the workflow's own, latest status counts
 			"PUSHED_AT",                                    // keep a label added after the push
-			`"$ACTION" = "unlabeled"`,                      // removing the label withdraws the sign-off
+			`"Sign-off withdrawn"`,                         // removing the label withdraws the sign-off
 			"state=failure",                                // ... as a newer, failing status
 			"first(",                                       // only the latest status for the context counts
-			"concurrency:",                                 // one run per PR at a time
+			`.event == "labeled" or .event == "unlabeled"`, // reconcile from durable label history
 			"highstakes/signed-off/pr-$PR",                 // sign-off scoped to this PR
-			"repos/$REPO/issues/$PR/labels",                // live labels, not the event snapshot
+			`issues/$PR/labels" --paginate`,                // live labels, not the event snapshot
+			`"$ACTION" = "labeled"`,                        // only the labeling run mints the sign-off status ...
+			"github.event.label.name",                      // ... for the sign-off label ...
+			"LIVE_HEAD",                                    // a stale run does not overwrite the comment
+			`pulls/$PR" --jq '.auto_merge != null'`,        // auto-merge read live, not from the event
+			"Auto-merge changed during this run",           // ... and re-checked before the gate passes
+			`Signed off by $last_actor at $last_at`,        // the status names the label event it was minted for
+			"label_state=$last",                            // the label state the decision used ...
+			"process.env.ASSESSED_LABELS",                  // ... rechecked before the comment is posted
+			"The sign-off label changed during this run",   // ... and before the gate passes
+			`sha[u] == head`,                               // only approvals of the assessed head count ...
+			"Reviews changed during this run",              // ... rechecked before the gate passes
+			`[ "$(label_state)" = "$last" ]`,               // a stale run never withdraws a newer sign-off
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)
@@ -92,6 +104,9 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 		}
 		if strings.Contains(wf, "contains(github.event.pull_request.labels") {
 			t.Errorf("%s workflow trusts the label's presence alone", name)
+		}
+		if strings.Contains(wf, "concurrency:") {
+			t.Errorf("%s workflow uses a concurrency group, which drops queued runs and their sign-off events", name)
 		}
 		if strings.Contains(wf, "highstakes-signed-off-sha") {
 			t.Errorf("%s workflow trusts a comment marker that any commenter can write", name)

@@ -424,16 +424,20 @@ Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.y
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
           SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # Verify sign-off step: never the label alone
-          AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set +e
+          # Live auto-merge state, not the event snapshot.
+          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
+          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
           signed=
           if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist, and on `labeled`/`unlabeled`, so the sign-off label does too.
+A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist, on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`, so the auto-merge item follows the PR. Before posting the comment it checks the head, the auto-merge state and the sign-off label again, and before passing it checks the auto-merge state, the sign-off label and the approvals again: a run that saw an older state leaves the comment or the decision to the newer run.
 
 </details>
 

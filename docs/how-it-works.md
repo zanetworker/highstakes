@@ -164,7 +164,7 @@ A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.
 
 A single owner never counts in a repo with one author overall (counted across every file's owners), so one-person repos get no `single-owner`, `ownership-issue` or owner-based `document-invariants` items: there is no one to name.
 
-Whether a PR changes exported symbols is not detected, so no action depends on it. `pr check` marks before-merge items done when the PR already satisfies them, and only Harden now and Protect files' items go in its checklist; the rest are listed as worth doing, not blocking. See the [CLI reference](cli-reference.md#verdict-and-checklist).
+Whether a PR changes exported symbols is not detected, so no action depends on it. `pr check` marks before-merge items done when the PR already satisfies them, and only Harden now and Protect files' items go in its checklist; the rest are listed as worth doing, not blocking. `single-owner` is always worth doing, whatever the tier: nothing in the PR can complete it, so it never blocks the merge. See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 **Agent autonomy.** After quadrants are set, `analyze` gives every file an autonomy level from its posture (Routine 3, Stabilize 2, Protect 1, Harden now 0; unassessed files use the posture of their tier), capped at 1 when impact is not LLM-assessed and at `autonomy.max_level`. See the [CLI reference](cli-reference.md#agent-autonomy).
 
