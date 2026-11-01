@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/highstakes/internal/incidents"
 	"github.com/zanetworker/highstakes/internal/policy"
 	"github.com/zanetworker/highstakes/internal/prcomment"
+	"github.com/zanetworker/highstakes/internal/prdata"
 	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tui"
@@ -401,12 +402,18 @@ var prCheckCmd = &cobra.Command{
 		authorFlag, _ := cmd.Flags().GetString("author")
 		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
 		approvals, _ := cmd.Flags().GetStringSlice("approvals")
+		repoFlag, _ := cmd.Flags().GetString("repo")
 
 		if jsonOut {
 			format = "json"
 		}
 		if format != "text" && format != "markdown" && format != "json" {
 			return cliError(2, "--format must be one of: text, markdown, json (got: %q)", format)
+		}
+
+		repo, err := commentRepo(repoFlag, os.Getenv("GITHUB_REPOSITORY"), func() (prdata.Repo, error) { return prdata.OriginRepo(".") })
+		if err != nil {
+			return cliError(2, "%v", err)
 		}
 
 		hm, err := loadHeatmap()
@@ -458,7 +465,7 @@ var prCheckCmd = &cobra.Command{
 
 		switch {
 		case format == "markdown":
-			fmt.Print(prcomment.Render(&risk, hm))
+			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base)}))
 			return gateErr
 		case format == "json" && len(changes) == 0:
 			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
@@ -782,6 +789,7 @@ func agentContext() map[string]interface{} {
 							"--json":      flagDef("bool", false, "Output as JSON (same as --format json)"),
 							"--format":    flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
 							"--approvals": flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
+							"--repo":      flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
 							"--base":      flagDef("string", "main", "Base branch"),
 							"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
 							"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
@@ -1042,6 +1050,7 @@ func init() {
 	prCheckCmd.Flags().String("author", "", "PR author email or handle to exclude from reviewers (default: HEAD commit author)")
 	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")
 	prCheckCmd.Flags().String("format", "text", "Output format: text, markdown (the PR comment), json")
+	prCheckCmd.Flags().String("repo", "", "GitHub owner/name the markdown comment links to for one-click issues and CODEOWNERS edits (default: $GITHUB_REPOSITORY, then the origin remote)")
 	prCheckCmd.Flags().StringSlice("approvals", nil, "GitHub logins that approved the PR (CI fills it); ticks owner-review items when a suggested owner approved")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)

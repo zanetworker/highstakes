@@ -460,7 +460,7 @@ func ApplyAutonomy(risk *types.PRRisk, hm *types.Heatmap, maxLevel int) {
 		}
 		a.Label = types.AutonomyLabel(a.Level)
 		fc.Autonomy = &a
-		if a.Level < risk.AutonomyLevel || (a.Level == risk.AutonomyLevel && risk.AutonomyReason == "") {
+		if a.Level < risk.AutonomyLevel || (a.Level == risk.AutonomyLevel && causeRank(cause) > causeRank(risk.AutonomyReason)) {
 			risk.AutonomyLevel, risk.AutonomyReason = a.Level, cause
 		}
 	}
@@ -472,19 +472,46 @@ func ApplyAutonomy(risk *types.PRRisk, hm *types.Heatmap, maxLevel int) {
 	}
 }
 
+const (
+	causeUnassessed = "touches files whose impact is not AI-assessed"
+	causeNotScored  = "touches files HighStakes has not assessed"
+	causeConfig     = "touches dependency or tool config files"
+)
+
+// causeRank orders the causes that can set the PR's autonomy level, so a tie
+// quotes the most important: Harden now or Protect files, then impact not
+// AI-assessed, then new, unscored or config files, then the max_level cap.
+// "" (no cause yet) ranks lowest.
+func causeRank(cause string) int {
+	switch cause {
+	case "touches " + types.QuadrantFragileCritical.Label() + " files", "touches " + types.QuadrantProtect.Label() + " files":
+		return 5
+	case causeUnassessed:
+		return 4
+	case causeNotScored, causeConfig:
+		return 3
+	case "":
+		return 0
+	}
+	if strings.HasPrefix(cause, "autonomy.max_level") {
+		return 1
+	}
+	return 2 // other postures (Stabilize)
+}
+
 // fileAutonomy is one changed file's autonomy before the config cap, and
 // the cause to quote when it sets the PR's level ("" for L3 files). scored
 // is false for the non-code files CalculatePRRisk leaves unscored.
 func fileAutonomy(fc types.FileChange, scored bool) (types.Autonomy, string) {
 	switch {
 	case !scored && isConfigFile(fc.Path):
-		return types.Autonomy{Level: 1, Reason: "dependency or tool config: propose only"}, "touches dependency or tool config files"
+		return types.Autonomy{Level: 1, Reason: "dependency or tool config: propose only"}, causeConfig
 	case !scored && isPlainTextDoc(fc.Path):
 		return types.Autonomy{Level: types.MaxAutonomy, Reason: "plain-text docs: cannot execute"}, ""
 	case !scored:
 		// Never assessed: an SVG can carry scripts and test fixtures can be
 		// executed, so unknown content gets no autonomy beyond proposing.
-		return types.Autonomy{Level: 1, Reason: "not assessed: propose only"}, "touches files HighStakes has not assessed"
+		return types.Autonomy{Level: 1, Reason: "not assessed: propose only"}, causeNotScored
 	}
 	q := fc.Quadrant
 	if q == "" {
@@ -496,7 +523,7 @@ func fileAutonomy(fc types.FileChange, scored bool) (types.Autonomy, string) {
 	case a.Level == types.MaxAutonomy:
 		return a, ""
 	case !assessed && q.Autonomy().Level > 1: // the L1 cap set the level
-		return a, "touches files whose impact is not AI-assessed"
+		return a, causeUnassessed
 	}
 	return a, "touches " + q.Label() + " files"
 }

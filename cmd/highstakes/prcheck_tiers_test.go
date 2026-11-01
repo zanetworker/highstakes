@@ -167,8 +167,8 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pr check: %v\n%s", err, out)
 	}
-	for _, want := range []string{"## ⛔ Harden before merge", "AI may auto-merge: no (touches Harden now files)",
-		"- [ ] Get sign-off from a senior owner (@ana)", "- [ ] Add regression tests", "/core/a.go @ana"} {
+	for _, want := range []string{"## ⛔ Harden before merge", "🤖 AI may auto-merge: ❌ no (touches Harden now files)",
+		"- [ ] 👀 Get sign-off from @ana on `core/a.go`", "- [ ] 🧪 Add regression tests", "/core/a.go @ana"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -181,10 +181,22 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pr check: %v\n%s", err, out)
 	}
-	for _, want := range []string{"- [x] Get sign-off from a senior owner (@ana)", "- [x] Add regression tests"} {
+	for _, want := range []string{"- [x] 👀 Get sign-off from @ana on `core/a.go`", "- [x] 🧪 Add regression tests"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+
+	out, err = runCLI(t, dir, append(base, "--repo", "acme/core")...)
+	if err != nil {
+		t.Fatalf("pr check --repo: %v\n%s", err, out)
+	}
+	if want := "- [👥 Add `/core/a.go @ana` to CODEOWNERS](https://github.com/acme/core/edit/main/.github/CODEOWNERS)"; !strings.Contains(out, want) {
+		t.Errorf("--repo should link the CODEOWNERS action; missing %q in:\n%s", want, out)
+	}
+	_, err = runCLI(t, dir, append(base, "--repo", "acme")...)
+	if ee := (*exitError)(nil); !errors.As(err, &ee) || ee.code != 2 {
+		t.Errorf("invalid --repo: err = %v, want exit 2", err)
 	}
 
 	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--json", "--shadow=false", "--fail-on=", "--reviewers=0")
@@ -213,13 +225,13 @@ func TestPRCheck_DeletedTestDoesNotTick(t *testing.T) {
 	}{
 		{name: "deleted adjacent test", extra: []string{"core/a_test.go"},
 			edit: func(t *testing.T, dir string) { gitIn(t, dir, "rm", "-q", "core/a_test.go") },
-			want: "- [ ] Add regression tests"},
+			want: "- [ ] 🧪 Add regression tests"},
 		{name: "test renamed away from the file", extra: []string{"core/a_test.go"},
 			edit: func(t *testing.T, dir string) { gitIn(t, dir, "mv", "core/a_test.go", "other/a_test.go") },
-			want: "- [ ] Add regression tests"},
+			want: "- [ ] 🧪 Add regression tests"},
 		{name: "test renamed next to the file", extra: []string{"other/a_test.go"},
 			edit: func(t *testing.T, dir string) { gitIn(t, dir, "mv", "other/a_test.go", "core/a_test.go") },
-			want: "- [x] Add regression tests"},
+			want: "- [x] 🧪 Add regression tests"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

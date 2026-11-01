@@ -1,21 +1,47 @@
 <!-- highstakes-triage -->
 ## ⛔ Harden before merge
 
-`core/h0.go` and 5 other files are likely to break and costly if broken.
+⛔ 6 harden · ✅ 2 routine
 
-### Do before merge
+### ✅ Do before merge (0 of 1 done)
 
-- [ ] Get sign-off from a senior owner (`core/h0.go`, `core/h5.go`)
+- [ ] 👀 Get sign-off from someone who knows `core/h0.go`, `core/h5.go`
 
-| File | If it breaks | Breaks often? | Do |
-|---|---|---|---|
-| `core/h0.go` | costly (no description; run analyze again) | Yes | Harden now |
-| `core/h1.go` | costly (no description; run analyze again) | Yes | Harden now |
-| `core/h2.go` | costly (no description; run analyze again) | Yes | Harden now |
-| `core/h3.go` | costly (no description; run analyze again) | Yes | Harden now |
-| `core/h4.go` | costly (no description; run analyze again) | Yes | Harden now |
-| 1 more file needs action |  |  | see details |
-| 2 other files | limited damage | rarely | Routine |
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ⛔ | `core/h0.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ⛔ | `core/h1.go` | costly (no description; run analyze again) | 🔴 yes | careful review |
+| ⛔ | `core/h2.go` | costly (no description; run analyze again) | 🔴 yes | careful review |
+| ⛔ | `core/h3.go` | costly (no description; run analyze again) | 🔴 yes | careful review |
+| ⛔ | `core/h4.go` | costly (no description; run analyze again) | 🔴 yes | careful review |
+| ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
+
+<details><summary>📋 1 more file needs action</summary>
+
+- ⛔ `core/h5.go`: 👀 senior sign-off
+
+</details>
+
+<details><summary>🗺 Where this PR lands</summary>
+
+```mermaid
+quadrantChart
+  title Changed files
+  x-axis Rarely breaks --> Breaks often
+  y-axis Limited damage --> Costly if it breaks
+  quadrant-1 Harden now
+  quadrant-2 Protect
+  quadrant-3 Routine
+  quadrant-4 Stabilize
+  h0.go: [0.70, 0.77]
+  h1.go: [0.69, 0.77]
+  h2.go: [0.69, 0.77]
+  h3.go: [0.68, 0.77]
+  h4.go: [0.67, 0.77]
+  h5.go: [0.66, 0.77]
+```
+
+</details>
 
 <details><summary>Why these actions?</summary>
 

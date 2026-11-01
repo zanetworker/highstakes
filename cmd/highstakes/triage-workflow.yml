@@ -58,9 +58,10 @@ jobs:
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
+          REPO: ${{ github.repository }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment

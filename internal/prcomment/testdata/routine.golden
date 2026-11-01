@@ -1,11 +1,11 @@
 <!-- highstakes-triage -->
 ## ✅ Routine
 
-No changed file is likely to break or costly if it does. Normal review.
+✅ 2 routine
 
-| File | If it breaks | Breaks often? | Do |
-|---|---|---|---|
-| 2 files | limited damage | rarely | Routine |
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ✅ | 2 files | limited damage | 🟢 rarely | normal review |
 
 <details><summary>Why these actions?</summary>
 

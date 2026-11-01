@@ -76,21 +76,26 @@ func TestTaskWork(t *testing.T) {
 	f := &types.FileHeat{Path: "a/b.go"}
 	f.Factors.Complexity.FunctionCount = 30
 	tests := []struct {
-		id, wantTitle string
-		agentWork     bool
+		id, wantTitle, wantDone string
+		agentWork               bool
 	}{
-		{"split", "Split a/b.go into smaller files", true},
-		{"complexity-issue", "Cut the cyclomatic complexity of a/b.go", true},
-		{"test-gap", "Add tests next to a/b.go", true},
-		{"document-invariants", "Document the invariants of a/b.go next to the code", true},
-		{"codeowners", "Add a CODEOWNERS line for a/b.go", true},
-		{"ownership-issue", "", false}, // needs a second person, not an agent
+		{"split", "Split a/b.go into smaller files", "tests pass and the 30 functions of a/b.go are spread over smaller files", true},
+		{"complexity-issue", "Cut the cyclomatic complexity of a/b.go", "tests pass and cyclomatic complexity drops below 0", true},
+		{"test-gap", "Add tests next to a/b.go", "a test file next to a/b.go passes", true},
+		{"document-invariants", "Document the invariants of a/b.go next to the code", "the invariants of a/b.go are documented next to the code", true},
+		{"codeowners", "Add a CODEOWNERS line for a/b.go", "CODEOWNERS covers a/b.go", true},
+		{"regression-tests", "Add regression tests for the recent fixes to a/b.go", "a test next to a/b.go covers the recent fixes and passes", true},
+		{"ownership-issue", "", "a second author reviews or changes a/b.go", false}, // needs a second person, not an agent
+		{"unknown", "Address the backlog item on a/b.go", "tests pass", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
-			title, ok := taskTitle(tt.id, f)
+			title, ok := TaskTitle(tt.id, f)
 			if ok != tt.agentWork || title != tt.wantTitle {
-				t.Errorf("taskTitle(%q) = %q, %v; want %q, %v", tt.id, title, ok, tt.wantTitle, tt.agentWork)
+				t.Errorf("TaskTitle(%q) = %q, %v; want %q, %v", tt.id, title, ok, tt.wantTitle, tt.agentWork)
+			}
+			if got := Acceptance(tt.id, f); got != tt.wantDone {
+				t.Errorf("Acceptance(%q) = %q, want %q", tt.id, got, tt.wantDone)
 			}
 		})
 	}

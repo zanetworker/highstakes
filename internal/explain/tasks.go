@@ -37,7 +37,7 @@ func Tasks(hm *types.Heatmap, minLevel, maxLevel int) []Task {
 			if act.Scope != types.ScopeBacklog || act.ID == "assess-impact" {
 				continue
 			}
-			title, ok := taskTitle(act.ID, f)
+			title, ok := TaskTitle(act.ID, f)
 			if !ok || (a.Level == 0 && !assistOnly[act.ID]) {
 				continue
 			}
@@ -49,7 +49,7 @@ func Tasks(hm *types.Heatmap, minLevel, maxLevel int) []Task {
 			}
 			out = append(out, Task{
 				Title: title, File: path, ActionID: act.ID, Signal: act.Signal,
-				Command: cmd, Acceptance: acceptance(act.ID, f), Level: a.Level, LevelLabel: a.Label,
+				Command: cmd, Acceptance: Acceptance(act.ID, f), Level: a.Level, LevelLabel: a.Label,
 			})
 		}
 	}
@@ -66,10 +66,10 @@ func Tasks(hm *types.Heatmap, minLevel, maxLevel int) []Task {
 // explanations, never changes to the code or its ownership.
 var assistOnly = map[string]bool{"test-gap": true, "document-invariants": true}
 
-// taskTitle phrases a backlog action as work an agent does on the file, so
-// the instruction matches its acceptance. ok is false for actions that need a
+// TaskTitle phrases an action as work an agent does on the file, so the
+// instruction matches its acceptance. ok is false for actions that need a
 // person rather than an agent (a second reviewer).
-func taskTitle(id string, f *types.FileHeat) (string, bool) {
+func TaskTitle(id string, f *types.FileHeat) (string, bool) {
 	switch id {
 	case "split":
 		return "Split " + f.Path + " into smaller files", true
@@ -81,14 +81,16 @@ func taskTitle(id string, f *types.FileHeat) (string, bool) {
 		return "Document the invariants of " + f.Path + " next to the code", true
 	case "codeowners":
 		return "Add a CODEOWNERS line for " + f.Path, true
+	case "regression-tests":
+		return "Add regression tests for the recent fixes to " + f.Path, true
 	case "ownership-issue":
 		return "", false
 	}
 	return "Address the backlog item on " + f.Path, true
 }
 
-// acceptance is a checkable "done when" for a backlog action.
-func acceptance(id string, f *types.FileHeat) string {
+// Acceptance is a checkable "done when" for an action.
+func Acceptance(id string, f *types.FileHeat) string {
 	switch id {
 	case "split":
 		return "tests pass and the " + count(f.Factors.Complexity.FunctionCount, "function") + " of " + f.Path + " are spread over smaller files"
@@ -100,6 +102,8 @@ func acceptance(id string, f *types.FileHeat) string {
 		return "a test file next to " + f.Path + " passes"
 	case "document-invariants":
 		return "the invariants of " + f.Path + " are documented next to the code"
+	case "regression-tests":
+		return "a test next to " + f.Path + " covers the recent fixes and passes"
 	case "ownership-issue":
 		return "a second author reviews or changes " + f.Path
 	}

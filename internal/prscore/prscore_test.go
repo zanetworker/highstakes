@@ -321,6 +321,13 @@ func TestApplyAutonomy(t *testing.T) {
 		{"dependency manifest", []string{"ui/a.go", "go.mod"}, 3, 1, false, "touches dependency or tool config files"},
 		{"config cap", []string{"ui/a.go"}, 2, 2, false, "autonomy.max_level is 2"},
 		{"empty PR", nil, 3, 3, true, "every touched file is L3"},
+		// Several causes at the same lowest level: the most important one is quoted,
+		// whatever the file order.
+		{"protect beats unassessed", []string{"est/e.go", "core/p.go"}, 3, 1, false, "touches Protect files"},
+		{"protect beats config", []string{"go.mod", "core/p.go"}, 3, 1, false, "touches Protect files"},
+		{"unassessed beats new and config", []string{"ui/logo.png", "go.mod", "est/e.go"}, 3, 1, false, "touches files whose impact is not AI-assessed"},
+		{"config beats the cap", []string{"ui/a.go", "go.mod"}, 1, 1, false, "touches dependency or tool config files"},
+		{"protect beats the cap", []string{"ui/a.go", "core/p.go"}, 1, 1, false, "touches Protect files"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

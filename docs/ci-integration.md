@@ -10,7 +10,7 @@ Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/hig
 
 1. Runs `highstakes init` only when `.heatmap/config.yaml` is missing (a committed config is kept), then `highstakes analyze` (cached by file content).
 2. Collects the reviewers whose latest review is an approval, with `gh api repos/<repo>/pulls/<n>/reviews`.
-3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins>`, which renders the comment in Go and exits 5 when the PR changes a Harden now file.
+3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --repo <owner/name>`, which renders the comment in Go and exits 5 when the PR changes a Harden now file.
 4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
 5. Fails the `triage` job when `pr check` exited 5.
 
@@ -22,13 +22,14 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
+          REPO: ${{ github.repository }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-The comment leads with the verdict (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize` or `✅ Routine`) and one sentence naming the riskiest file, then one `AI may auto-merge: yes|no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels, **Do before merge** as a checklist of the Harden now and Protect files' items (`[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved), a short file table in plain words (File, If it breaks, Breaks often?, Do; scores and cutoffs are in the folded details), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items (Stabilize work such as refactoring the touched function) and the backlog (plain items with their commands, such as a CODEOWNERS line to add; no checkboxes). See the [CLI reference](cli-reference.md#verdict-and-checklist).
+The comment is built to act on at a glance. It leads with the verdict (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize` or `✅ Routine`), the changed files per posture (`🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`) and one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels. Then come **Do before merge (N of M done)**, a checklist of the Harden now and Protect files' items with an emoji per kind (👀 review, 🧪 tests, ✂️ split, 🚫 auto-merge off, 📝 docs, 👥 ownership; `[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved), a short file table in plain words (posture emoji, File, If it breaks, Breaks often? as 🔴 with the strongest signal or 🟢 rarely, and Next step), a fold with one line per further file that needs action, **⚡ One-click actions** (prefilled GitHub issues for split, complexity, test and invariant work, a CODEOWNERS edit link, and the circuit breakers as things to do), a folded Mermaid quadrant chart of where the PR lands, and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items and the backlog. `--repo "$REPO"` makes the issue and CODEOWNERS actions links; without a repo they stay plain text. See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 ### Secrets
 

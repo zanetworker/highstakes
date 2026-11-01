@@ -1,6 +1,7 @@
 // Package prcomment renders `pr check` as the Markdown PR comment the
-// triage workflow posts: verdict first, then the before-merge checklist, a
-// short file table, and the reasons folded away.
+// triage workflow posts: verdict and counts first, then the before-merge
+// checklist, a short file table with each file's next step, one-click
+// actions, a quadrant chart, and the reasons folded away.
 package prcomment
 
 import (
@@ -15,13 +16,16 @@ import (
 // Marker starts every comment so the workflow can find and update its own.
 const Marker = "<!-- highstakes-triage -->"
 
-// maxRows is how many non-routine files the table lists; the rest get one
-// "need action" row and stay in the details.
-const maxRows = 5
+// maxRows is how many non-routine files the table lists; the rest go in a
+// fold, one line each, up to maxFoldLines.
+const (
+	maxRows      = 5
+	maxFoldLines = 50
+)
 
 var headings = map[string]string{
 	"Harden now": "⛔ Harden before merge",
-	"Protect":    "🛡 Protect",
+	"Protect":    "🛡 Protect before merge",
 	"Stabilize":  "🔧 Stabilize",
 	"Routine":    "✅ Routine",
 }
@@ -43,56 +47,94 @@ var severity = map[string]int{"Harden now": 3, "Protect": 2, "Stabilize": 1, "Ro
 func posture(fc types.FileChange) string { return fc.Posture() }
 
 // Render returns the comment for a scored PR. hm supplies per-file reasons;
-// files missing from it simply have none.
-func Render(risk *types.PRRisk, hm *types.Heatmap) string {
+// files missing from it simply have none. links turns issue and CODEOWNERS
+// actions into links; its zero value keeps them plain text.
+func Render(risk *types.PRRisk, hm *types.Heatmap, links Links) string {
 	verdict := risk.Verdict
 	if verdict == "" {
 		verdict = types.TierPosture(risk.Tier)
 	}
 	files := ranked(risk.FilesChanged)
+	issues := issueLinks(risk, files, hm, links.Repo)
 	var b strings.Builder
 	b.WriteString(Marker + "\n")
 	fmt.Fprintf(&b, "## %s\n\n", headings[verdict])
-	b.WriteString(summary(verdict, files, hm) + "\n\n")
+	if c := postureCounts(files); c != "" {
+		b.WriteString(c + "\n\n")
+	}
 	if risk.AutonomyReason != "" {
-		fmt.Fprintf(&b, "AI may auto-merge: %s (%s)\n\n", map[bool]string{true: "yes", false: "no"}[risk.AutoMergeAllowed], risk.AutonomyReason)
+		fmt.Fprintf(&b, "🤖 AI may auto-merge: %s (%s)\n\n", map[bool]string{true: "✅ yes", false: "❌ no"}[risk.AutoMergeAllowed], risk.AutonomyReason)
 	}
-
-	if len(risk.Checklist) > 0 {
-		b.WriteString("### Do before merge\n\n")
-		for i, a := range risk.Checklist {
-			box := " "
-			if a.Done {
-				box = "x"
-			}
-			line := fmt.Sprintf("- [%s] %s (%s)\n", box, a.Text, codeList(a.Files))
-			if !fits(&b, line) {
-				fmt.Fprintf(&b, "- _%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list_\n", plural(len(risk.Checklist)-i, "item"))
-				break
-			}
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
+	writeChecklist(&b, risk)
+	writeTable(&b, files, risk, hm, issues)
+	writeOneClick(&b, risk, issues, links)
+	if chart := quadrantChart(files, risk); chart != "" && fits(&b, chart) {
+		b.WriteString("<details><summary>🗺 Where this PR lands</summary>\n\n" + chart + "\n</details>\n\n")
 	}
-
-	// Circuit breakers (unscored files, large diffs, low test ratio) stay
-	// visible: they flag where the scores themselves are not to be trusted.
-	if len(risk.CircuitBreakerSignals) > 0 {
-		b.WriteString("### Warnings\n\n")
-		for _, s := range risk.CircuitBreakerSignals {
-			line := "- " + s + "\n"
-			if room := MaxCommentChars - reserve - b.Len(); len(line) > room/2 {
-				// One signal can list thousands of paths: keep its start, cut the rest.
-				line = "- " + s[:max(0, room/2-200)] + "... (omitted to fit GitHub's comment size limit)\n"
-			}
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
-	}
-
-	writeTable(&b, files, hm, risk.LikelyCutoff)
 	writeDetails(&b, risk, files, hm)
 	return ScrubEmails(b.String())
+}
+
+func writeChecklist(b *strings.Builder, risk *types.PRRisk) {
+	if len(risk.Checklist) == 0 {
+		return
+	}
+	done := 0
+	for _, a := range risk.Checklist {
+		if a.Done {
+			done++
+		}
+	}
+	fmt.Fprintf(b, "### ✅ Do before merge (%d of %d done)\n\n", done, len(risk.Checklist))
+	for i, a := range risk.Checklist {
+		line := checklistLine(a)
+		if !fits(b, line) {
+			fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list_\n", plural(len(risk.Checklist)-i, "item"))
+			break
+		}
+		b.WriteString(line)
+	}
+	b.WriteString("\n")
+}
+
+// writeOneClick lists the one-click actions: prefilled issues, CODEOWNERS
+// lines (at most maxLinks in all), then the circuit breakers (unscored
+// files, large diffs, low test ratio) as things to do, since they flag
+// where the scores themselves are not to be trusted.
+func writeOneClick(b *strings.Builder, risk *types.PRRisk, issues []issueLink, links Links) {
+	var lines []string
+	for _, l := range issues {
+		if l.url == "" {
+			lines = append(lines, "- 📝 Open an issue: "+l.title)
+		} else {
+			lines = append(lines, fmt.Sprintf("- [📝 Open issue: %s](%s)", l.title, l.url))
+		}
+	}
+	for _, a := range risk.Backlog {
+		if a.ID == "codeowners" && a.Command != "" && len(lines) < maxLinks {
+			lines = append(lines, codeownersAction(a, links))
+		}
+	}
+	for _, s := range risk.CircuitBreakerSignals {
+		line := "- " + breakerLine(s, risk)
+		if room := MaxCommentChars - reserve - b.Len(); len(line) > room/2 {
+			// One signal can list thousands of paths: keep its start, cut the rest.
+			line = line[:max(0, room/2-200)] + "... (omitted to fit GitHub's comment size limit)"
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return
+	}
+	b.WriteString("### ⚡ One-click actions\n\n")
+	for i, l := range lines {
+		if !fits(b, l+"\n") {
+			fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit_\n", plural(len(lines)-i, "action"))
+			break
+		}
+		b.WriteString(l + "\n")
+	}
+	b.WriteString("\n")
 }
 
 var (
@@ -142,64 +184,53 @@ func ranked(fcs []types.FileChange) []types.FileChange {
 	return out
 }
 
-// summary is the one sentence under the verdict: the riskiest file(s), why.
-func summary(verdict string, files []types.FileChange, hm *types.Heatmap) string {
-	var top []string
-	for _, fc := range files {
-		if posture(fc) == verdict {
-			top = append(top, fc.Path)
-		}
-	}
-	if verdict == "Routine" || len(top) == 0 {
-		return "No changed file is likely to break or costly if it does. Normal review."
-	}
-	names := "`" + top[0] + "` is"
-	switch {
-	case len(top) == 2:
-		names = "`" + top[0] + "` and `" + top[1] + "` are"
-	case len(top) > 2:
-		names = fmt.Sprintf("`%s` and %d other files are", top[0], len(top)-1)
-	}
-	why := map[string]string{
-		"Harden now": "likely to break and costly if broken",
-		"Protect":    "costly if broken",
-		"Stabilize":  "likely to break, with limited damage",
-	}[verdict]
-	s := names + " " + why
-	if f, ok := hm.Files[top[0]]; ok && f.Factors.BlastRadius.Summary != "" {
-		s += ": " + strings.TrimSuffix(f.Factors.BlastRadius.Summary, ".")
-	}
-	return s + "."
-}
-
-func writeTable(b *strings.Builder, files []types.FileChange, hm *types.Heatmap, likelyCutoff int) {
-	b.WriteString("| File | If it breaks | Breaks often? | Do |\n|---|---|---|---|\n")
-	shown, more, rest := 0, 0, 0
+func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk, hm *types.Heatmap, issues []issueLink) {
+	b.WriteString("|    | File | If it breaks | Breaks often? | Next step |\n|---|---|---|---|---|\n")
+	var more []types.FileChange
+	shown, rest := 0, 0
 	for _, fc := range files {
 		switch {
 		case posture(fc) == "Routine":
 			rest++
 		case shown == maxRows:
-			more++
+			more = append(more, fc)
 		default:
 			shown++
-			fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", cell(fc.Path), cell(ifBreaks(fc, hm)), cell(breaksOften(fc, hm, likelyCutoff)), posture(fc))
+			do := nextStep(fc, risk).label
+			for _, l := range issues {
+				if l.file == fc.Path && l.url != "" {
+					do += fmt.Sprintf(" · [📝 open issue](%s)", l.url)
+					break
+				}
+			}
+			fmt.Fprintf(b, "| %s | `%s` | %s | %s | %s |\n", postureEmoji[posture(fc)], cell(fc.Path), cell(ifBreaks(fc, hm)),
+				cell(breaksOften(fc, hm, risk.LikelyCutoff)), cell(do))
 		}
-	}
-	if more > 0 {
-		need := "files need"
-		if more == 1 {
-			need = "file needs"
-		}
-		fmt.Fprintf(b, "| %d more %s action |  |  | see details |\n", more, need)
 	}
 	switch {
 	case rest > 0 && shown > 0:
-		fmt.Fprintf(b, "| %d other %s | limited damage | rarely | Routine |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| ✅ | %d other %s | limited damage | 🟢 rarely | normal review |\n", rest, plural(rest, "file"))
 	case rest > 0:
-		fmt.Fprintf(b, "| %d %s | limited damage | rarely | Routine |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| ✅ | %d %s | limited damage | 🟢 rarely | normal review |\n", rest, plural(rest, "file"))
 	}
 	b.WriteString("\n")
+	if len(more) == 0 {
+		return
+	}
+	need := "files need"
+	if len(more) == 1 {
+		need = "file needs"
+	}
+	fmt.Fprintf(b, "<details><summary>📋 %d more %s action</summary>\n\n", len(more), need)
+	for i, fc := range more {
+		line := fmt.Sprintf("- %s `%s`: %s\n", postureEmoji[posture(fc)], fc.Path, nextStep(fc, risk).label)
+		if i == maxFoldLines || !fits(b, line) {
+			fmt.Fprintf(b, "- _%s more; run `highstakes pr check` for the full list_\n", plural(len(more)-i, "file"))
+			break
+		}
+		b.WriteString(line)
+	}
+	b.WriteString("\n</details>\n\n")
 }
 
 // maxCell keeps table cells to one readable line.
@@ -232,21 +263,6 @@ func ifBreaks(fc types.FileChange, hm *types.Heatmap) string {
 		return "costly (no description; run analyze again)"
 	}
 	return "limited damage"
-}
-
-// breaksOften answers "will it break?" in words: the strongest signal when
-// the file is above the repo cutoff.
-func breaksOften(fc types.FileChange, hm *types.Heatmap, cutoff int) string {
-	if fc.Unscored {
-		return "new file"
-	}
-	if fc.Likelihood < cutoff {
-		return "No, rarely changes"
-	}
-	if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil && len(f.Explanation.LikelihoodReasons) > 0 {
-		return "Yes: " + short(f.Explanation.LikelihoodReasons[0])
-	}
-	return "Yes"
 }
 
 func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChange, hm *types.Heatmap) {

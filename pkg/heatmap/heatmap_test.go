@@ -717,3 +717,13 @@ func TestGenerate_UnitsSkipExcludedAndIgnoredEntries(t *testing.T) {
 		t.Errorf("unit entries = %v, want only app/__main__.py", got)
 	}
 }
+
+func TestSave_CreatesMissingDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".heatmap", "heatmap.json")
+	if err := Save(&types.Heatmap{Files: map[string]*types.FileHeat{}}, path); err != nil {
+		t.Fatalf("Save into a fresh checkout: %v", err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("Load after Save: %v", err)
+	}
+}

@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/zanetworker/highstakes/internal/ownership"
 	"github.com/zanetworker/highstakes/internal/policy"
+	"github.com/zanetworker/highstakes/internal/prdata"
 	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -224,4 +226,36 @@ func printDecision(risk *types.PRRisk) {
 		mode = " (shadow: not enforced)"
 	}
 	fmt.Printf("Decision: %s (fail-on %s)%s\n", strings.ToUpper(risk.Decision), risk.FailOn, mode)
+}
+
+// commentRepo is the owner/name the PR comment links to: --repo, else
+// $GITHUB_REPOSITORY (set in Actions), else the origin remote, else ""
+// (actions stay plain text). Only an invalid --repo is an error.
+func commentRepo(flag, env string, origin func() (prdata.Repo, error)) (string, error) {
+	if flag != "" {
+		r, err := prdata.ParseRepo(flag)
+		if err != nil {
+			return "", fmt.Errorf("--repo: %w", err)
+		}
+		return r.String(), nil
+	}
+	if r, err := prdata.ParseRepo(env); err == nil {
+		return r.String(), nil
+	}
+	if r, err := origin(); err == nil {
+		return r.String(), nil
+	}
+	return "", nil
+}
+
+var commitish = regexp.MustCompile(`^([0-9a-f]{7,40}|HEAD)$|[~^@:]`)
+
+// linkBase is the branch behind --base for the CODEOWNERS edit link, or ""
+// when the base is a commit or revision expression rather than a branch.
+func linkBase(base string) string {
+	b := strings.TrimPrefix(strings.TrimPrefix(base, "refs/heads/"), "origin/")
+	if b == "" || commitish.MatchString(b) {
+		return ""
+	}
+	return b
 }

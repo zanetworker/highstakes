@@ -55,7 +55,7 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 				Quadrant: types.QuadrantLow, QuadrantLabel: "Routine"},
 		},
 		Checklist: []types.Action{
-			{ID: "senior-review", Text: "Get sign-off from a senior owner (@ana, @bo)", Scope: types.ScopeBeforeMerge,
+			{ID: "senior-review", Text: "Get sign-off from a senior owner (@ana, @bo)", Scope: types.ScopeBeforeMerge, Owners: []string{"@ana", "@bo"},
 				Signal: "Harden now: likely to break and costly when it does", Files: []string{"net/proxy.rs"}},
 			{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge,
 				Signal: `recent fix: "fix: align checks" (2026-10-28)`, Done: true, Files: []string{"net/proxy.rs"}},
@@ -77,7 +77,7 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 
 func TestRender_HardenGolden(t *testing.T) {
 	risk, hm := hardenPR()
-	golden(t, "harden", Render(risk, hm))
+	golden(t, "harden", Render(risk, hm, Links{Repo: "acme/net", Base: "main"}))
 }
 
 // TestRender_OverflowGolden: a sixth Harden now file gets its own
@@ -94,7 +94,7 @@ func TestRender_OverflowGolden(t *testing.T) {
 	}
 	risk.Checklist = []types.Action{{ID: "senior-review", Text: "Get sign-off from a senior owner", Scope: types.ScopeBeforeMerge,
 		Signal: "Harden now", Files: []string{"core/h0.go", "core/h5.go"}}}
-	golden(t, "overflow", Render(risk, &types.Heatmap{}))
+	golden(t, "overflow", Render(risk, &types.Heatmap{}, Links{}))
 }
 
 func TestRender_RoutineGolden(t *testing.T) {
@@ -103,13 +103,13 @@ func TestRender_RoutineGolden(t *testing.T) {
 			{Path: "ui/a.go", Tier: types.TierLow, Likelihood: 3, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantLow},
 			{Path: "ui/b.go", Tier: types.TierLow, Likelihood: 4, Impact: 9, ImpactAssessed: true, Quadrant: types.QuadrantLow},
 		}}
-	golden(t, "routine", Render(risk, &types.Heatmap{}))
+	golden(t, "routine", Render(risk, &types.Heatmap{}, Links{}))
 }
 
 func TestRender_Rules(t *testing.T) {
 	t.Run("details show each file's scores against the cutoffs", func(t *testing.T) {
 		risk, hm := hardenPR()
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if !strings.Contains(out, "- Scores: Will it break? 50 (high, cutoff 33); How bad if it breaks? 92 (high, cutoff 78)") {
 			t.Errorf("per-file scores missing from details:\n%s", out)
 		}
@@ -120,7 +120,7 @@ func TestRender_Rules(t *testing.T) {
 			{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"core/p.go"}, Signal: "not covered", Command: "/core/p.go ana@example.com"},
 			{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"core/q.go"}, Signal: "not covered", Command: "/core/q.go 1+bo@users.noreply.github.com"},
 		}
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if strings.Contains(out, "/core/p.go a top owner") {
 			t.Errorf("redaction produced an invalid CODEOWNERS rule:\n%s", out)
 		}
@@ -140,7 +140,7 @@ func TestRender_Rules(t *testing.T) {
 				{Path: "a/multi.go", Tier: types.TierHigh, Impact: 85, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
 				{Path: "a/bare.go", Tier: types.TierHigh, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
 			}}
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if !strings.Contains(out, "| `a/multi.go` | line one line two |") {
 			t.Errorf("multi-line summary not flattened:\n%s", out)
 		}
@@ -153,15 +153,15 @@ func TestRender_Rules(t *testing.T) {
 	})
 	t.Run("table says what breaks and how often, not scores", func(t *testing.T) {
 		risk, hm := hardenPR()
-		out := Render(risk, hm)
-		if !strings.Contains(out, "| File | If it breaks | Breaks often? | Do |") {
+		out := Render(risk, hm, Links{})
+		if !strings.Contains(out, "|    | File | If it breaks | Breaks often? | Next step |") {
 			t.Errorf("table header not plain:\n%s", out)
 		}
 		// consequence from the LLM summary; frequency from the first likelihood reason
-		if !strings.Contains(out, "| `net/proxy.rs` | Core egress proxy that enforces network policy. | Yes: 55 commits in the last 90 days (top 1% of this repo) | Harden now |") {
+		if !strings.Contains(out, "| ⛔ | `net/proxy.rs` | Core egress proxy that enforces network policy. | 🔴 55 commits in the last 90 days | 👀 senior sign-off |") {
 			t.Errorf("proxy row not in plain words:\n%s", out)
 		}
-		if !strings.Contains(out, "| `net/policy.rs` | security 80 | No, rarely changes | Protect |") {
+		if !strings.Contains(out, "| 🛡 | `net/policy.rs` | security 80 | 🟢 rarely | 🚫 no auto-merge |") {
 			t.Errorf("policy row not in plain words:\n%s", out)
 		}
 		table := out[strings.Index(out, "| File |"):strings.Index(out, "<details>")]
@@ -174,28 +174,32 @@ func TestRender_Rules(t *testing.T) {
 	t.Run("no email address appears anywhere", func(t *testing.T) {
 		risk, hm := hardenPR()
 		risk.Checklist = append(risk.Checklist, types.Action{ID: "owner-review", Scope: types.ScopeBeforeMerge,
-			Text: "Get an owner's review (ana@example.com, 12345+bo@users.noreply.github.com)", Files: []string{"net/policy.rs"}})
+			Text: "Get an owner's review (ana@example.com, 12345+bo@users.noreply.github.com)", Files: []string{"net/policy.rs"},
+			Owners: []string{"ana@example.com", "12345+bo@users.noreply.github.com"}})
 		risk.SuggestedReviewers = []types.Reviewer{{Handle: "ana@example.com"}, {Handle: "@carl"}}
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if m := regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`).FindString(out); m != "" {
 			t.Errorf("email %q in comment:\n%s", m, out)
 		}
 		if !strings.Contains(out, "@bo") || !strings.Contains(out, "@carl") {
 			t.Errorf("GitHub handles should stay:\n%s", out)
 		}
-		if !strings.Contains(out, "Get an owner's review (a top owner, @bo)") {
-			t.Errorf("unmapped email not replaced readably:\n%s", out)
+		if top, _, _ := strings.Cut(out, "<details><summary>Why"); strings.Contains(top, "a top owner") {
+			t.Errorf("checklist names an unmapped owner as \"a top owner\":\n%s", out)
+		}
+		if !strings.Contains(out, "- [ ] 👀 Request a review from @bo on `net/policy.rs`\n") {
+			t.Errorf("review request should name the GitHub handle only:\n%s", out)
 		}
 	})
 	t.Run("routine summary leaves auto-merge to the autonomy line", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
 			AutoMergeAllowed: false, AutonomyLevel: 1, AutonomyReason: "touches files whose impact is not AI-assessed",
 			FilesChanged: []types.FileChange{{Path: "a.go", Tier: types.TierLow}}}
-		out := Render(risk, &types.Heatmap{})
+		out := Render(risk, &types.Heatmap{}, Links{})
 		if strings.Contains(out, "auto-merge allowed") {
 			t.Errorf("summary claims auto-merge while the autonomy line forbids it:\n%s", out)
 		}
-		if !strings.Contains(out, "AI may auto-merge: no") {
+		if !strings.Contains(out, "🤖 AI may auto-merge: ❌ no") {
 			t.Errorf("autonomy line missing:\n%s", out)
 		}
 	})
@@ -210,7 +214,7 @@ func TestRender_Rules(t *testing.T) {
 			hm.Files[p] = &types.FileHeat{Path: p, Explanation: &types.Explanation{LikelihoodReasons: []string{long}, ImpactReasons: []string{long}}}
 			risk.Backlog = append(risk.Backlog, types.Action{ID: "split", Text: "Split it", Files: []string{p}, Signal: long, Command: "gh issue create --title " + p})
 		}
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if len(out) > MaxCommentChars {
 			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
 		}
@@ -228,7 +232,7 @@ func TestRender_Rules(t *testing.T) {
 		}
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
 			CircuitBreakerSignals: []string{"Unscored new file(s), heat inherited from directory: " + strings.Join(paths, ", ")}}
-		out := Render(risk, &types.Heatmap{})
+		out := Render(risk, &types.Heatmap{}, Links{})
 		if len(out) > MaxCommentChars {
 			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
 		}
@@ -238,7 +242,7 @@ func TestRender_Rules(t *testing.T) {
 	})
 	t.Run("small PRs are not truncated", func(t *testing.T) {
 		risk, hm := hardenPR()
-		if out := Render(risk, hm); strings.Contains(out, "omitted") {
+		if out := Render(risk, hm, Links{}); strings.Contains(out, "omitted") {
 			t.Errorf("unexpected truncation notice:\n%s", out)
 		}
 	})
@@ -246,15 +250,15 @@ func TestRender_Rules(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
 			CircuitBreakerSignals: []string{"Unscored new file(s), heat inherited from directory: a/new.go"},
 			FilesChanged:          []types.FileChange{{Path: "a/new.go", Tier: types.TierLow, Unscored: true}}}
-		out := Render(risk, &types.Heatmap{})
-		if !strings.Contains(out, "Unscored new file(s), heat inherited from directory: a/new.go") {
+		out := Render(risk, &types.Heatmap{}, Links{})
+		if !strings.Contains(out, "### ⚡ One-click actions\n\n- 🆕 Unscored new file(s), treated like their directory until the next analyze scores them: a/new.go\n") {
 			t.Errorf("circuit breaker warning missing:\n%s", out)
 		}
 	})
 	t.Run("no warnings section without signals", func(t *testing.T) {
 		risk, hm := hardenPR()
 		risk.CircuitBreakerSignals = nil
-		if out := Render(risk, hm); strings.Contains(out, "Warnings") {
+		if out := Render(risk, hm, Links{}); strings.Contains(out, "Warnings") {
 			t.Errorf("unexpected warnings section:\n%s", out)
 		}
 	})
@@ -265,14 +269,14 @@ func TestRender_Rules(t *testing.T) {
 				Likelihood: 40 + i, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch})
 		}
 		risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: "r.go", Tier: types.TierLow, Quadrant: types.QuadrantLow, ImpactAssessed: true})
-		out := Render(risk, &types.Heatmap{})
-		if n := strings.Count(out, "| Stabilize |"); n != 5 {
+		out := Render(risk, &types.Heatmap{}, Links{})
+		if n := strings.Count(out, "| 🔧 |"); n != 5 {
 			t.Errorf("%d Stabilize rows, want 5:\n%s", n, out)
 		}
-		if !strings.Contains(out, "| 2 more files need action |  |  | see details |") {
-			t.Errorf("overflow files not shown as their own row:\n%s", out)
+		if !strings.Contains(out, "<details><summary>📋 2 more files need action</summary>\n\n- 🔧 `s1.go`: careful review\n- 🔧 `s0.go`: careful review\n") {
+			t.Errorf("overflow files not folded one line each:\n%s", out)
 		}
-		if !strings.Contains(out, "| 1 other file | limited damage | rarely | Routine |") {
+		if !strings.Contains(out, "| ✅ | 1 other file | limited damage | 🟢 rarely | normal review |") {
 			t.Errorf("routine row should hold only routine files:\n%s", out)
 		}
 		if !strings.Contains(out, "**`s0.go`** (Stabilize)") {
@@ -284,7 +288,7 @@ func TestRender_Rules(t *testing.T) {
 	})
 	t.Run("no heat score, review time or tier names", func(t *testing.T) {
 		risk, hm := hardenPR()
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		for _, bad := range []string{"heat", "Heat", "min", "CRITICAL", "🔥"} {
 			if strings.Contains(out, bad) {
 				t.Errorf("comment contains %q", bad)
@@ -293,7 +297,7 @@ func TestRender_Rules(t *testing.T) {
 	})
 	t.Run("every score shows its repo cutoff once", func(t *testing.T) {
 		risk, hm := hardenPR()
-		out := Render(risk, hm)
+		out := Render(risk, hm, Links{})
 		if !strings.Contains(out, "Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78") {
 			t.Errorf("cutoffs missing:\n%s", out)
 		}
@@ -308,7 +312,7 @@ func TestRender_Rules(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78,
 			FilesChanged: []types.FileChange{{Path: "s.go", Tier: types.TierMedium, Likelihood: 50, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch}},
 			WorthDoing:   []types.Action{{ID: "refactor", Text: "Refactor the function you touch", Signal: "complexity in the top 5%", Files: []string{"s.go"}}}}
-		out := Render(risk, &types.Heatmap{})
+		out := Render(risk, &types.Heatmap{}, Links{})
 		if strings.Contains(out, "Do before merge") {
 			t.Errorf("no blocking items, so no before-merge checklist:\n%s", out)
 		}
@@ -323,18 +327,50 @@ func TestRender_Rules(t *testing.T) {
 	t.Run("auto-merge line under the verdict", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", AutonomyLevel: 3, AutoMergeAllowed: true,
 			AutonomyReason: "every touched file is L3"}
-		out := Render(risk, &types.Heatmap{})
-		want := "Normal review.\n\nAI may auto-merge: yes (every touched file is L3)\n\n"
+		out := Render(risk, &types.Heatmap{}, Links{})
+		want := "## ✅ Routine\n\n🤖 AI may auto-merge: ✅ yes (every touched file is L3)\n\n"
 		if !strings.Contains(out, want) {
-			t.Errorf("missing %q right after the summary:\n%s", want, out)
+			t.Errorf("missing %q right after the verdict:\n%s", want, out)
 		}
 		risk.AutonomyReason = ""
-		if strings.Contains(Render(risk, &types.Heatmap{}), "AI may auto-merge") {
+		if strings.Contains(Render(risk, &types.Heatmap{}, Links{}), "AI may auto-merge") {
 			t.Error("no autonomy computed, so no line")
 		}
 	})
+	t.Run("with a repo, issue and CODEOWNERS actions are links", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.Backlog = append(risk.Backlog, types.Action{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"net/proxy.rs"},
+			Signal: "not covered", Command: "/net/proxy.rs @ana"})
+		out := Render(risk, hm, Links{Repo: "acme/net", Base: "main"})
+		for _, want := range []string{
+			"| 👀 senior sign-off · [📝 open issue](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=",
+			"- [📝 Open issue: Split net/proxy.rs into smaller files](https://github.com/acme/net/issues/new?",
+			"- [👥 Add `/net/proxy.rs @ana` to CODEOWNERS](https://github.com/acme/net/edit/main/.github/CODEOWNERS)",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+	})
+	t.Run("without a repo, actions are plain text", func(t *testing.T) {
+		risk, hm := hardenPR()
+		out := Render(risk, hm, Links{})
+		if strings.Contains(out, "https://") {
+			t.Errorf("link without a repo:\n%s", out)
+		}
+		if !strings.Contains(out, "- 📝 Open an issue: Split net/proxy.rs into smaller files\n") {
+			t.Errorf("plain-text issue action missing:\n%s", out)
+		}
+	})
+	t.Run("a large diff becomes a split action with its size", func(t *testing.T) {
+		risk := &types.PRRisk{Verdict: "Routine", CircuitBreakerSignals: []string{"Large diff (>500 lines)"},
+			FilesChanged: []types.FileChange{{Path: "a.go", LinesAdded: 1200, LinesDeleted: 34, ImpactAssessed: true, Quadrant: types.QuadrantLow}}}
+		if out := Render(risk, &types.Heatmap{}, Links{}); !strings.Contains(out, "- ✂️ Large diff (1,234 lines): consider splitting this PR\n") {
+			t.Errorf("large diff action missing:\n%s", out)
+		}
+	})
 	t.Run("marker lets the workflow update its own comment", func(t *testing.T) {
-		out := Render(&types.PRRisk{Verdict: "Routine"}, &types.Heatmap{})
+		out := Render(&types.PRRisk{Verdict: "Routine"}, &types.Heatmap{}, Links{})
 		if !strings.HasPrefix(out, Marker+"\n") {
 			t.Errorf("comment does not start with the marker:\n%s", out)
 		}

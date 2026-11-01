@@ -58,7 +58,7 @@ owners:
   bob@corp.example: bob-gh      # the @ is added if missing
 ```
 
-Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+alice@users.noreply.github.com`) become `@alice`; other authors appear by email in local outputs (`get`, `create codeowners`, the dashboard), which CODEOWNERS also accepts. PR comments (`pr check --format markdown`) never show an email: an unmapped author there reads "a top owner", so add an alias to name them. Use a `.mailmap` file to merge an author's multiple emails first; it is applied automatically. Authors whose name or email contains `[bot]` are ignored.
+Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+alice@users.noreply.github.com`) become `@alice`; other authors appear by email in local outputs (`get`, `create codeowners`, the dashboard), which CODEOWNERS also accepts. PR comments (`pr check --format markdown`) never show an email: a review request without a known handle asks for "someone who knows" the file, and any other unmapped author reads "a top owner", so add an alias to name them. Use a `.mailmap` file to merge an author's multiple emails first; it is applied automatically. Authors whose name or email contains `[bot]` are ignored.
 
 ## Tour Supporting Components
 

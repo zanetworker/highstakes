@@ -225,7 +225,7 @@ Why
 Latest fix  2026-10-28  fix(network): align destination checks for direct connections (#5004)
 ```
 
-Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the rules. `pr check` turns the before-merge items of the Harden now and Protect files a PR touches into one blocking checklist and ticks the ones the PR already satisfies; items for Stabilize files go into a folded "Worth doing (does not block)" section. Under the verdict, the comment says whether AI may auto-merge, with the reason (`AI may auto-merge: no (touches Protect files)`), from the [autonomy levels](docs/cli-reference.md#agent-autonomy). The dashboard and TUI detail panels show the same sections.
+Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the rules. `pr check` turns the before-merge items of the Harden now and Protect files a PR touches into one blocking checklist and ticks the ones the PR already satisfies; items for Stabilize files go into a folded "Worth doing (does not block)" section. Under the verdict, the comment says whether AI may auto-merge, with the reason (`🤖 AI may auto-merge: ❌ no (touches Protect files)`), from the [autonomy levels](docs/cli-reference.md#agent-autonomy). The dashboard and TUI detail panels show the same sections.
 
 </details>
 
@@ -421,9 +421,10 @@ Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.y
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
+          REPO: ${{ github.repository }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
@@ -456,28 +457,39 @@ highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] |
 
 </details>
 
-**What the PR comment looks like** (a real `pr check --format markdown` on NVIDIA/OpenShell after the PR also changed a test next to `proxy.rs`; GitHub folds the details block):
+**What the PR comment looks like** (a `pr check --format markdown` on NVIDIA/OpenShell after the PR also changed a test next to `proxy.rs`, with `--repo NVIDIA/OpenShell`; issue URLs shortened here; GitHub folds the `<details>` blocks):
 
 ```markdown
 ## ⛔ Harden before merge
 
-`crates/openshell-supervisor-network/src/proxy.rs` and `crates/openshell-supervisor-network/src/egress_audit.rs` are likely to break and costly if broken: Core sandbox egress proxy; bugs can block traffic or bypass network policy.
+⛔ 2 harden · ✅ 2 routine
 
-### Do before merge
+🤖 AI may auto-merge: ❌ no (touches Harden now files)
 
-- [ ] Get sign-off from a senior owner (@johntmyers, a top owner) (`crates/openshell-supervisor-network/src/proxy.rs`)
-- [x] Add regression tests around the 4 recent fixes (`crates/openshell-supervisor-network/src/proxy.rs`)
-- [x] Add contract tests for its public interface (`crates/openshell-supervisor-network/src/proxy.rs`)
-- [ ] Keep auto-merge off (`crates/openshell-supervisor-network/src/proxy.rs`)
+### ✅ Do before merge (2 of 4 done)
 
-| File | If it breaks | Breaks often? | Do |
-|---|---|---|---|
-| `crates/openshell-supervisor-network/src/proxy.rs` | Core sandbox egress proxy; bugs can block traffic or bypass network policy. | Yes: 55 commits in the last 90 days, 28 authors overall (top 1% of this repo) | Harden now |
-| `crates/openshell-supervisor-network/src/egress_audit.rs` | new file: treated like its directory (harden now) | new file | Harden now |
-| 2 other files | limited damage | rarely | Routine |
+- [ ] 👀 Get sign-off from @johntmyers on `crates/openshell-supervisor-network/src/proxy.rs`
+- [x] 🧪 Add regression tests around the 4 recent fixes (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [x] 🧪 Add contract tests for its public interface (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [ ] 🚫 Keep auto-merge off
+
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ⛔ | `crates/openshell-supervisor-network/src/proxy.rs` | Core sandbox egress proxy; bugs can block traffic or bypass network policy. | 🔴 4 recent fixes | 👀 senior sign-off · [📝 open issue](https://github.com/NVIDIA/OpenShell/issues/new?title=Split...) |
+| ⛔ | `crates/openshell-supervisor-network/src/egress_audit.rs` | new file: treated like its directory (harden now) | 🆕 new file | careful review |
+| ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
+
+### ⚡ One-click actions
+
+- [📝 Open issue: Split crates/openshell-supervisor-network/src/proxy.rs into smaller files](https://github.com/NVIDIA/OpenShell/issues/new?title=Split...)
+- 🆕 Unscored new file(s), treated like their directory until the next analyze scores them: crates/openshell-supervisor-network/src/egress_audit.rs
+
+<details><summary>🗺 Where this PR lands</summary>
+(a Mermaid quadrant chart of the non-routine files)
+</details>
 
 <details><summary>Why these actions?</summary>
-(per-file reasons, scores and repo cutoffs, suggested reviewers, backlog commands)
+(per-file reasons, scores and repo cutoffs, suggested reviewers, worth doing, backlog commands, gate)
 </details>
 ```
 

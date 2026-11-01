@@ -1,0 +1,14 @@
+```mermaid
+quadrantChart
+  title Changed files
+  x-axis Rarely breaks --> Breaks often
+  y-axis Limited damage --> Costly if it breaks
+  quadrant-1 Harden now
+  quadrant-2 Protect
+  quadrant-3 Routine
+  quadrant-4 Stabilize
+  proxy.rs: [0.63, 0.82]
+  policy.rs: [0.08, 0.55]
+  policy.rs 2: [0.98, 0.02]
+  weirdname.go: [0.55, 0.06]
+```

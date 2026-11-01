@@ -373,6 +373,10 @@ func Save(h *types.Heatmap, path string) error {
 		return fmt.Errorf("marshal JSON: %w", err)
 	}
 
+	// A fresh checkout has no .heatmap/ yet (analyze without init).
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}

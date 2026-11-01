@@ -1,22 +1,43 @@
 <!-- highstakes-triage -->
 ## ⛔ Harden before merge
 
-`net/proxy.rs` is likely to break and costly if broken: Core egress proxy that enforces network policy.
+⛔ 1 harden · 🛡 2 protect · ✅ 2 routine
 
-AI may auto-merge: no (touches Harden now files)
+🤖 AI may auto-merge: ❌ no (touches Harden now files)
 
-### Do before merge
+### ✅ Do before merge (1 of 3 done)
 
-- [ ] Get sign-off from a senior owner (@ana, @bo) (`net/proxy.rs`)
-- [x] Add regression tests around the recent fix (`net/proxy.rs`)
-- [ ] Keep auto-merge off (`net/proxy.rs`, `net/policy.rs`)
+- [ ] 👀 Get sign-off from @ana, @bo on `net/proxy.rs`
+- [x] 🧪 Add regression tests around the recent fix (`net/proxy.rs`)
+- [ ] 🚫 Keep auto-merge off
 
-| File | If it breaks | Breaks often? | Do |
-|---|---|---|---|
-| `net/proxy.rs` | Core egress proxy that enforces network policy. | Yes: 55 commits in the last 90 days (top 1% of this repo) | Harden now |
-| `net/policy.rs` | security 80 | No, rarely changes | Protect |
-| `net/new\|file.rs` | new file: treated like its directory (protect) | new file | Protect |
-| 2 other files | limited damage | rarely | Routine |
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ⛔ | `net/proxy.rs` | Core egress proxy that enforces network policy. | 🔴 55 commits in the last 90 days | 👀 senior sign-off · [📝 open issue](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=File%3A+%60net%2Fproxy.rs%60%0AWhy%3A+479+functions+in+one+file+%28top+1%25%29%0ADone+when%3A+tests+pass+and+the+0+functions+of+net%2Fproxy.rs+are+spread+over+smaller+files%0A%0AOpened+from+the+HighStakes+PR+comment) |
+| 🛡 | `net/policy.rs` | security 80 | 🟢 rarely | 🚫 no auto-merge |
+| 🛡 | `net/new\|file.rs` | new file: treated like its directory (protect) | 🆕 new file | careful review |
+| ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
+
+### ⚡ One-click actions
+
+- [📝 Open issue: Split net/proxy.rs into smaller files](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=File%3A+%60net%2Fproxy.rs%60%0AWhy%3A+479+functions+in+one+file+%28top+1%25%29%0ADone+when%3A+tests+pass+and+the+0+functions+of+net%2Fproxy.rs+are+spread+over+smaller+files%0A%0AOpened+from+the+HighStakes+PR+comment)
+
+<details><summary>🗺 Where this PR lands</summary>
+
+```mermaid
+quadrantChart
+  title Changed files
+  x-axis Rarely breaks --> Breaks often
+  y-axis Limited damage --> Costly if it breaks
+  quadrant-1 Harden now
+  quadrant-2 Protect
+  quadrant-3 Routine
+  quadrant-4 Stabilize
+  proxy.rs: [0.63, 0.82]
+  policy.rs: [0.08, 0.55]
+```
+
+</details>
 
 <details><summary>Why these actions?</summary>
 

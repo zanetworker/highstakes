@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zanetworker/highstakes/internal/prdata"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -75,5 +76,54 @@ func TestAppendShadowLog(t *testing.T) {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("record missing %s: %s", want, lines[0])
 		}
+	}
+}
+
+func TestCommentRepo(t *testing.T) {
+	origin := func(r prdata.Repo, err error) func() (prdata.Repo, error) {
+		return func() (prdata.Repo, error) { return r, err }
+	}
+	noOrigin := origin(prdata.Repo{}, errors.New("no origin"))
+	tests := []struct {
+		name, flag, env string
+		origin          func() (prdata.Repo, error)
+		want            string
+		wantErr         bool
+	}{
+		{"flag wins", "acme/net", "other/repo", origin(prdata.Repo{Owner: "o", Name: "r"}, nil), "acme/net", false},
+		{"GITHUB_REPOSITORY next", "", "other/repo", origin(prdata.Repo{Owner: "o", Name: "r"}, nil), "other/repo", false},
+		{"origin remote last", "", "", origin(prdata.Repo{Owner: "o", Name: "r"}, nil), "o/r", false},
+		{"nothing known: plain text, no error", "", "", noOrigin, "", false},
+		{"bad env value is skipped", "", "not-a-repo", noOrigin, "", false},
+		{"bad flag is an error", "acme", "", noOrigin, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := commentRepo(tt.flag, tt.env, tt.origin)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("commentRepo = %q, %v; want %q, err=%v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLinkBase(t *testing.T) {
+	tests := []struct{ base, want string }{
+		{"main", "main"},
+		{"origin/main", "main"},
+		{"origin/release/1.2", "release/1.2"},
+		{"refs/heads/dev", "dev"},
+		{"a4715ad", ""},                                  // a commit, not a branch
+		{"a4715ad0c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6", ""}, // full SHA
+		{"HEAD~3", ""},
+		{"HEAD", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.base, func(t *testing.T) {
+			if got := linkBase(tt.base); got != tt.want {
+				t.Errorf("linkBase(%q) = %q, want %q", tt.base, got, tt.want)
+			}
+		})
 	}
 }
