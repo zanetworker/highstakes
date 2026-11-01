@@ -249,3 +249,34 @@ func TestHotPaths_ByImpact(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeowners_EscapesPaths(t *testing.T) {
+	tests := []struct {
+		name, path, want string
+	}{
+		{"plain path unchanged", "auth/jwt.go", "/auth/jwt.go @alice"},
+		{"space is escaped so it is not an owner", "src/payment handlers.go", `/src/payment\ handlers.go @alice`},
+		{"glob metacharacters are literal", "a/*?[x]!.go", `/a/\*\?\[x\]\!.go @alice`},
+		{"backslash is escaped", `a\b.go`, `/a\\b.go @alice`},
+		{"leading hash is not a comment", "#notes.md", `/\#notes.md @alice`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := []Entry{{Path: tt.path, Tier: types.TierCritical, HeatScore: 90, Files: []string{tt.path}}}
+			owners := map[string][]ownership.Owner{tt.path: {{Handle: "@alice", Share: 1}}}
+			block, _ := Codeowners(entries, owners, 2)
+			if !strings.Contains(block, "\n"+tt.want+"\n") {
+				t.Errorf("block missing %q:\n%s", tt.want, block)
+			}
+		})
+	}
+}
+
+func TestBuild_PathsStayUnescaped(t *testing.T) {
+	path := "src/payment handlers.go"
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{path: file(path, 90, types.TierCritical)}}
+	p := Build(hm, HotPaths(hm, types.TierHigh, th), types.TierHigh)
+	if len(p.Paths) != 1 || p.Paths[0] != path || p.Files[0].Path != path {
+		t.Errorf("policy paths = %v files = %+v, want raw %q", p.Paths, p.Files, path)
+	}
+}

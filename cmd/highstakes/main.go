@@ -707,179 +707,211 @@ var agentContextCmd = &cobra.Command{
 	Use:   "agent-context",
 	Short: "Machine-readable description of all commands and flags",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := map[string]interface{}{
-			"schema_version": "1",
-			"cli_version":    version,
-			"commands": map[string]interface{}{
-				"init": map[string]interface{}{
-					"description": "Initialize heatmap in current repository",
-					"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
-				},
-				"analyze": map[string]interface{}{
-					"description": "Analyze repository and generate heatmap with LLM blast radius assessment",
-					"flags": map[string]interface{}{
-						"--json":        flagDef("bool", false, "Output as JSON"),
-						"--no-llm":      flagDef("bool", false, "Skip LLM, use static heuristics only"),
-						"--force":       flagDef("bool", false, "Re-assess all files (ignore cache)"),
-						"--model":       flagDef("string", "openai/gpt-6-luna", "OpenRouter model ID"),
-						"--concurrency": flagDef("int", 10, "Parallel LLM requests"),
-					},
-				},
-				"get": map[string]interface{}{
-					"description": "Get heat score and blast radius reasoning for a file",
-					"args":        "file_path (required)",
-					"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
-					"subcommands": map[string]interface{}{
-						"tour": map[string]interface{}{
-							"description": "Risk-ordered reading path: directories in dependency order (dependencies first), hottest files first, with file:line anchors",
-							"flags": map[string]interface{}{
-								"--json":   flagDef("bool", false, "Output as JSON (schema version 1)"),
-								"--limit":  flagDef("int", 0, "Keep the N hottest files (0 = all)"),
-								"--focus":  flagDef("string", "", "Only files under this repo-relative directory or file"),
-								"--format": flagDef("enum", "text", "Values: text, json, walkthrough (show-me step-through data)"),
-								"--out":    flagDef("string", "", "Write to this file instead of stdout"),
-							},
-						},
-						"architecture": map[string]interface{}{
-							"description": "Generated architecture diagram of runtime units: SeeCode spec or plain JSON, with declared links from .heatmap/architecture.yaml and top files per box as evidence",
-							"flags": map[string]interface{}{
-								"--format":             flagDef("enum", "seecode", "Values: seecode, json"),
-								"--json":               flagDef("bool", false, "Same as --format json"),
-								"--max-nodes":          flagDef("int", 9, "Most boxes (2-24); the rest fold into one other-units box"),
-								"--out":                flagDef("string", "", "Write to this file instead of stdout"),
-								"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
-							},
-						},
-					},
-				},
-				"list": map[string]interface{}{
-					"description": "List files sorted by heat score",
-					"flags": map[string]interface{}{
-						"--json":  flagDef("bool", false, "Output as JSON"),
-						"--tier":  flagDef("enum", "", "Filter by tier. Values: critical, high, medium, low"),
-						"--limit": flagDef("int", 0, "Max files to return (0 = all)"),
-					},
-					"subcommands": map[string]interface{}{
-						"units": map[string]interface{}{
-							"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
-							"flags": map[string]interface{}{
-								"--json":               flagDef("bool", false, "Output as JSON"),
-								"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
-							},
-						},
-					},
-				},
-				"pr": map[string]interface{}{
-					"description": "Assess pull request risk",
-					"subcommands": map[string]interface{}{
-						"check": map[string]interface{}{
-							"description": "Score current diff against a base branch",
-							"flags": map[string]interface{}{
-								"--json":      flagDef("bool", false, "Output as JSON"),
-								"--base":      flagDef("string", "main", "Base branch"),
-								"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
-								"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
-								"--author":    flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
-								"--reviewers": flagDef("int", 3, "Max suggested reviewers (0 = off)"),
-							},
-						},
-					},
-				},
-				"create": map[string]interface{}{
-					"description": "Create review artifacts from the heatmap",
-					"subcommands": map[string]interface{}{
-						"codeowners": map[string]interface{}{
-							"description": "CODEOWNERS block for high-stakes paths with owners from git history",
-							"flags": map[string]interface{}{
-								"--json":       flagDef("bool", false, "Output as JSON"),
-								"--write":      flagDef("bool", false, "Update the marked block in --file"),
-								"--file":       flagDef("string", ".github/CODEOWNERS", "CODEOWNERS path for --write"),
-								"--min-tier":   flagDef("enum", "high", "Values: critical, high, medium, low"),
-								"--max-owners": flagDef("int", 2, "Owners per path"),
-							},
-						},
-						"policy": map[string]interface{}{
-							"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json)",
-							"flags": map[string]interface{}{
-								"--json":     flagDef("bool", false, "Output as JSON"),
-								"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low"),
-							},
-						},
-					},
-				},
-				"incident": map[string]interface{}{
-					"description": "Manage production incident records",
-					"subcommands": map[string]interface{}{
-						"create": map[string]interface{}{
-							"description": "Record a new incident",
-							"flags": map[string]interface{}{
-								"--json":        flagDef("bool", false, "Output as JSON"),
-								"--file":        flagDef("string", "", "File path (required)"),
-								"--severity":    flagDef("enum", "", "Values: critical, high, medium, low (required)"),
-								"--description": flagDef("string", "", "What happened (required)"),
-								"--date":        flagDef("string", "", "YYYY-MM-DD (default: today)"),
-							},
-						},
-						"list": map[string]interface{}{
-							"description": "List recorded incidents",
-							"flags": map[string]interface{}{
-								"--json": flagDef("bool", false, "Output as JSON"),
-								"--file": flagDef("string", "", "Filter by file path"),
-							},
-						},
-					},
-				},
-				"check": map[string]interface{}{
-					"description": "Check how well the heatmap matches reality",
-					"subcommands": map[string]interface{}{
-						"calibration": map[string]interface{}{
-							"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history",
-							"flags": map[string]interface{}{
-								"--json":    flagDef("bool", false, "Output as JSON"),
-								"--top":     flagDef("int", 10, "K for precision@K and recall@K"),
-								"--since":   flagDef("string", "365d", "Event window in days (Nd)"),
-								"--holdout": flagDef("string", "", "Cutoff YYYY-MM-DD or Nd: score with history before it, count events after it"),
-								"--limit":   flagDef("int", 10, "Max files per surprise list"),
-							},
-						},
-					},
-				},
-				"report": map[string]interface{}{
-					"description": "Generate heat distribution report with reasoning",
-					"flags": map[string]interface{}{
-						"--json":  flagDef("bool", false, "Output full heatmap as JSON"),
-						"--limit": flagDef("int", 10, "Max files per tier"),
-					},
-				},
-				"github": map[string]interface{}{
-					"description": "GitHub integration",
-					"subcommands": map[string]interface{}{
-						"install": map[string]interface{}{
-							"description": "Install GitHub Action for automated PR triage",
-						},
-					},
-				},
-			},
-			"environment": map[string]interface{}{
-				"OPENROUTER_API_KEY": "Required for LLM blast radius analysis. Get from openrouter.ai",
-			},
-			"models": []string{
-				"openai/gpt-6-luna (default, best impact ranking on the benchmark)",
-				"z-ai/glm-5.3-flash (cheapest, slower)",
-				"deepseek/deepseek-v4.1-flash (open weights, self-hostable)",
-				"anthropic/claude-haiku-5.5 (fewest failed calls)",
-			},
-			"exit_codes": map[string]interface{}{
-				"0": "Success",
-				"1": "Internal error",
-				"2": "Invalid input (bad flags, missing required params)",
-				"3": "External dependency failure (git, API)",
-				"4": "Not found (file not in heatmap)",
-				"5": "PR blocked by pr check --fail-on",
-			},
-		}
-		return printJSON(ctx)
+		return printJSON(agentContext())
 	},
+}
+
+// agentContext describes every command and flag for agent callers.
+// TestAgentContext_CoversEveryCommandAndFlag keeps it in step with rootCmd.
+func agentContext() map[string]interface{} {
+	return map[string]interface{}{
+		"schema_version": "1",
+		"cli_version":    version,
+		"commands": map[string]interface{}{
+			"init": map[string]interface{}{
+				"description": "Initialize heatmap in current repository",
+				"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+			},
+			"analyze": map[string]interface{}{
+				"description": "Analyze repository and generate heatmap with LLM blast radius assessment",
+				"flags": map[string]interface{}{
+					"--json":        flagDef("bool", false, "Output as JSON"),
+					"--no-llm":      flagDef("bool", false, "Skip LLM, use static heuristics only"),
+					"--force":       flagDef("bool", false, "Re-assess all files (ignore cache)"),
+					"--model":       flagDef("string", "openai/gpt-6-luna", "OpenRouter model ID"),
+					"--concurrency": flagDef("int", 10, "Parallel LLM requests"),
+				},
+			},
+			"get": map[string]interface{}{
+				"description": "Get heat score and blast radius reasoning for a file",
+				"args":        "file_path (required)",
+				"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+				"subcommands": map[string]interface{}{
+					"tour": map[string]interface{}{
+						"description": "Reading path with file:line anchors: product sections ranked by importance (max impact, fragile-critical stops, max heat), each section's dependencies emitted before it; supporting sections last; files by impact then centrality",
+						"flags": map[string]interface{}{
+							"--json":               flagDef("bool", false, "Output as JSON (schema version 1); same as --format json"),
+							"--format":             flagDef("enum", "text", "Values: text, json, walkthrough (show-me step-through data)"),
+							"--out":                flagDef("string", "", "Write to this file instead of stdout"),
+							"--limit":              flagDef("int", 0, "Keep the N most impactful files (0 = all); ignored with --per-component"),
+							"--per-component":      flagDef("int", 0, "Keep the N most important files of each component, one section per component (0 = off)"),
+							"--min-impact":         flagDef("int", 0, "Skip files whose impact is below this, and components left without files (0-100)"),
+							"--components":         flagDef("string", "", "Only these components, comma-separated (e.g. crates/core,internal/api)"),
+							"--include-supporting": flagDef("bool", false, "Add supporting components (examples, scripts, .github, docs, deploy, tests, vendor; tour.supporting in config) in a final part"),
+							"--focus":              flagDef("string", "", "Only files under this repo-relative directory or file"),
+						},
+					},
+					"architecture": map[string]interface{}{
+						"description": "Generated architecture diagram of runtime units: SeeCode spec or plain JSON, with declared links from .heatmap/architecture.yaml and top files per box as evidence",
+						"flags": map[string]interface{}{
+							"--format":             flagDef("enum", "seecode", "Values: seecode, json"),
+							"--json":               flagDef("bool", false, "Same as --format json"),
+							"--max-nodes":          flagDef("int", 9, "Most boxes (2-24); the rest fold into one other-units box"),
+							"--out":                flagDef("string", "", "Write to this file instead of stdout"),
+							"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
+						},
+					},
+				},
+			},
+			"list": map[string]interface{}{
+				"description": "List files sorted by heat score",
+				"flags": map[string]interface{}{
+					"--json":  flagDef("bool", false, "Output as JSON"),
+					"--tier":  flagDef("enum", "", "Filter by tier. Values: critical, high, medium, low"),
+					"--limit": flagDef("int", 0, "Max files to return (0 = all)"),
+					"--sort":  flagDef("enum", "heat", "Values: heat, likelihood, impact"),
+				},
+				"subcommands": map[string]interface{}{
+					"units": map[string]interface{}{
+						"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
+						"flags": map[string]interface{}{
+							"--json":               flagDef("bool", false, "Output as JSON"),
+							"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
+						},
+					},
+				},
+			},
+			"pr": map[string]interface{}{
+				"description": "Assess pull request risk",
+				"subcommands": map[string]interface{}{
+					"check": map[string]interface{}{
+						"description": "Score current diff against a base branch",
+						"flags": map[string]interface{}{
+							"--json":      flagDef("bool", false, "Output as JSON"),
+							"--base":      flagDef("string", "main", "Base branch"),
+							"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
+							"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
+							"--author":    flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
+							"--reviewers": flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+						},
+					},
+				},
+			},
+			"create": map[string]interface{}{
+				"description": "Create review artifacts from the heatmap",
+				"subcommands": map[string]interface{}{
+					"codeowners": map[string]interface{}{
+						"description": "CODEOWNERS block for high-stakes paths with owners from git history",
+						"flags": map[string]interface{}{
+							"--json":       flagDef("bool", false, "Output as JSON"),
+							"--write":      flagDef("bool", false, "Update the marked block in --file"),
+							"--file":       flagDef("string", ".github/CODEOWNERS", "CODEOWNERS path for --write"),
+							"--min-tier":   flagDef("enum", "high", "Values: critical, high, medium, low"),
+							"--max-owners": flagDef("int", 2, "Owners per path"),
+						},
+					},
+					"labels": map[string]interface{}{
+						"description": "Blind CSV sheet (path, maintainer_rating, notes) for maintainers to rate 1-5 how bad a bug in each file would be; feed it to check calibration --labels",
+						"flags": map[string]interface{}{
+							"--json":   flagDef("bool", false, "Output the sampled paths and settings as JSON"),
+							"--top":    flagDef("int", 20, "Files HighStakes rates highest on blast radius"),
+							"--random": flagDef("int", 20, "Randomly sampled other non-test files"),
+							"--seed":   flagDef("int", 1, "Random seed; the same seed gives the same sheet"),
+							"--out":    flagDef("string", "", "Write the CSV to this file (default stdout)"),
+						},
+					},
+					"policy": map[string]interface{}{
+						"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json)",
+						"flags": map[string]interface{}{
+							"--json":     flagDef("bool", false, "Output as JSON"),
+							"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low"),
+						},
+					},
+				},
+			},
+			"incident": map[string]interface{}{
+				"description": "Manage production incident records",
+				"subcommands": map[string]interface{}{
+					"create": map[string]interface{}{
+						"description": "Record a new incident",
+						"flags": map[string]interface{}{
+							"--json":        flagDef("bool", false, "Output as JSON"),
+							"--file":        flagDef("string", "", "File path (required)"),
+							"--severity":    flagDef("enum", "", "Values: critical, high, medium, low (required)"),
+							"--description": flagDef("string", "", "What happened (required)"),
+							"--date":        flagDef("string", "", "YYYY-MM-DD (default: today)"),
+						},
+					},
+					"list": map[string]interface{}{
+						"description": "List recorded incidents",
+						"flags": map[string]interface{}{
+							"--json": flagDef("bool", false, "Output as JSON"),
+							"--file": flagDef("string", "", "Filter by file path"),
+						},
+					},
+				},
+			},
+			"check": map[string]interface{}{
+				"description": "Check how well the heatmap matches reality",
+				"subcommands": map[string]interface{}{
+					"calibration": map[string]interface{}{
+						"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history",
+						"flags": map[string]interface{}{
+							"--json":    flagDef("bool", false, "Output as JSON"),
+							"--top":     flagDef("int", 10, "K for precision@K and recall@K"),
+							"--since":   flagDef("string", "365d", "Event window in days (Nd)"),
+							"--holdout": flagDef("string", "", "Cutoff YYYY-MM-DD or Nd: score with history before it, count events after it"),
+							"--limit":   flagDef("int", 10, "Max files per surprise list"),
+							"--events":  flagDef("enum", "all", "Event kinds to count. Values: all, fixes, reverts, security"),
+							"--labels":  flagDef("string", "", "Compare with maintainer ratings in this CSV (from create labels) instead of git history"),
+						},
+					},
+				},
+			},
+			"dashboard": map[string]interface{}{
+				"description": "Generate interactive HTML dashboard and open it in the browser",
+				"flags": map[string]interface{}{
+					"--output":  flagDef("string", "", "Output path (default: .heatmap/dashboard.html)"),
+					"--no-open": flagDef("bool", false, "Don't open in browser"),
+				},
+			},
+			"agent-context": map[string]interface{}{
+				"description": "Machine-readable description of all commands and flags (this document)",
+			},
+			"report": map[string]interface{}{
+				"description": "Generate heat distribution report with reasoning",
+				"flags": map[string]interface{}{
+					"--json":  flagDef("bool", false, "Output full heatmap as JSON"),
+					"--limit": flagDef("int", 10, "Max files per tier"),
+				},
+			},
+			"github": map[string]interface{}{
+				"description": "GitHub integration",
+				"subcommands": map[string]interface{}{
+					"install": map[string]interface{}{
+						"description": "Install GitHub Action for automated PR triage",
+					},
+				},
+			},
+		},
+		"environment": map[string]interface{}{
+			"OPENROUTER_API_KEY": "Required for LLM blast radius analysis. Get from openrouter.ai",
+		},
+		"models": []string{
+			"openai/gpt-6-luna (default, best impact ranking on the benchmark)",
+			"z-ai/glm-5.3-flash (cheapest, slower)",
+			"deepseek/deepseek-v4.1-flash (open weights, self-hostable)",
+			"anthropic/claude-haiku-5.5 (fewest failed calls)",
+		},
+		"exit_codes": map[string]interface{}{
+			"0": "Success",
+			"1": "Internal error",
+			"2": "Invalid input (bad flags, missing required params)",
+			"3": "External dependency failure (git, API)",
+			"4": "Not found (file not in heatmap)",
+			"5": "PR blocked by pr check --fail-on",
+		},
+	}
 }
 
 // --- github ---

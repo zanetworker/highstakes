@@ -41,6 +41,23 @@
           "additionalProperties": {
             "type": "integer"
           }
+        },
+        "git_history": {
+          "type": "string",
+          "description": "\"complete\" when churn factors were read from git, or \"unavailable: <reason>\" (churn is then 0)"
+        },
+        "likely_cutoff": {
+          "type": "integer",
+          "description": "Lowest likelihood counted as likely (top 20% of non-test files)"
+        },
+        "impact_threshold": {
+          "type": "integer",
+          "description": "Lowest impact counted as impactful: max(tiers.high, top 20% of assessed non-test files)"
+        },
+        "units": {
+          "type": "array",
+          "description": "Runtime units (binaries, scripts) found from imports and manifests",
+          "items": {"$ref": "#/definitions/Unit"}
         }
       }
     },
@@ -79,12 +96,42 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 100,
-          "description": "Aggregate heat score (0-100)"
+          "description": "max(likelihood, impact) when impact is assessed, otherwise the likelihood (kept for compatibility)"
         },
         "tier": {
           "type": "string",
           "enum": ["critical", "high", "medium", "low"],
-          "description": "Risk tier"
+          "description": "Risk tier: from the quadrant when impact is assessed, else from heat_score"
+        },
+        "likelihood": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How likely the file is to need fixes (churn, complexity, centrality, path keywords, incidents; no LLM)"
+        },
+        "impact": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Damage if the file breaks: LLM blast radius when impact_assessed, else an estimate from centrality and path keywords"
+        },
+        "impact_assessed": {
+          "type": "boolean",
+          "description": "Whether impact came from the LLM"
+        },
+        "quadrant": {
+          "type": "string",
+          "enum": ["fragile-critical", "protect", "watch", "low"],
+          "description": "Likelihood x impact quadrant; present only when impact is assessed"
+        },
+        "component": {
+          "type": "string",
+          "description": "Top-level unit of code the file belongs to (crate, package, module)"
+        },
+        "units": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Names of the runtime units that link the file"
         },
         "language": {
           "type": "string",
@@ -373,6 +420,36 @@
             }
           }
         }
+      }
+    },
+    "Unit": {
+      "type": "object",
+      "description": "A deployable entry point and the components it links (from imports and manifests, not from observing what runs)",
+      "required": ["name", "kind", "entry", "home", "components", "shared"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "description": "rust-bin, go-main, node-bin, node-start, python-script, python-main"},
+        "entry": {"type": "string", "description": "Entry file"},
+        "evidence": {"type": "string", "description": "file:line that declares the entry point"},
+        "home": {"type": "string", "description": "Component holding the entry file"},
+        "components": {"type": "array", "items": {"type": "string"}, "description": "Every component linked transitively, home first"},
+        "shared": {"type": "array", "items": {"type": "string"}, "description": "Linked components other units link too"},
+        "files": {"type": "integer", "description": "Non-test files linked"},
+        "lines": {"type": "integer", "description": "Their total lines"},
+        "max_impact": {"type": "integer", "description": "Highest impact among linked files"},
+        "impact_assessed": {"type": "boolean", "description": "Whether the file supplying max_impact was LLM-assessed; false means max_impact is an estimate"},
+        "fragile_critical": {"type": "integer", "description": "Linked files in the fragile-critical quadrant"},
+        "supporting": {"type": "boolean", "description": "Unit around the product (examples, scripts, tests, helper bins)"},
+        "inferred_placement": {"type": "array", "items": {"$ref": "#/definitions/Placement"}}
+      }
+    },
+    "Placement": {
+      "type": "object",
+      "description": "Deployment hint that names a unit (where the binary is packaged, not proof that it runs there)",
+      "properties": {
+        "kind": {"type": "string", "enum": ["dockerfile", "helm", "k8s"]},
+        "detail": {"type": "string", "description": "e.g. ENTRYPOINT of deploy/docker/Dockerfile.worker"},
+        "evidence": {"type": "string", "description": "file:line"}
       }
     },
     "Incident": {

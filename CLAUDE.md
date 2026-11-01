@@ -33,7 +33,7 @@ docs/                        User-facing documentation
 
 ## Key Patterns
 
-- Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score = max of the two for compatibility
+- Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score (kept for compatibility) = max of the two when impact is assessed, else the likelihood
 - LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
 - Assessments cached in .heatmap/cache/ by SHA-256 of model ID, prompt version (llm.PromptVersion) and file content
 - Analyzer excludes configurable in .heatmap/config.yaml (not hardcoded)

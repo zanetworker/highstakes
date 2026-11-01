@@ -405,6 +405,60 @@ internal fun internalOnly() {}
 	}
 }
 
+func TestParseSource_DeclaredSymbols(t *testing.T) {
+	tests := []struct {
+		name, lang, path, src string
+		want                  []string
+	}{
+		{
+			name: "kotlin top-level declarations carry the package",
+			lang: "Kotlin", path: "Services.kt",
+			src:  "package com.example\n\nclass PaymentService { fun member() {} }\ninterface Ledger\nobject Registry\nfun formatAmount() { val local = 1 }\nval ZERO = 0L\n",
+			want: []string{"com.example.Ledger", "com.example.PaymentService", "com.example.Registry", "com.example.ZERO", "com.example.formatAmount"},
+		},
+		{
+			name: "kotlin without a package uses the bare name",
+			lang: "Kotlin", path: "Main.kt",
+			src:  "fun main() {}\n",
+			want: []string{"main"},
+		},
+		{
+			name: "csharp block and nested namespaces skip nested types",
+			lang: "C#", path: "Handlers.cs",
+			src:  "namespace Acme { namespace Billing { public class Processor { public class Nested {} } public enum Kind {} } }\nclass Global {}\n",
+			want: []string{"Acme.Billing.Kind", "Acme.Billing.Processor", "Global"},
+		},
+		{
+			name: "csharp file-scoped namespace",
+			lang: "C#", path: "Text.cs",
+			src:  "namespace Acme.Util;\n\npublic static class StringTools {}\npublic record Money();\n",
+			want: []string{"Acme.Util.Money", "Acme.Util.StringTools"},
+		},
+		{
+			name: "java keeps the filename rule and declares no symbols",
+			lang: "Java", path: "Helper.java",
+			src:  "package com.acme;\npublic class Helper {}\n",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := parseSource(tt.lang, tt.path, []byte(tt.src))
+			if err != nil {
+				t.Fatalf("parseSource: %v", err)
+			}
+			var got []string
+			if res.Symbols != nil {
+				got = append(got, res.Symbols...)
+				sort.Strings(got)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Symbols = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSource_Errors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -562,6 +616,35 @@ func TestAnalyzer_JavaImports(t *testing.T) {
 			base + "app/Service.java": {base + "model/Order.java", base + "model/User.java", base + "util/Helper.java"},
 		},
 	)
+}
+
+func TestAnalyzer_KotlinImportsResolveDeclaredSymbols(t *testing.T) {
+	base := "src/main/kotlin/com/example/"
+	a := analyzeRepo(t, map[string]string{
+		base + "Services.kt":                    "package com.example\n\nclass PaymentService\ninterface Ledger\nobject Registry\n",
+		base + "util/Money.kt":                  "package com.example.util\n\nfun formatAmount(c: Long): String = c.toString()\nval ZERO = 0L\n",
+		base + "util/Other.kt":                  "package com.example.util\n\nclass Unrelated\n",
+		base + "app/Checkout.kt":                "package com.example.app\n\nimport com.example.PaymentService\nimport com.example.util.formatAmount\nimport kotlin.math.max\n\nclass Checkout\n",
+		base + "app/Audit.kt":                   "package com.example.app\n\nimport com.example.util.ZERO\nimport com.example.Registry\n",
+		"src/main/java/com/example/Caller.java": "package com.example.j;\nimport com.example.Ledger;\npublic class Caller {}\n",
+	})
+	assertEdges(t, a, nil, map[string][]string{
+		base + "app/Checkout.kt":                {base + "Services.kt", base + "util/Money.kt"},
+		base + "app/Audit.kt":                   {base + "Services.kt", base + "util/Money.kt"},
+		"src/main/java/com/example/Caller.java": {base + "Services.kt"},
+	})
+}
+
+func TestAnalyzer_CSharpUsingsResolveDeclaredTypes(t *testing.T) {
+	a := analyzeRepo(t, map[string]string{
+		"src/Billing/Handlers.cs": "namespace Acme.Billing\n{\n    public class PaymentProcessor {}\n    public class Outer { public class Nested {} }\n}\n",
+		"src/Util/Text.cs":        "namespace Acme.Util;\n\npublic static class StringTools {}\n",
+		"src/Util/Unrelated.cs":   "namespace Acme.Util;\n\npublic class Other {}\n",
+		"src/App/Program.cs":      "using static Acme.Util.StringTools;\nusing Proc = Acme.Billing.PaymentProcessor;\nusing System;\n\nnamespace Acme.App;\npublic class Program {}\n",
+	})
+	assertEdges(t, a, nil, map[string][]string{
+		"src/App/Program.cs": {"src/Billing/Handlers.cs", "src/Util/Text.cs"},
+	})
 }
 
 func TestAnalyzer_TreeSitterComplexityReplacesHeuristic(t *testing.T) {

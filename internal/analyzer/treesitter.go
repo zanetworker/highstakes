@@ -36,6 +36,11 @@ type parseResult struct {
 	Imports []string
 	// Packages are the Java/Kotlin package or C# namespaces the file declares.
 	Packages []string
+	// Symbols are the qualified names of top-level Kotlin declarations and C#
+	// namespace-level types, which need not match the file name.
+	Symbols []string
+	// fileNamespace is the C# file-scoped namespace, whose types are its siblings.
+	fileNamespace string
 }
 
 type set map[string]bool
@@ -589,6 +594,22 @@ func kotlinImports(n *ts.Node, src []byte, l *ts.Language, r *parseResult) {
 		if id := childOfType(n, l, "identifier"); id != nil {
 			r.Packages = append(r.Packages, compact(id.Text(src)))
 		}
+	case "class_declaration", "object_declaration", "function_declaration", "property_declaration":
+		if p := n.Parent(); p == nil || p.Type(l) != "source_file" {
+			return
+		}
+		name := childOfType(n, l, "type_identifier", "simple_identifier")
+		if v := childOfType(n, l, "variable_declaration"); v != nil {
+			name = childOfType(v, l, "simple_identifier")
+		}
+		if name == nil {
+			return
+		}
+		sym := name.Text(src)
+		if len(r.Packages) > 0 {
+			sym = r.Packages[0] + "." + sym
+		}
+		r.Symbols = append(r.Symbols, sym)
 	case "import_header":
 		id := childOfType(n, l, "identifier")
 		if id == nil {
@@ -629,7 +650,42 @@ func csharpImports(n *ts.Node, src []byte, l *ts.Language, r *parseResult) {
 			}
 		}
 		r.Packages = append(r.Packages, ns)
+		if n.Type(l) == "file_scoped_namespace_declaration" {
+			r.fileNamespace = ns
+		}
+	default:
+		if csharpTypes[n.Type(l)] {
+			if sym := csharpTypeSymbol(n, src, l, r.fileNamespace); sym != "" {
+				r.Symbols = append(r.Symbols, sym)
+			}
+		}
 	}
+}
+
+var csharpTypes = newSet("class_declaration", "struct_declaration", "interface_declaration", "enum_declaration", "record_declaration", "delegate_declaration")
+
+// csharpTypeSymbol qualifies a namespace-level type with its enclosing
+// namespaces (or the file-scoped one); nested types return "".
+func csharpTypeSymbol(n *ts.Node, src []byte, l *ts.Language, fileNamespace string) string {
+	name := n.ChildByFieldName("name", l)
+	if name == nil {
+		return ""
+	}
+	var nss []string
+	for p := n.Parent(); p != nil; p = p.Parent() {
+		switch {
+		case csharpTypes[p.Type(l)]:
+			return ""
+		case p.Type(l) == "namespace_declaration":
+			if ns := p.ChildByFieldName("name", l); ns != nil {
+				nss = append([]string{compact(ns.Text(src))}, nss...)
+			}
+		}
+	}
+	if len(nss) == 0 && fileNamespace != "" {
+		nss = []string{fileNamespace}
+	}
+	return strings.Join(append(nss, name.Text(src)), ".")
 }
 
 func cImports(n *ts.Node, src []byte, l *ts.Language, r *parseResult) {

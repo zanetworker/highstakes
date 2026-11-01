@@ -156,7 +156,7 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 		}
 		rows = append(rows, CodeownersRow{Entry: e, Owners: handles})
 
-		line := "/" + e.Path
+		line := "/" + escapeCodeownersPath(e.Path)
 		if len(handles) == 0 {
 			fmt.Fprintf(&b, "# %s (%s, heat %d): no owner found in git history\n", line, e.Tier, e.HeatScore)
 			continue
@@ -166,6 +166,16 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 	b.WriteString(EndMarker + "\n")
 	return b.String(), rows
 }
+
+// codeownersEscaper backslash-escapes characters that CODEOWNERS (gitignore
+// syntax) would read as a separator, glob or comment, so a rule matches the
+// literal path. Policy JSON/YAML keeps raw paths; only CODEOWNERS escapes.
+var codeownersEscaper = strings.NewReplacer(
+	`\`, `\\`, " ", `\ `, "*", `\*`, "?", `\?`,
+	"[", `\[`, "]", `\]`, "!", `\!`, "#", `\#`,
+)
+
+func escapeCodeownersPath(p string) string { return codeownersEscaper.Replace(p) }
 
 // ReplaceBlock swaps the marked block in existing CODEOWNERS content, or
 // appends it. Appending puts it last, where CODEOWNERS rules take precedence.

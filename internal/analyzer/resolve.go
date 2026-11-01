@@ -37,6 +37,7 @@ func (a *Analyzer) resolveImports() {
 type resolver struct {
 	a        *Analyzer
 	packages map[string][]string // Java/Kotlin package or C# namespace -> files
+	symbols  map[string][]string // "Java:" Kotlin or "C#:" qualified declaration -> files
 	crates   map[string]string   // Rust crate import name -> crate dir
 	tsconfig map[string]*tsPaths // dir -> governing tsconfig (nil when none)
 }
@@ -45,6 +46,7 @@ func newResolver(a *Analyzer) *resolver {
 	r := &resolver{
 		a:        a,
 		packages: map[string][]string{},
+		symbols:  map[string][]string{},
 		crates:   map[string]string{},
 		tsconfig: map[string]*tsPaths{},
 	}
@@ -56,6 +58,13 @@ func newResolver(a *Analyzer) *resolver {
 					key = "Java:" + pkg // Java and Kotlin share packages
 				}
 				r.packages[key] = append(r.packages[key], path)
+			}
+			for _, sym := range info.parsed.Symbols {
+				key := "C#:" + sym
+				if info.Language == "Kotlin" {
+					key = "Java:" + sym
+				}
+				r.symbols[key] = append(r.symbols[key], path)
 			}
 		}
 		if filepath.Base(path) == "Cargo.toml" {
@@ -431,8 +440,12 @@ func stripJSONC(in []byte) []byte {
 
 // Java / Kotlin / C#
 
-// classFiles returns the files in package pkg whose file name is cls (Java convention).
+// classFiles returns the files in package pkg that declare cls: Kotlin and C#
+// files by their indexed symbols, Java files by file name (Java convention).
 func (r *resolver) classFiles(key, cls string) []string {
+	if files := r.symbols[key+"."+cls]; len(files) > 0 {
+		return files
+	}
 	for _, f := range r.packages[key] {
 		if strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)) == cls {
 			return []string{f}

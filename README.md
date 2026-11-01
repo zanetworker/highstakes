@@ -132,7 +132,7 @@ On the [calibration benchmark](bench/README.md) (seven repos, five languages), c
 | Dependency Centrality | 10 | Import graph analysis |
 | Path Keywords | 5 | "auth", "payment" and similar in the path |
 
-Impact is the highest of the four LLM dimensions. Without an LLM it is an estimate from centrality and path keywords, shown with `~`, and tiers fall back to the heat score. `heat_score` stays in the JSON as `max(likelihood, impact)`. Details: [How It Works](docs/how-it-works.md#two-axes-likelihood-and-impact).
+Impact is the highest of the four LLM dimensions. Without an LLM it is an estimate from centrality and path keywords, shown with `~`, and tiers fall back to the heat score. `heat_score` stays in the JSON: `max(likelihood, impact)` when impact is LLM-assessed, otherwise the likelihood. Details: [How It Works](docs/how-it-works.md#two-axes-likelihood-and-impact).
 
 ### Tier System
 

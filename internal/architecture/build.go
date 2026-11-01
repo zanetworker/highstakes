@@ -301,8 +301,7 @@ func libNode(id, comp string, product []types.Unit, hm *types.Heatmap, fileNode 
 	}
 	for p, box := range fileNode {
 		if f := hm.Files[p]; box == "c:"+comp && !tour.IsTestFile(p) {
-			n.MaxImpact = max(n.MaxImpact, f.Impact)
-			n.ImpactAssessed = n.ImpactAssessed || f.ImpactAssessed
+			n.MaxImpact, n.ImpactAssessed = units.RaiseImpact(n.MaxImpact, n.ImpactAssessed, f)
 			if f.Quadrant == types.QuadrantFragileCritical {
 				n.FragileCritical++
 			}

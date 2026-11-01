@@ -166,3 +166,31 @@ func TestOwners(t *testing.T) {
 		t.Errorf("Owners(nil) = %v, want empty", got)
 	}
 }
+
+func TestLink_MaxImpactAssessedFollowsTheMaxFile(t *testing.T) {
+	est := func(p string, impact int) *types.FileHeat {
+		f := fh(p, impact, "")
+		f.ImpactAssessed = false
+		return f
+	}
+	tests := []struct {
+		name         string
+		dep          *types.FileHeat
+		wantImpact   int
+		wantAssessed bool
+	}{
+		{"estimated max beats assessed 20, shown as estimate", est("lib/a.go", 90), 90, false},
+		{"assessed max stays assessed", fh("lib/a.go", 70, ""), 70, true},
+		{"tie prefers the assessed value", est("lib/a.go", 20), 20, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hm := fixture(map[string][]string{"cmd/srv/main.go": {"lib/a.go"}},
+				fh("cmd/srv/main.go", 20, ""), tt.dep)
+			u := Link(hm, []Entry{{Name: "srv", Kind: KindGoMain, Entry: "cmd/srv/main.go"}}, nil)[0]
+			if u.MaxImpact != tt.wantImpact || u.ImpactAssessed != tt.wantAssessed {
+				t.Errorf("max impact %d assessed %v, want %d %v", u.MaxImpact, u.ImpactAssessed, tt.wantImpact, tt.wantAssessed)
+			}
+		})
+	}
+}

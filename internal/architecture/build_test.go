@@ -388,3 +388,29 @@ func TestBuild_LibraryIsTheMostDirectlyImported(t *testing.T) {
 		t.Errorf("nodes = %+v, want lib-core, not lib-schema", d.Nodes)
 	}
 }
+
+func TestBuild_LibraryImpactEstimateIsNotShownAsAssessed(t *testing.T) {
+	tests := []struct {
+		name         string
+		policyAssess bool
+		wantAssessed bool
+		wantSub      string
+	}{
+		{"estimated max is labelled an estimate", false, false, "impact ~95"},
+		{"assessed max is plain", true, true, "impact 95"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hm := fixtureHeatmap()
+			hm.Files["crates/core/src/policy.rs"].ImpactAssessed = tt.policyAssess
+			d, err := Build(hm, types.DeclaredArchitecture{}, Options{MaxNodes: 9})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lib := nodeByID(d, "lib-core")
+			if lib == nil || lib.MaxImpact != 95 || lib.ImpactAssessed != tt.wantAssessed || !strings.HasSuffix(lib.Sub, tt.wantSub) {
+				t.Errorf("lib-core = %+v, want max 95 assessed %v sub ending %q", lib, tt.wantAssessed, tt.wantSub)
+			}
+		})
+	}
+}

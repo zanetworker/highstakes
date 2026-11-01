@@ -114,8 +114,7 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 			comps[f.Component] = true
 			u.Files++
 			u.Lines += f.Size.Lines
-			u.MaxImpact = max(u.MaxImpact, f.Impact)
-			u.ImpactAssessed = u.ImpactAssessed || f.ImpactAssessed
+			u.MaxImpact, u.ImpactAssessed = RaiseImpact(u.MaxImpact, u.ImpactAssessed, f)
 			if f.Quadrant == types.QuadrantFragileCritical {
 				u.FragileCritical++
 			}
@@ -141,6 +140,19 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 		sort.Strings(f.Units)
 	}
 	return out
+}
+
+// RaiseImpact folds file f into a running maximum impact. assessed says
+// whether the file supplying the maximum was LLM-assessed, so an estimate
+// is never shown as assessed; on a tie the assessed value wins.
+func RaiseImpact(maxImpact int, assessed bool, f *types.FileHeat) (int, bool) {
+	switch {
+	case f.Impact > maxImpact:
+		return f.Impact, f.ImpactAssessed
+	case f.Impact == maxImpact:
+		return maxImpact, assessed || f.ImpactAssessed
+	}
+	return maxImpact, assessed
 }
 
 // Owners maps each unit home (entry component) to the unit that owns it:

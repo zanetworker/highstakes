@@ -23,6 +23,8 @@ func TestAssign(t *testing.T) {
 		mk("crates/net/src/proxy.rs", "crates/net", "sup"),
 		mk("crates/tool/src/x.rs", "crates/tool"),
 		mk("crates/sup/tests/it.rs", "crates/sup"),
+		mk("crates/core/src/dead.rs", "crates/core"),
+		mk("crates/core/tests/dead_test.rs", "crates/core"),
 	} {
 		hm.Files[f.Path] = f
 	}
@@ -33,8 +35,8 @@ func TestAssign(t *testing.T) {
 		"crates/sbx/src/bin/perf.rs": "u:sbx-perf",
 		"crates/net/src/proxy.rs":    "u:sup",
 	}
-	if !reflect.DeepEqual(got, want) || unlinked != 1 {
-		t.Errorf("Assign = %v, %d; want %v, 1 (the test file is not counted)", got, unlinked, want)
+	if !reflect.DeepEqual(got, want) || unlinked != 2 {
+		t.Errorf("Assign = %v, %d; want %v, 2 (unreachable files in a shared component are unlinked; test files are not counted)", got, unlinked, want)
 	}
 
 	t.Run("no units", func(t *testing.T) {

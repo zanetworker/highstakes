@@ -204,8 +204,8 @@ Imports are resolved to files in the repo. Anything that does not name a repo fi
 | Go | Same-module imports via `go.mod`; a package import credits every non-test file in that directory |
 | Rust | `mod x;` (`x.rs` or `x/mod.rs`), `use crate::`, `use self::`, `use super::`, and `use other_crate::` for crates in the same repo (by `Cargo.toml` name) |
 | TypeScript / JavaScript | Relative specifiers with extension and `index` resolution (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`), TypeScript's `./x.js` to `x.ts` convention, `require()` and dynamic `import()`, and `tsconfig.json`/`jsconfig.json` `paths` and `baseUrl` (nearest config, relative `extends` followed) |
-| Java / Kotlin | `import a.b.C` to the file `C.java`/`C.kt` declaring `package a.b`; wildcard imports credit the whole package; static imports resolve to their class |
-| C# | `using A.B` credits every file declaring namespace `A.B` |
+| Java / Kotlin | `import a.b.C` to the Kotlin file that declares top-level `C` (class, interface, object, `fun` or `val`) in `package a.b`, whatever the file is named, else the file `C.java`/`C.kt` declaring `package a.b`; wildcard imports credit the whole package; static imports resolve to their class |
+| C# | `using A.B` credits every file declaring namespace `A.B`; `using static A.B.T` and `using X = A.B.T` go to the file declaring type `T` in namespace `A.B` (block or file-scoped), whatever the file is named |
 | C / C++ | `#include` paths relative to the file, the repo root, `include/` and `src/` |
 | Ruby | `require_relative`, and `require` under `lib/` |
 

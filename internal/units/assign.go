@@ -24,12 +24,12 @@ func Assign(hm *types.Heatmap) (fileNode map[string]string, unlinked int) {
 	owner := Owners(hm.Metadata.Units)
 	for p, f := range hm.Files {
 		switch {
-		case shared[f.Component]:
-			fileNode[p] = "c:" + f.Component
 		case len(f.Units) == 0:
 			if !tour.IsTestFile(p) {
 				unlinked++
 			}
+		case shared[f.Component]:
+			fileNode[p] = "c:" + f.Component
 		case len(f.Units) == 1 && f.Units[0] != owner[f.Component]:
 			fileNode[p] = "u:" + f.Units[0] // e.g. a helper bin's own file in another unit's crate
 		case owner[f.Component] != "":
