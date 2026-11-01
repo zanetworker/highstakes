@@ -22,10 +22,12 @@ internal/
   scorer/                    Likelihood, impact, heat and quadrant tier assignment
   prscore/                   PR risk scoring (importance + change risk), reviewers, gate
   ownership/                 Per-file owners from git log (recency-weighted, .mailmap aware)
-  policy/                    Hot path collapsing, CODEOWNERS block, AI reviewer policy
+  policy/                    Hot path collapsing, CODEOWNERS block and coverage, AI reviewer policy
+  explain/                   Verdict, reasons and scoped actions per file; PR-time done marking (pure, no LLM)
+  prcomment/                 Markdown PR comment for `pr check --format markdown` (golden-file tested)
   incidents/                 Incident tracking persistence
   tui/                       Bubbletea TUI (tree model + view)
-  dashboard/                 HTML dashboard generator (treemap + explorer)
+  dashboard/                 HTML dashboard generator (action inbox default; treemap, explorer, architecture, quadrant tabs)
   types/                     Shared type definitions
 pkg/heatmap/                 Public API (generator, config, save/load)
 docs/                        User-facing documentation
@@ -33,6 +35,8 @@ docs/                        User-facing documentation
 
 ## Key Patterns
 
+- Human-facing names: likelihood = "Will it break?", impact = "How bad if it breaks?"; quadrants = postures Harden now / Protect / Stabilize / Routine (types.Quadrant.Label). JSON keeps `quadrant` values and adds `quadrant_label`; tiers stay as metadata and filters. Never print a score without its repo cutoff
+- Actions have a scope (before_merge | backlog), a signal, and backlog items a copyable command; rules live in internal/explain/actions.go, PR-time marking in internal/explain/pr.go
 - Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score (kept for compatibility) = max of the two when impact is assessed, else the likelihood
 - LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
 - Assessments cached in .heatmap/cache/ by SHA-256 of model ID, prompt version (llm.PromptVersion) and file content

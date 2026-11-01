@@ -3,89 +3,146 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
 func TestExplanationBlock(t *testing.T) {
 	e := &types.Explanation{
-		Headline:          "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)",
+		Verdict:           "Harden now",
 		ImpactHigh:        true,
 		Likely:            true,
 		ImpactReasons:     []string{"security 92 · data 70", `"Core proxy."`},
-		LikelihoodReasons: []string{"55 commits in the last 90 days, 28 authors overall (top 2% of this repo)"},
-		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
+		LikelihoodReasons: []string{"55 commits in the last 90 days (top 2% of this repo)", "11 files import it (top 1%)"},
+		Actions: []types.Action{
+			{ID: "senior-review", Text: "Get sign-off from a senior owner (@ana)", Scope: types.ScopeBeforeMerge, Signal: "Harden now: likely to break and costly when it does"},
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Signal: "not covered by CODEOWNERS", Command: "/net/proxy.rs @ana"},
+		},
 	}
+	fix := types.Change{Date: time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC), Message: "fix(network): align destination checks"}
 	tests := []struct {
 		name string
 		f    *types.FileHeat
 		want string
 	}{
-		{"full block", &types.FileHeat{ImpactAssessed: true, Explanation: e},
-			"FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)\n" +
-				"Why impact is high: security 92 · data 70\n" +
-				"  \"Core proxy.\"\n" +
-				"Why it's likely to break:\n" +
-				"  55 commits in the last 90 days, 28 authors overall (top 2% of this repo)\n" +
-				"What to do:\n" +
-				"  • Add to CODEOWNERS; never auto-merge\n"},
-		{"no actions and no reasons", &types.FileHeat{Explanation: &types.Explanation{Headline: "LOW STAKES (impact 1, likelihood 1)"}},
-			"LOW STAKES (impact 1, likelihood 1)\n"},
+		{"full block", &types.FileHeat{Path: "net/proxy.rs", Likelihood: 50, Impact: 92, ImpactAssessed: true, Explanation: e,
+			RecentChanges: []types.Change{{Message: "feat: x"}, fix}},
+			"net/proxy.rs\n" +
+				"HARDEN NOW\n" +
+				"Will it break?         50  HIGH  repo cutoff 33\n" +
+				"How bad if it breaks?  92  HIGH  repo cutoff 78\n" +
+				"Scores are a relative signal within this repo, not a probability.\n" +
+				"Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.\n" +
+				"\n" +
+				"Do before the next merge\n" +
+				"  [ ] Get sign-off from a senior owner (@ana)\n" +
+				"      why: Harden now: likely to break and costly when it does\n" +
+				"Put on the backlog\n" +
+				"  [ ] Add a CODEOWNERS line\n" +
+				"      why: not covered by CODEOWNERS\n" +
+				"      /net/proxy.rs @ana\n" +
+				"\n" +
+				"Why\n" +
+				"  Break signals: 55 commits in the last 90 days (top 2% of this repo); 11 files import it (top 1%)\n" +
+				"  Break cost: security 92 · data 70; \"Core proxy.\"\n" +
+				"Latest fix  2026-10-28  fix(network): align destination checks\n"},
+		{"unassessed impact is an estimate; no actions, no fix",
+			&types.FileHeat{Path: "a.go", Likelihood: 10, Impact: 20, Explanation: &types.Explanation{Verdict: "Not assessed"}},
+			"a.go\n" +
+				"NOT ASSESSED\n" +
+				"Will it break?         10  LOW   repo cutoff 33\n" +
+				"How bad if it breaks?  ~20 estimate (run analyze with an LLM to assess)\n" +
+				"Scores are a relative signal within this repo, not a probability.\n" +
+				"Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.\n"},
 		{"old heatmap without explanation", &types.FileHeat{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := explanationBlock(tt.f); got != tt.want {
+			if got := explanationBlock(tt.f, 33, 78); got != tt.want {
 				t.Errorf("got:\n%s\nwant:\n%s", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTopActions(t *testing.T) {
-	as := []types.Action{{Text: "a"}, {Text: "b"}, {Text: "c"}, {Text: "d"}}
-	tests := []struct {
-		name string
-		f    *types.FileHeat
-		n    int
-		want string
-	}{
-		{"first three", &types.FileHeat{Explanation: &types.Explanation{Actions: as}}, 3, "a|b|c"},
-		{"fewer than n", &types.FileHeat{Explanation: &types.Explanation{Actions: as[:1]}}, 3, "a"},
-		{"no explanation", &types.FileHeat{}, 3, ""},
-		{"zero", &types.FileHeat{Explanation: &types.Explanation{Actions: as}}, 0, ""},
+func TestAttachPRActions(t *testing.T) {
+	hard := []types.Action{
+		{ID: "senior-review", Text: "Get sign-off from a senior owner (@ana)", Scope: types.ScopeBeforeMerge, Owners: []string{"@ana"}},
+		{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge},
+		{ID: "no-auto-merge", Text: "Keep auto-merge off", Scope: types.ScopeBeforeMerge},
+		{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/net/proxy.rs @ana"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got []string
-			for _, a := range topActions(tt.f, tt.n) {
-				got = append(got, a.Text)
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"net/proxy.rs": {Path: "net/proxy.rs", Impact: 92, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical,
+			Explanation: &types.Explanation{Actions: hard}},
+		"ui/view.go": {Path: "ui/view.go", Quadrant: types.QuadrantLow, ImpactAssessed: true,
+			Explanation: &types.Explanation{Actions: []types.Action{{ID: "light-review", Text: "Normal review", Scope: types.ScopeBeforeMerge}}}},
+	}}
+	risk := &types.PRRisk{FilesChanged: []types.FileChange{
+		{Path: "ui/view.go", Tier: types.TierLow},
+		{Path: "net/proxy.rs", Tier: types.TierCritical},
+		{Path: "net/proxy_tests.rs", Tier: types.TierLow},
+		{Path: "net/new.rs", Tier: types.TierHigh, Unscored: true},
+	}}
+	c := buildChange([]prscore.FileChange{
+		{Path: "ui/view.go", LinesAdded: 3}, {Path: "net/proxy.rs", LinesAdded: 10, LinesDeleted: 2},
+		{Path: "net/proxy_tests.rs", LinesAdded: 20}, {Path: "net/new.rs", LinesAdded: 5, IsNew: true},
+	}, hm, []string{"ana"}, nil)
+	if c.Lines != 40 {
+		t.Errorf("lines = %d, want 40", c.Lines)
+	}
+	attachPRActions(risk, hm, c)
+
+	var got []string
+	for _, a := range risk.Checklist {
+		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+	}
+	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open" {
+		t.Errorf("checklist = %v", got)
+	}
+	if len(risk.Backlog) != 1 || risk.Backlog[0].ID != "codeowners" {
+		t.Errorf("backlog = %+v", risk.Backlog)
+	}
+	for _, fc := range risk.FilesChanged {
+		switch fc.Path {
+		case "net/proxy.rs":
+			if len(fc.Actions) != 3 {
+				t.Errorf("proxy.rs carries %d before-merge actions, want 3", len(fc.Actions))
 			}
-			if strings.Join(got, "|") != tt.want {
-				t.Errorf("got %v, want %s", got, tt.want)
+		default:
+			if len(fc.Actions) != 0 {
+				t.Errorf("%s: routine and unscored files carry no actions: %+v", fc.Path, fc.Actions)
 			}
-		})
+		}
 	}
 }
 
-func TestAttachActions(t *testing.T) {
-	acts := []types.Action{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
+func TestBuildChange_Components(t *testing.T) {
 	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
-		"crit.go": {Explanation: &types.Explanation{Actions: acts}},
-		"high.go": {Explanation: &types.Explanation{Actions: acts[:2]}},
-		"med.go":  {Explanation: &types.Explanation{Actions: acts}},
+		"a/x.go": {Path: "a/x.go", Component: "a"},
+		"b/y.go": {Path: "b/y.go", Component: "b"},
 	}}
-	risk := &types.PRRisk{FilesChanged: []types.FileChange{
-		{Path: "crit.go", Tier: types.TierCritical},
-		{Path: "high.go", Tier: types.TierHigh},
-		{Path: "med.go", Tier: types.TierMedium},
-		{Path: "new.go", Tier: types.TierHigh}, // not in heatmap
-	}}
-	attachActions(risk, hm)
-	want := map[string]int{"crit.go": 3, "high.go": 2, "med.go": 0, "new.go": 0}
-	for _, fc := range risk.FilesChanged {
-		if len(fc.Actions) != want[fc.Path] {
-			t.Errorf("%s: %d actions, want %d", fc.Path, len(fc.Actions), want[fc.Path])
-		}
+	tests := []struct {
+		name  string
+		paths []string
+		want  int
+	}{
+		{"one component", []string{"a/x.go"}, 1},
+		{"tests do not count", []string{"a/x.go", "b/y_test.go"}, 1},
+		{"unscored files count by directory", []string{"a/x.go", "b/y.go", "c/new.go"}, 3},
+		{"empty", nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fcs []prscore.FileChange
+			for _, p := range tt.paths {
+				fcs = append(fcs, prscore.FileChange{Path: p})
+			}
+			if got := buildChange(fcs, hm, nil, nil).Components; got != tt.want {
+				t.Errorf("components = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

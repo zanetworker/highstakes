@@ -18,15 +18,20 @@ func wtStop(order int, p string, q types.Quadrant, why, likelyWhy string, action
 	if likelyWhy != "" {
 		e.LikelihoodReasons = []string{likelyWhy}
 	}
-	for _, a := range actions {
-		e.Actions = append(e.Actions, types.Action{ID: "x", Text: a})
+	for i, a := range actions {
+		scope := types.ScopeBeforeMerge
+		if i == len(actions)-1 && len(actions) > 1 {
+			scope = types.ScopeBacklog
+		}
+		e.Actions = append(e.Actions, types.Action{ID: "x", Text: a, Scope: scope})
 	}
 	s.Explanation = e
+	s.Verdict, s.TopBeforeMerge, s.TopBacklog = q.Label(), e.Top(types.ScopeBeforeMerge), e.Top(types.ScopeBacklog)
 	return s
 }
 
 func wtTour() *Tour {
-	return &Tour{Repo: "/src/acme", Commit: "abcdef1234", TotalStops: 4, ProductComponents: 3, Sections: []Section{
+	return &Tour{Repo: "/src/acme", Commit: "abcdef1234", TotalStops: 4, LikelyCutoff: 33, ImpactThreshold: 78, ProductComponents: 3, Sections: []Section{
 		{Order: 1, Component: "crates/acme-core", Kind: KindProduct, Stops: []Stop{
 			wtStop(1, "crates/acme-core/src/policy.rs", types.QuadrantFragileCritical, "Every unit loads policy <here>", "Changed 40 times", "Add tests", "Pair review"),
 		}},
@@ -95,6 +100,12 @@ func TestWalkthrough(t *testing.T) {
 		}
 		if h.Pay != "policy.rs:7" || h.Short != "do: Add tests" || h.Plane != "fragile" {
 			t.Errorf("hop = %+v, want anchor payload, first action, fragile plane", h)
+		}
+		for _, want := range []string{"Harden now", "Will it break? 50 HIGH, cutoff 33", "How bad if it breaks? 90 HIGH, cutoff 78",
+			"Before merge: Add tests", "Backlog: Pair review"} {
+			if !strings.Contains(h.Txt, want) {
+				t.Errorf("caption = %q, want %q", h.Txt, want)
+			}
 		}
 		if h := p.Flows["product"].Hops[2]; !strings.Contains(h.Txt, "security 90 · data 80") || h.Plane != "estimate" || h.Short != "read auth.rs" {
 			t.Errorf("hop 3 = %+v, want the first impact reason when the stop has no why, estimate plane", h)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,10 +127,11 @@ func appendShadowLog(path, base string, risk *types.PRRisk) error {
 	return nil
 }
 
-// printPRExtras prints the two-axis summary, reviewers and gate decision.
-func printPRExtras(risk *types.PRRisk) {
-	fmt.Printf("Importance: %d (%s)   Change risk: %d (%s)\n",
-		risk.Importance, risk.Tier, risk.ChangeRisk, risk.ChangeRiskLevel)
+// printPRText prints pr check for a terminal: verdict, the before-merge
+// checklist, files with both axes and their repo cutoffs, backlog, gate.
+func printPRText(risk *types.PRRisk) {
+	fmt.Printf("%s\n", strings.ToUpper(risk.Verdict))
+	fmt.Printf("Change risk: %d (%s)\n", risk.ChangeRisk, risk.ChangeRiskLevel)
 	for _, f := range risk.ChangeRiskFactors {
 		fmt.Printf("  - %s\n", f)
 	}
@@ -140,7 +142,53 @@ func printPRExtras(risk *types.PRRisk) {
 		}
 		fmt.Printf("Suggested reviewers: %s\n", strings.Join(names, ", "))
 	}
-	fmt.Println()
+	if len(risk.Checklist) > 0 {
+		fmt.Println("\nDo before merge")
+		for _, a := range risk.Checklist {
+			fmt.Printf("  %s %s (%s)\n", checkbox(a.Done), a.Text, strings.Join(a.Files, ", "))
+		}
+	}
+
+	fmt.Printf("\nFiles (repo cutoffs: will it break %d, how bad %d; %s)\n",
+		risk.LikelyCutoff, risk.ImpactThreshold, strings.ToLower(strings.TrimSuffix(types.AxisNote, ".")))
+	files := append([]types.FileChange(nil), risk.FilesChanged...)
+	sort.SliceStable(files, func(i, j int) bool {
+		if a, b := tierOrder[files[i].Tier], tierOrder[files[j].Tier]; a != b {
+			return a > b
+		}
+		return files[i].Impact > files[j].Impact
+	})
+	for _, fc := range files {
+		posture := fc.QuadrantLabel
+		if posture == "" {
+			posture = types.TierPosture(fc.Tier)
+		}
+		axes := fmt.Sprintf("break %3d  bad %3d", fc.Likelihood, fc.Impact)
+		switch {
+		case fc.Unscored:
+			axes = "new file, inherited"
+		case !fc.ImpactAssessed:
+			axes = fmt.Sprintf("break %3d  bad ~%2d", fc.Likelihood, fc.Impact)
+		}
+		fmt.Printf("  %-10s  %-19s  %s  +%d/-%d\n", posture, axes, fc.Path, fc.LinesAdded, fc.LinesDeleted)
+	}
+
+	if len(risk.Backlog) > 0 {
+		fmt.Println("\nBacklog (the file over time, not this PR)")
+		for _, a := range risk.Backlog {
+			fmt.Printf("  [ ] %s (%s)\n", a.Text, strings.Join(a.Files, ", "))
+			if a.Command != "" {
+				fmt.Printf("      %s\n", a.Command)
+			}
+		}
+	}
+	if len(risk.CircuitBreakerSignals) > 0 {
+		fmt.Println("\nCircuit breakers")
+		for _, s := range risk.CircuitBreakerSignals {
+			fmt.Printf("  - %s\n", s)
+		}
+	}
+	printDecision(risk)
 }
 
 // printDecision prints the gate outcome, if a gate was set.

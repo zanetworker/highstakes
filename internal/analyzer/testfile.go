@@ -5,6 +5,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/zanetworker/highstakes/internal/tour"
 )
 
 // HasTestFile reports whether a test for relPath exists by its language's
@@ -55,4 +57,32 @@ func testFileCandidates(rel string) ([]string, bool) {
 		return []string{dir + stem + "_spec.rb", dir + stem + "_test.rb"}, true
 	}
 	return nil, false
+}
+
+// IsAdjacentTest reports whether test (a slash-separated repo path) is a
+// test for src: one of src's conventional test paths, a test file inside the
+// module directory named after src (Rust src/proxy/tests/x.rs for
+// src/proxy.rs), or a test in a sibling tests/ directory whose name
+// contains src's stem.
+func IsAdjacentTest(test, src string) bool {
+	if test == src || !tour.IsTestFile(test) {
+		return false
+	}
+	cands, _ := testFileCandidates(src)
+	for _, c := range cands {
+		if c == test {
+			return true
+		}
+	}
+	dir, base := path.Split(src)
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	switch {
+	case strings.HasPrefix(test, dir+stem+"/"):
+		return true
+	case path.Dir(test)+"/" == dir:
+		return strings.HasPrefix(path.Base(test), stem+"_") // proxy_tests.rs, proxy_test.rs
+	case strings.HasPrefix(test, dir+"tests/"), strings.HasPrefix(test, dir+"__tests__/"):
+		return strings.Contains(path.Base(test), stem)
+	}
+	return false
 }

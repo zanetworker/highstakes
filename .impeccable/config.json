@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "em-dash-overuse",
+        "value": "*",
+        "files": [
+          "**/*.html"
+        ],
+        "createdAt": "2026-11-01T13:16:40.589Z",
+        "reason": "False positive: the -- is CLI flags (gh issue create --title/--body) inside copyable commands in the dashboard backlog cards; the page has no em dashes"
+      }
+    ]
+  }
+}

@@ -15,6 +15,9 @@ import (
 type RepoStats struct {
 	LikelyCutoff    int // lowest likelihood counted as likely
 	ImpactThreshold int // lowest impact counted as impactful
+	// Codeowned reports whether an existing CODEOWNERS rule covers a path;
+	// nil means nothing is covered. Callers set it after BuildRepoStats.
+	Codeowned func(string) bool
 
 	churn, authors, cyclomatic, functions, importers, lines []int // sorted ascending
 	isTest                                                  func(string) bool

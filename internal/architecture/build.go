@@ -286,7 +286,7 @@ func mostShared(hm *types.Heatmap, product []types.Unit, fileNode map[string]str
 func unitNode(id string, u types.Unit) Node {
 	return Node{ID: id, Label: u.Name, Kind: KindUnit, Tag: kindTag(u.Kind), MaxImpact: u.MaxImpact,
 		ImpactAssessed: u.ImpactAssessed, FragileCritical: u.FragileCritical,
-		Sub: impactText(u.MaxImpact, u.ImpactAssessed) + fmt.Sprintf(" · %d fragile-critical", u.FragileCritical)}
+		Sub: impactText(u.MaxImpact, u.ImpactAssessed) + fmt.Sprintf(" · %d Harden now", u.FragileCritical)}
 }
 
 func libNode(id, comp string, product []types.Unit, hm *types.Heatmap, fileNode map[string]string) Node {
@@ -387,9 +387,9 @@ func lineOf(p string, source func(string) ([]byte, error)) int {
 	return tour.LineHint(string(b))
 }
 
-// note is the quadrant (or impact estimate) and the first action.
+// note is the posture (or impact estimate) and the first action.
 func note(f *types.FileHeat) string {
-	q := string(f.Quadrant)
+	q := f.Quadrant.Label()
 	if !f.ImpactAssessed || q == "" {
 		q = fmt.Sprintf("impact ~%d (estimate)", f.Impact)
 	}

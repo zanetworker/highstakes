@@ -108,7 +108,7 @@ func TestGetFile_ShowsAxes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	for _, want := range []string{"Impact:     90", "Likelihood: 10", "Quadrant:   protect", "if it breaks", "needs fixes"} {
+	for _, want := range []string{"How bad if it breaks?  90", "Will it break?         10", "Protect"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

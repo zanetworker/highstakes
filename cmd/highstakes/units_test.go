@@ -59,7 +59,7 @@ func TestListUnits(t *testing.T) {
 		}
 		for _, want := range []string{
 			"openshell-supervisor", "crates/sup/src/main.rs (crates/sup/Cargo.toml:13)",
-			"impact 92", "3 fragile-critical", "own: crates/sup, crates/sup-network", "shared: crates/core",
+			"impact 92", "3 Harden now", "own: crates/sup, crates/sup-network", "shared: crates/core",
 			"inferred placement: ENTRYPOINT of deploy/Dockerfile.supervisor [deploy/Dockerfile.supervisor:18]",
 			"inferred placement: none found",
 			"links units: cli (crates/cli)", // crates/cli is the cli unit's crate, not sup's own

@@ -256,3 +256,54 @@ func TestCalculatePRRisk_ImportanceFromImpact(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculatePRRisk_VerdictAndAxes(t *testing.T) {
+	hm := &types.Heatmap{
+		Metadata: types.Metadata{LikelyCutoff: 33, ImpactThreshold: 78},
+		Files: map[string]*types.FileHeat{
+			"net/proxy.rs": {Path: "net/proxy.rs", HeatScore: 92, Likelihood: 50, Impact: 92, ImpactAssessed: true,
+				Tier: types.TierCritical, Quadrant: types.QuadrantFragileCritical, QuadrantLabel: "Harden now"},
+			"ui/view.go": {Path: "ui/view.go", HeatScore: 10, Likelihood: 10, Impact: 10, ImpactAssessed: true,
+				Tier: types.TierLow, Quadrant: types.QuadrantLow, QuadrantLabel: "Routine"},
+		},
+	}
+	tests := []struct {
+		name        string
+		paths       []string
+		wantVerdict string
+	}{
+		{"most severe file sets the verdict", []string{"ui/view.go", "net/proxy.rs"}, "Harden now"},
+		{"routine only", []string{"ui/view.go"}, "Routine"},
+		{"empty PR is routine", nil, "Routine"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var changes []FileChange
+			for _, p := range tt.paths {
+				changes = append(changes, FileChange{Path: p, LinesAdded: 1})
+			}
+			risk := CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
+			if risk.Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", risk.Verdict, tt.wantVerdict)
+			}
+			if risk.LikelyCutoff != 33 || risk.ImpactThreshold != 78 {
+				t.Errorf("cutoffs = %d %d, want 33 78", risk.LikelyCutoff, risk.ImpactThreshold)
+			}
+		})
+	}
+	t.Run("changed files carry both axes and the posture", func(t *testing.T) {
+		risk := CalculatePRRisk(0, []FileChange{{Path: "net/proxy.rs"}, {Path: "net/new.rs", IsNew: true}}, hm, scorer.DefaultTierThresholds())
+		for _, fc := range risk.FilesChanged {
+			switch fc.Path {
+			case "net/proxy.rs":
+				if fc.Likelihood != 50 || fc.Impact != 92 || !fc.ImpactAssessed || fc.Quadrant != types.QuadrantFragileCritical || fc.QuadrantLabel != "Harden now" {
+					t.Errorf("proxy.rs = %+v", fc)
+				}
+			case "net/new.rs":
+				if fc.QuadrantLabel != "" || fc.Likelihood != 0 {
+					t.Errorf("an unscored file has no axes: %+v", fc)
+				}
+			}
+		}
+	})
+}

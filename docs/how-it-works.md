@@ -94,16 +94,22 @@ With the LLM, impact is the blast radius score (`impact_assessed: true`). Withou
 After every file is scored, two thresholds split the grid:
 
 - **Likely**: likelihood in the top 20% of the repo's non-test files. The cutoff is repo-relative (the likelihood of the file at the 20% rank, at least one file, ties included, never 0) because churn levels differ widely between repos. It is stored as `metadata.likely_cutoff`.
-- **Impactful**: impact at or above `max(tiers.high, the impact at the top-20% rank of assessed non-test files)`, ties included. The percentile keeps the quadrant meaningful when the LLM scores generously and most files would clear a fixed bar; the `tiers.high` floor (61 by default) keeps small or low-stakes repos from calling modest impact impactful. The effective cutoff is stored as `metadata.impact_threshold` and shown in each explanation headline ("impactful starts at N in this repo").
+- **Impactful**: impact at or above `max(tiers.high, the impact at the top-20% rank of assessed non-test files)`, ties included. The percentile keeps the quadrant meaningful when the LLM scores generously and most files would clear a fixed bar; the `tiers.high` floor (61 by default) keeps small or low-stakes repos from calling modest impact impactful. The effective cutoff is stored as `metadata.impact_threshold` and shown next to every score ("How bad if it breaks?  92  HIGH  repo cutoff 78"). Scores are a relative signal within the repo, not a probability.
 
-| Quadrant | `quadrant` | Tier | Review guidance |
-|---|---|---|---|
-| Likely and impactful | `fragile-critical` | CRITICAL | Likely to break and costly when it does: senior review, add tests first |
-| Impactful, stable | `protect` | HIGH | Stable but costly if broken: keep owners on review, never auto-merge |
-| Likely, low impact | `watch` | MEDIUM | Changes and breaks often, limited damage: refactor or add tests |
-| Neither | `low` | LOW | Light review |
+Every output a person reads names the axes as questions: "Will it break?" (likelihood) and "How bad if it breaks?" (impact), and names each quadrant by its posture, what to do about it.
 
-The quadrant and its tier apply only to files whose impact was assessed. Other files keep the tier from their heat score, and `quadrant` is left out of the JSON.
+The two questions are not equally backed, and `get`, the PR comment and the dashboard say so in one line ("Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings."). On a merged-PR calibration over 7 repos, "Will it break?" picked files that later got bug-fix PRs (top-10 precision 0.57 to 1.00, lift 2.2 to 4.4). "How bad if it breaks?" was positive but below plain PR activity in 5 of 7 repos; where repos use severity labels it reached a lift of about 2 to 2.8. It has not been checked against maintainer ratings yet.
+
+
+
+| Quadrant | Posture (`quadrant_label`) | `quadrant` | Tier | What it asks for |
+|---|---|---|---|---|
+| Likely and impactful | Harden now | `fragile-critical` | CRITICAL | Senior owner sign-off, regression and contract tests, smaller PRs, auto-merge off |
+| Impactful, stable | Protect | `protect` | HIGH | Owner review, block auto-merge, tests before merge when none sit next to the file |
+| Likely, low impact | Stabilize | `watch` | MEDIUM | Regression tests when fixes recur, refactor what you touch; never blocks |
+| Neither | Routine | `low` | LOW | Normal review; auto-merge allowed by policy |
+
+JSON keeps the `quadrant` values as stable machine IDs and adds `quadrant_label`; tier names stay as metadata and filters (`--tier`, `--fail-on`). The quadrant and its tier apply only to files whose impact was assessed. Other files keep the tier from their heat score, and `quadrant` is left out of the JSON.
 
 ### Heat Score
 
@@ -115,7 +121,7 @@ Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)
 
 ## Reasons and Actions
 
-After quadrants are set, `analyze` attaches an `explanation` to every file: a headline, why its impact is high (or low), why it is likely (or not) to break, and what to do. It is computed by rules in `internal/explain` from numbers already in the heatmap, with no extra LLM call, so the same heatmap always gives the same text.
+After quadrants are set, `analyze` attaches an `explanation` to every file: a verdict (the posture, or `Not assessed`), a headline, why its impact is high (or low), why it is likely (or not) to break, and what to do, split into before-merge and backlog actions. It is computed by rules in `internal/explain` from numbers already in the heatmap, with no extra LLM call, so the same heatmap always gives the same text.
 
 Percentiles are repo-relative: "top 5%" means at most 5% of the repo's non-test files have a value at least as high (rounded up, so the repo maximum in 1,000 files is "top 1%"). A signal becomes a reason only when it is in the top 20% and above zero.
 
@@ -134,25 +140,29 @@ Percentiles are repo-relative: "top 5%" means at most 5% of the repo's non-test 
 
 A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.py`, `foo_test.py` or `tests/test_foo.py`; `foo.test.ts` or `foo.spec.ts` beside it or in `__tests__/` (also for `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`); `FooTest.java` or `FooTests.java` beside it or in the Maven `src/test/` mirror (also `.kt`, `.cs`); `foo_spec.rb` or `foo_test.rb`; for Rust, a `#[cfg(test)]` module in the file. Other languages have no convention, so `has_test_file` is left out and no reason is given. The test coverage score itself is unchanged.
 
-**What to do.** Actions come from a rule table, most important first. `pr check` shows the first three.
+**What to do.** Actions come from a rule table. Each has a `scope`: `before_merge` is what any PR touching the file needs, `backlog` is what to fix in the file over time. Each carries the `signal` that triggered it, and backlog items carry a copyable `command` (a `gh issue create` command, or for `codeowners` an anchored CODEOWNERS line naming the top two owners). Before-merge actions come first.
 
-| Action | Quadrants | When |
-|---|---|---|
-| `assess-impact` | not assessed | always |
-| `senior-review` | fragile-critical | always; names the top two owners when known |
-| `owner-review` | protect | always; names the top two owners when known |
-| `codeowners` | fragile-critical, protect | always |
-| `change-carefully` | protect | always |
-| `ai-review` | watch | always |
-| `light-review` | low, and every test file | always (the only action) |
-| `split` | fragile-critical, not assessed | functions or cyclomatic in the top 5% |
-| `refactor` | watch | complexity in the top 20% |
-| `regression-tests` | fragile-critical, protect, not assessed | at least one recent fix |
-| `add-tests` | watch | two or more recent fixes |
-| `stable-interface` | fragile-critical, protect | importers in the top 10% |
-| `no-tests` | all but low | no test found and no fix-driven test action already asks for tests |
-| `single-owner` | all but low | top owner holds 80% or more of the file and it has 5 or more commits |
-| `knowledge-spread` | all but low | 5 or more authors and authors in the top 10% |
+| Action | Scope | Postures | When |
+|---|---|---|---|
+| `senior-review` | before merge | Harden now | always; names the top two owners when known |
+| `owner-review` | before merge | Protect | always; names the top two owners when known |
+| `regression-tests` | before merge | Harden now, not assessed; Stabilize | at least one recent fix; Stabilize needs two or more |
+| `no-tests` | before merge | Harden now, Protect, not assessed | no test next to the file and no regression-tests item already asks for tests |
+| `stable-interface` | before merge | Harden now, Protect | importers in the top 10% ("Add contract tests") |
+| `refactor` | before merge | Stabilize | complexity in the top 20% ("Refactor the function you touch") |
+| `single-owner` | before merge | Stabilize, not assessed | top owner holds 80% or more of the file and it has 5 or more commits ("Add a second reviewer") |
+| `no-auto-merge` | before merge | Harden now, Protect | always |
+| `smaller-pr` | before merge | Harden now | `pr check` only: the diff is over 500 lines or touches 3+ components |
+| `light-review` | before merge | Routine, and every test file | always (the only action; `pr check` leaves it out of the checklist) |
+| `assess-impact` | backlog | not assessed | always (`highstakes analyze`) |
+| `split` | backlog | Harden now, not assessed | functions or cyclomatic in the top 5% |
+| `codeowners` | backlog | Harden now, Protect | no existing CODEOWNERS rule covers the file |
+| `document-invariants` | backlog | Harden now | 5 or more authors with authors in the top 10%, or a single owner (as above) |
+| `test-gap` | backlog | Protect | no test next to the file |
+| `complexity-issue` | backlog | Stabilize | complexity in the top 20% |
+| `ownership-issue` | backlog | Stabilize | a single owner (as above) |
+
+Whether a PR changes exported symbols is not detected, so no action depends on it. `pr check` marks before-merge items done when the PR already satisfies them; see the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 Owners come from the same history pass as [Ownership](#ownership), run once during `analyze`. If git fails, actions stay generic and `analyze` prints a warning.
 
@@ -182,7 +192,7 @@ A unit is **supporting** (`supporting: true`) when its entry point sits in a sup
 
 **Declared links.** What imports cannot show (a gRPC session between two binaries, a driver the gateway calls over a socket, which pod runs what) a human declares in `.heatmap/architecture.yaml`, each claim with `file:line` evidence (see [Configuration](configuration.md#architecture-declarations)). Every output keeps declared links and placements apart from inferred ones: dashed and marked "declared".
 
-**Generated pictures.** `get architecture --format seecode` turns units, imports and declarations into a SeeCode architecture spec: the top product units by max impact (ties: more fragile-critical files), the shared library the most units import directly, and one "other units" box for the rest, within SeeCode's budget (9 boxes, 12 arrows by default). Arrows are declared links first, then imports by importing-file count. Rows follow dependency levels (callers above what they use); placement groups are the declared placement, else the first inferred hint. Every box lists its top 3 files by impact as evidence, with the quadrant and the first action. `get tour --format walkthrough` turns the tour into data for the show-me step-through: one box per component, one step per stop. Neither is hand-drawn, so a regenerated picture follows the code.
+**Generated pictures.** `get architecture --format seecode` turns units, imports and declarations into a SeeCode architecture spec: the top product units by max impact (ties: more Harden now files), the shared library the most units import directly, and one "other units" box for the rest, within SeeCode's budget (9 boxes, 12 arrows by default). Arrows are declared links first, then imports by importing-file count. Rows follow dependency levels (callers above what they use); placement groups are the declared placement, else the first inferred hint. Every box lists its top 3 files by impact as evidence, with the posture and the first action. `get tour --format walkthrough` turns the tour into data for the show-me step-through: one box per component, one step per stop. Neither is hand-drawn, so a regenerated picture follows the code.
 
 **Limits.** Units come from entry points and imports, not from runtime truth. A unit lists what a binary can execute, not what a deployment actually starts: feature flags, `cfg` gates, dynamic loading, plugins, RPC between processes and configuration-selected drivers are invisible, and an import the resolver misses drops the code it leads to. Placement says where a binary is packaged, not where or how many copies run; a Helm chart that picks images at install time, or a Dockerfile that runs a script, yields no hint. Examples and helper binaries are units too when they declare an entry point; they are flagged supporting by name, which can still hide a production helper whose name sounds like tooling, or show a tool whose name does not: check with `--include-supporting`. Treat units as a map to check against the deployment, not as the deployment.
 

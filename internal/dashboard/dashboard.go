@@ -103,14 +103,7 @@ func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath str
 		tierCounts[f.Tier]++
 	}
 
-	// Top action items: highest heat files that need human review
-	var actionItems []fileEntry
-	for _, f := range files {
-		if !f.AutoMerge && len(actionItems) < 5 {
-			actionItems = append(actionItems, f)
-		}
-	}
-	actionsJSON, _ := json.Marshal(actionItems)
+	inboxJSON, _ := json.Marshal(buildInbox(hm))
 
 	statsJSON, _ := json.Marshal(map[string]interface{}{
 		"total":            len(files),
@@ -133,7 +126,9 @@ func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath str
 	html = strings.ReplaceAll(html, "/*__ARCH__*/{}", string(archJSON))
 	html = strings.ReplaceAll(html, "/*__UNITS__*/{}", string(unitsJSON))
 	html = strings.ReplaceAll(html, "/*__STATS__*/{}", string(statsJSON))
-	html = strings.ReplaceAll(html, "/*__ACTIONS__*/[]", string(actionsJSON))
+	html = strings.ReplaceAll(html, "/*__INBOX__*/{}", string(inboxJSON))
+	evidenceJSON, _ := json.Marshal(types.AxisEvidence)
+	html = strings.ReplaceAll(html, "/*__EVIDENCE__*/''", string(evidenceJSON))
 
 	if err := os.WriteFile(outputPath, []byte(html), 0644); err != nil {
 		return fmt.Errorf("write dashboard: %w", err)
@@ -151,98 +146,123 @@ const tmpl = `<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;900&family=Red+Hat+Text:wght@400;500;600;700&family=Red+Hat+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#000;--panel:#0a0a0a;--border:#292929;--text:#E0E0E0;--muted:#A3A3A3;--dim:#4D4D4D;
---accent:#EE0000;--critical:#EE0000;--high:#E85D75;--medium:#D4874D;--low:#2D8A2D;
---font-d:'Red Hat Display',sans-serif;--font-t:'Red Hat Text',sans-serif;--font-m:'Red Hat Mono',monospace}
-body{background:var(--bg);color:var(--text);font-family:var(--font-t)}
+:root{--bg:#0b0b0c;--panel:#131315;--raise:#1b1b1e;--border:rgba(255,255,255,.08);--text:#ececec;--muted:#a8a8ad;--dim:#8c8c92;
+--accent:#ee0000;--critical:#f2555a;--high:#e0a43c;--medium:#6aa6e0;--low:#5fae6b;
+--font-d:'Red Hat Display',sans-serif;--font-t:'Red Hat Text',sans-serif;--font-m:'Red Hat Mono',monospace;--ease:cubic-bezier(.2,0,0,1)}
+body{background:var(--bg);color:var(--text);font-family:var(--font-t);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--medium);outline-offset:2px}
 
-header{padding:14px 24px;border-bottom:2px solid var(--accent);display:flex;align-items:center;gap:16px}
-header h1{font:700 18px var(--font-d);color:#fff}
+header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:16px}
+header h1{font:600 24px var(--font-d);color:#fff}
 header .meta{font:12px var(--font-m);color:var(--muted)}
 
-.top{display:flex;gap:0;border-bottom:1px solid var(--border)}
+.inbox{flex:1;overflow-y:auto;padding:20px 24px 32px;display:none}
+.inbox.active{display:block}
+.inbox-intro{font:14px/1.5 var(--font-t);color:var(--muted);max-width:36em;margin-bottom:20px}
+.inbox-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:24px;align-items:start}
+.inbox h2{font:500 18px var(--font-d);color:#fff;display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.inbox h2 .count{font:12px var(--font-m);color:var(--dim)}
+.inbox .sub{font:13px var(--font-t);color:var(--muted);margin-bottom:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;column-gap:8px;row-gap:4px}
+.card:hover{background:var(--raise)}
+.card .dot{width:8px;height:8px;border-radius:50%;margin-top:6px}
+.card .do{font:500 14px/1.4 var(--font-t);color:#fff;grid-column:2}
+.card .why{font:13px/1.4 var(--font-t);color:var(--muted);grid-column:2}
+.card .who{font:12px var(--font-m);color:var(--dim);grid-column:2;display:flex;flex-wrap:wrap;gap:4px 12px}
+.card .file{background:none;border:0;padding:0;font:12px var(--font-m);color:var(--text);cursor:pointer;text-align:left;overflow-wrap:anywhere}
+.card .file:hover{color:#fff;text-decoration:underline}
+.card .side{grid-row:1/span 3;grid-column:3;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.card .posture{font:12px var(--font-t)}
+.cmd{grid-column:2/span 2;min-width:0;display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 4px 4px 8px;margin-top:4px}
+.cmd code{flex:1;min-width:0;font:12px var(--font-m);color:var(--muted);overflow-x:auto;white-space:nowrap}
+.copy{border:1px solid var(--border);background:var(--raise);border-radius:4px;padding:4px 8px;font:12px var(--font-t);color:var(--text);cursor:pointer;flex-shrink:0}
+.copy:hover{border-color:var(--muted)}
+.more{background:none;border:1px solid var(--border);border-radius:4px;padding:4px 12px;font:13px var(--font-t);color:var(--muted);cursor:pointer;margin-top:4px}
+.more:hover{color:#fff;border-color:var(--muted)}
 
-.actions{flex:1;padding:16px 24px;border-right:1px solid var(--border)}
-.actions h2{font:600 11px var(--font-d);text-transform:uppercase;letter-spacing:1.5px;color:var(--accent);margin-bottom:10px}
-.action-card{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer}
-.action-card:hover{background:var(--panel)}
-.action-card:last-child{border:none}
-.action-score{font:700 20px var(--font-d);width:36px;text-align:center;flex-shrink:0}
-.action-body{flex:1;min-width:0}
-.action-path{font:500 12px var(--font-m);color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.action-reason{font:11px var(--font-t);color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.action-tag{display:inline-block;font:600 9px var(--font-d);padding:1px 5px;border-radius:2px;text-transform:uppercase;margin-top:3px}
-
-.tier-bar{width:280px;padding:16px 20px;display:flex;flex-direction:column;gap:6px;justify-content:center}
-.tier-row{display:flex;align-items:center;gap:8px;height:22px}
-.tier-label{font:600 10px var(--font-d);text-transform:uppercase;letter-spacing:1px;width:65px;text-align:right;flex-shrink:0}
-.tier-fill{height:20px;border-radius:3px;transition:width .3s;cursor:pointer;display:flex;align-items:center;padding:0 6px;min-width:24px}
-.tier-fill span{font:600 11px var(--font-m);color:#000}
-
-.main{display:flex;height:calc(100vh - 200px)}
+.meter{position:relative;height:4px;background:var(--raise);border-radius:2px;margin:4px 0 0}
+.meter .fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
+.meter .tick{position:absolute;top:-3px;width:2px;height:10px;background:var(--text);border-radius:1px}
+.main{display:flex;height:calc(100vh - 106px)}
 
 .treemap-wrap{flex:1;padding:8px;position:relative;overflow:hidden}
 .treemap{width:100%;height:100%;position:relative}
-.tm-node{position:absolute;border:1px solid rgba(0,0,0,.6);cursor:pointer;overflow:hidden;transition:opacity .15s;display:flex;flex-direction:column;justify-content:flex-end;padding:3px 5px}
+.tm-node{position:absolute;border:1px solid rgba(0,0,0,.6);cursor:pointer;overflow:hidden;transition:opacity .15s var(--ease);display:flex;flex-direction:column;justify-content:flex-end;padding:3px 5px}
 .tm-node:hover{opacity:.85;z-index:10;border-color:#fff}
 .tm-node.dimmed{opacity:.2}
-.tm-label{font:500 10px var(--font-m);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tm-score{font:700 14px var(--font-d);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.tm-label{font:500 12px var(--font-m);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm-score{font:600 14px var(--font-d);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 .breadcrumb{position:absolute;top:10px;left:12px;z-index:20;display:flex;gap:4px;align-items:center}
-.breadcrumb span{font:500 11px var(--font-m);color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:3px;background:rgba(0,0,0,.7)}
+.breadcrumb span{font:500 12px var(--font-m);color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:3px;background:rgba(0,0,0,.7)}
 .breadcrumb span:hover{color:#fff}
 .breadcrumb span.current{color:#fff}
 
-.detail{width:340px;border-left:1px solid var(--border);padding:16px;overflow-y:auto;background:var(--panel)}
-.detail h3{font:600 14px var(--font-d);color:#fff;word-break:break-all;margin-bottom:4px}
-.detail .tier-badge{display:inline-block;padding:2px 8px;border-radius:3px;font:600 11px var(--font-d);text-transform:uppercase;margin:6px 0}
-.detail .sec{margin-top:14px}
-.detail .sec-title{font:600 10px var(--font-d);text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid var(--border)}
+.detail{width:380px;border-left:1px solid var(--border);padding:20px;overflow-y:auto;background:var(--panel)}
+.detail h3{font:500 14px var(--font-m);color:#fff;word-break:break-all;margin-bottom:8px}
+.detail .verdict{font:500 18px var(--font-d);margin-bottom:12px}
+.detail .q{margin:12px 0}
+.detail .q .ql{display:flex;justify-content:space-between;align-items:baseline;font:13px var(--font-t)}
+.detail .q .qv{font:500 14px var(--font-m);color:#fff}
+.detail .q .qc{font:12px var(--font-m);color:var(--dim)}
+.detail .note{font:12px/1.5 var(--font-t);color:var(--dim);margin-top:8px}
+.detail ul.check{list-style:none}
+.detail ul.check li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px;margin-bottom:8px;font:13px/1.45 var(--font-t)}
+.detail ul.check .box{font:12px var(--font-m);color:var(--dim);padding-top:1px;white-space:nowrap}
+.detail ul.check .sig{display:block;color:var(--muted);font-size:12px}
+.detail ul.check .cmd{grid-column:2}
+.detail details{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
+.detail summary{cursor:pointer;font:500 13px var(--font-d);color:var(--muted)}
+.detail summary:hover{color:#fff}
+.detail .tier-badge{display:inline-block;padding:2px 8px;border-radius:4px;font:500 12px var(--font-t);margin:4px 0}
+.detail .sec{margin-top:16px}
+.detail .sec-title{font:500 13px var(--font-d);color:#fff;margin-bottom:8px}
 .detail .reason{font:13px/1.5 var(--font-t);margin-bottom:4px}
 .detail .crit{font:500 12px var(--font-t);color:var(--accent)}
 .bar-r{display:flex;align-items:center;gap:6px;margin:3px 0}
-.bar-r .bl{font:11px var(--font-t);color:var(--muted);width:72px;text-align:right}
+.bar-r .bl{font:12px var(--font-t);color:var(--muted);width:80px;text-align:right}
 .bar-r .b{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
 .bar-r .bf{height:100%;border-radius:3px}
-.bar-r .bv{font:11px var(--font-m);width:24px}
+.bar-r .bv{font:12px var(--font-m);width:24px}
 .rev{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px;font:12px var(--font-t);margin-top:6px}
 .rev div{margin:1px 0}
 .atag{display:inline-block;padding:2px 6px;border-radius:3px;font:600 10px var(--font-d);margin-top:6px}
 .atag.block{background:#5F0000;color:var(--critical)}
 .atag.safe{background:#0A3D0A;color:var(--low)}
-.empty{padding:30px;text-align:center;color:var(--dim);font:14px var(--font-t)}
+.empty{padding:32px;text-align:center;color:var(--dim);font:14px var(--font-t)}
 
 .explorer{flex:1;overflow-y:auto;padding:4px 0;display:none}
 .explorer.active{display:block}
 .treemap-wrap.active{display:block}
 .treemap-wrap{display:block}
-.ex-row{display:flex;align-items:center;padding:3px 8px;cursor:pointer;border-left:3px solid transparent;gap:4px}
+.ex-row{display:flex;align-items:center;padding:4px 8px;cursor:pointer;gap:4px;min-height:28px}
 .ex-row:hover{background:var(--panel)}
-.ex-row.selected{background:#111;border-left-color:var(--accent)}
+.ex-row.selected{background:var(--raise)}
 .ex-dir{font:600 12px var(--font-d);color:var(--muted)}
-.ex-dir .arrow{display:inline-block;width:12px;font-size:10px;color:var(--dim)}
+.ex-dir .arrow{display:inline-block;width:12px;font-size:12px;color:var(--dim)}
 .ex-dir .dname{color:#fff}
-.ex-dir .dheat{margin-left:auto;font:600 11px var(--font-m)}
+.ex-dir .dheat{margin-left:auto;font:12px var(--font-t)}
 .ex-file{font:12px var(--font-m)}
 .ex-file .fname{color:var(--text)}
-.ex-file .fheat{margin-left:auto;font:600 12px var(--font-d);min-width:28px;text-align:right}
+.ex-file .fheat{margin-left:auto;font:12px var(--font-t);min-width:80px;text-align:right}
 .ex-file .ftier{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.ex-file .freason{color:var(--dim);font:11px var(--font-t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px;margin-left:8px}
+.ex-file .freason{color:var(--dim);font:12px var(--font-t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px;margin-left:8px}
 .ex-heat-bar{width:60px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0;margin-left:8px}
 .ex-heat-bar .fill{height:100%;border-radius:2px}
-.view-toggle{display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-left:8px}
-.view-toggle button{padding:3px 10px;border:none;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-d)}
-.view-toggle button.on{background:var(--accent);color:#fff}
+.view-toggle{display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:8px}
+.view-toggle button{padding:4px 12px;border:none;border-radius:4px;background:none;color:var(--muted);cursor:pointer;font:13px var(--font-t);white-space:nowrap}
+.view-toggle button:hover{color:#fff}
+.view-toggle button.on{background:var(--raise);color:#fff;box-shadow:inset 0 0 0 1px var(--border)}
 .arch{flex:1;overflow:hidden;display:none;flex-direction:column;position:relative;min-width:0}
-.arch-hint{padding:6px 12px;font:11px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
+.arch-hint{padding:8px 12px;font:12px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
 .arch-bar{display:flex;gap:6px;align-items:center;margin-bottom:5px}
-.arch-bar label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.arch-bar label{font:12px var(--font-t);color:var(--muted)}
 .arch-bar .fbtn:disabled{opacity:.4;cursor:not-allowed}
-.arch-zoom{font:11px var(--font-m);color:var(--dim);margin-left:4px}
+.arch-zoom{font:12px var(--font-m);color:var(--dim);margin-left:4px}
 .arch-vp{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab}
 .arch-vp.panning{cursor:grabbing}
 .arch .band{fill:#ffffff08;stroke:var(--border);stroke-dasharray:4 4}
-.arch .band-label{font:600 10px var(--font-d);fill:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.arch .band-label{font:500 12px var(--font-d);fill:var(--muted)}
 .arch svg{display:block}
 .arch .an{cursor:pointer}
 .arch .an rect{stroke-width:1.5}
@@ -250,11 +270,11 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .arch .an.sel rect{stroke:var(--text);stroke-width:2.5}
 .arch .an.dim,.arch .ae.dim{opacity:.15}
 .arch .an-dir{font:600 12px var(--font-m);fill:var(--text)}
-.arch .an-hot{font:11px var(--font-t);fill:var(--muted)}
-.arch .an-heat{font:700 13px var(--font-d)}
+.arch .an-hot{font:12px var(--font-t);fill:var(--muted)}
+.arch .an-heat{font:600 13px var(--font-d)}
 .arch .ae path{fill:none;stroke:var(--dim)}
 .arch .ae.hl path{stroke:var(--text)}
-.arch .ae text{font:10px var(--font-m);fill:var(--muted)}
+.arch .ae text{font:12px var(--font-m);fill:var(--muted)}
 .arch .ae.hl text{fill:var(--text)}
 .arch .ae{cursor:pointer}
 .arch .ae:hover path{stroke:var(--muted)}
@@ -263,15 +283,15 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .arch .ae.declared{cursor:default}
 .arch .ae.declared path{stroke:var(--accent);stroke-dasharray:6 4}
 .arch .ae.declared text{fill:var(--accent)}
-.elink{font:11px var(--font-m);padding:4px 0;border-bottom:1px solid var(--border);word-break:break-all}
+.elink{font:12px var(--font-m);padding:4px 0;border-bottom:1px solid var(--border);word-break:break-all}
 .elink-file{cursor:pointer;color:var(--text)}
 .elink-file:hover{color:#fff}
 .elink-file .ftier{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
 .earrow{color:var(--dim);margin:0 6px}
-.fmeta{margin-left:auto;font:11px var(--font-m);color:var(--muted);white-space:nowrap;padding-left:8px}
+.fmeta{margin-left:auto;font:12px var(--font-m);color:var(--muted);white-space:nowrap;padding-left:8px}
 .arch .arrow{fill:var(--dim)}
 .arch .an-frag{fill:none;stroke:var(--medium);stroke-width:1.5;stroke-dasharray:4 3}
-.arch .an-likely{font:600 10px var(--font-m);fill:var(--medium)}
+.arch .an-likely{font:500 12px var(--font-m);fill:var(--medium)}
 .arch-legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:4px}
 .arch-legend span{display:inline-flex;align-items:center;gap:5px}
 .arch-legend i{display:inline-block;width:12px;height:10px;border-radius:2px;border:1.5px solid}
@@ -282,18 +302,21 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .quad .qd:hover,.quad .qd.sel{stroke:#fff;stroke-width:2}
 .quad .qline{stroke:var(--muted);stroke-dasharray:5 4}
 .quad .qaxis{stroke:var(--border)}
-.quad .qtick{font:10px var(--font-m);fill:var(--dim)}
-.quad .qtitle{font:600 12px var(--font-d)}
-.quad .qguide{font:11px var(--font-t);fill:var(--muted);paint-order:stroke;stroke:#000;stroke-width:3px}
-.quad .qlab{font:600 11px var(--font-d);fill:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.quad .qtick{font:12px var(--font-m);fill:var(--dim)}
+.quad .qtitle{font:500 13px var(--font-d)}
+.quad .qguide{font:12px var(--font-t);fill:var(--muted);paint-order:stroke;stroke:#000;stroke-width:3px}
+.quad .qlab{font:500 12px var(--font-d);fill:var(--muted)}
 .flist .ex-row{padding:4px 0}
-.controls{display:flex;gap:6px;padding:6px 12px;align-items:center;border-bottom:1px solid var(--border)}
-.controls label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.fbtn{padding:3px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-t)}
-.fbtn.on{border-color:var(--accent);color:#fff;background:rgba(238,0,0,.1)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px 24px;align-items:center;border-bottom:1px solid var(--border)}
+.controls label{font:12px var(--font-t);color:var(--muted)}
+.fbtn{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--panel);color:var(--muted);cursor:pointer;font:12px var(--font-t)}
+.fbtn.on{border-color:rgba(255,255,255,.24);color:#fff;background:var(--raise)}
 .fbtn:hover{border-color:var(--muted)}
-input[type=text]{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:3px;font:12px var(--font-m);width:160px}
-input:focus{outline:none;border-color:var(--accent)}
+input[type=text]{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font:12px var(--font-m);width:180px}
+input:focus-visible{outline:2px solid var(--medium);outline-offset:0}
+input::placeholder{color:var(--dim)}
+@media (max-width:760px){header{flex-wrap:wrap;padding:12px 16px}.view-toggle{max-width:100%;overflow-x:auto}.inbox,.detail{min-width:0}.main{flex-direction:column;height:auto}.detail{width:auto;border-left:0;border-top:1px solid var(--border)}.inbox{padding:16px}.inbox-cols{grid-template-columns:1fr}.controls{padding:8px 16px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
@@ -301,32 +324,31 @@ input:focus{outline:none;border-color:var(--accent)}
 <h1>HighStakes</h1>
 <span class="meta" id="meta"></span>
 </header>
-<div class="top">
-<div class="actions" id="actions"></div>
-<div class="tier-bar" id="tierbar"></div>
-</div>
 <div class="controls">
-<div class="view-toggle">
-<button class="on" onclick="setMode('treemap',this)">Treemap</button>
-<button onclick="setMode('explorer',this)">Explorer</button>
-<button onclick="setMode('arch',this)">Architecture</button>
-<button onclick="setMode('quadrant',this)">Quadrant</button>
+<div class="view-toggle" role="tablist" aria-label="Views">
+<button role="tab" aria-selected="true" class="on" data-mode="inbox" onclick="setMode('inbox',this)">Action inbox</button>
+<button role="tab" aria-selected="false" tabindex="-1" data-mode="treemap" onclick="setMode('treemap',this)">Treemap</button>
+<button role="tab" aria-selected="false" tabindex="-1" data-mode="explorer" onclick="setMode('explorer',this)">Explorer</button>
+<button role="tab" aria-selected="false" tabindex="-1" data-mode="arch" onclick="setMode('arch',this)">Architecture</button>
+<button role="tab" aria-selected="false" tabindex="-1" data-mode="quadrant" onclick="setMode('quadrant',this)">Quadrant</button>
 </div>
-<label style="margin-left:12px">Tier:</label>
-<button class="fbtn on" onclick="setView('all',this)">All</button>
-<button class="fbtn" onclick="setView('critical',this)">Critical</button>
-<button class="fbtn" onclick="setView('high',this)">High</button>
-<button class="fbtn" onclick="setView('medium',this)">Medium</button>
-<button class="fbtn" onclick="setView('low',this)">Low</button>
+<span style="width:8px"></span>
+<label>Posture</label>
+<button class="fbtn on" aria-pressed="true" data-tier="all" onclick="setView('all',this)">All</button>
+<button class="fbtn" aria-pressed="false" data-tier="critical" onclick="setView('critical',this)">Harden now</button>
+<button class="fbtn" aria-pressed="false" data-tier="high" onclick="setView('high',this)">Protect</button>
+<button class="fbtn" aria-pressed="false" data-tier="medium" onclick="setView('medium',this)">Stabilize</button>
+<button class="fbtn" aria-pressed="false" data-tier="low" onclick="setView('low',this)">Routine</button>
 <span style="flex:1"></span>
-<label>Search:</label>
-<input type=text id=search placeholder="path or reason..." oninput="onSearch()">
-<label style="margin-left:12px">Size:</label>
-<button class="fbtn on" data-sz="lines" onclick="setSizing('lines',this)">Lines</button>
-<button class="fbtn" data-sz="heat" onclick="setSizing('heat',this)">Heat</button>
+<label for="search">Search</label>
+<input type=text id=search placeholder="Path or reason" oninput="onSearch()">
+<label>Size</label>
+<button class="fbtn on" aria-pressed="true" data-sz="lines" onclick="setSizing('lines',this)">Lines</button>
+<button class="fbtn" aria-pressed="false" data-sz="impact" onclick="setSizing('impact',this)">Break cost</button>
 </div>
 <div class="main">
-<div class="treemap-wrap active" id="treemap-wrap">
+<div class="inbox active" id="inbox" role="tabpanel" aria-label="Action inbox"></div>
+<div class="treemap-wrap" id="treemap-wrap" style="display:none">
 <div class="breadcrumb" id="bread"></div>
 <div class="treemap" id="treemap"></div>
 </div>
@@ -345,45 +367,27 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="arch-vp" id="archvp"></div>
 </div>
 <div class="quad" id="quadrant"></div>
-<div class="detail" id="detail"><div class="empty">Click a file to see its blast radius</div></div>
+<div class="detail" id="detail" aria-live="polite"><div class="empty">Pick a card or a file to see what to do and why</div></div>
 </div>
 <script>
 const FILES=/*__FILES__*/[];
 const STATS=/*__STATS__*/{};
-const ACTIONS=/*__ACTIONS__*/[];
+const INBOX=/*__INBOX__*/{};
 const ARCH=/*__ARCH__*/{};
 const UNITS=/*__UNITS__*/{};
-const C={critical:'#EE0000',high:'#E85D75',medium:'#D4874D',low:'#2D8A2D'};
+// One hue per posture, the same in every view. Tiers map 1:1 to postures.
+const C={critical:'#f2555a',high:'#e0a43c',medium:'#6aa6e0',low:'#5fae6b'};
+const POSTURE={critical:'Harden now',high:'Protect',medium:'Stabilize',low:'Routine'};
+const VC={'Harden now':C.critical,'Protect':C.high,'Stabilize':C.medium,'Routine':C.low,'Not assessed':'#8c8c92'};
 const QUAD={
-  'fragile-critical':{label:'Fragile and critical',guide:'likely to break and costly when it does: senior review, add tests first'},
-  'protect':{label:'Protect',guide:'stable but costly if broken: keep owners on review, never auto-merge'},
-  'watch':{label:'Watch',guide:'changes and breaks often, limited damage: refactor or add tests'},
-  'low':{label:'Low stakes',guide:'light review'}};
+  'fragile-critical':{label:'Harden now',guide:'likely to break and costly: owner sign-off, tests before merge'},
+  'protect':{label:'Protect',guide:'costly if it breaks: owner review, no auto-merge'},
+  'watch':{label:'Stabilize',guide:'breaks often, limited damage: regression tests, refactor'},
+  'low':{label:'Routine',guide:'normal review'}};
+const NOTE='Scores are a relative signal within this repo, not a probability.';
+const EVIDENCE=/*__EVIDENCE__*/'';
 
 document.getElementById('meta').textContent=(STATS.branch||'')+' @ '+(STATS.commit||'').slice(0,7)+'  |  '+STATS.analyzed_at+'  |  '+STATS.total+' files';
-
-// Action cards
-const actEl=document.getElementById('actions');
-actEl.innerHTML='<h2>Needs Your Attention</h2>'+ACTIONS.map(f=>{
-  const c=C[f.tier];
-  return '<div class="action-card" onclick="selectFile(\''+esc(f.path)+'\')">'+
-    '<div class="action-score" style="color:'+c+'">'+f.heat_score+'</div>'+
-    '<div class="action-body">'+
-    '<div class="action-path">'+f.path+'</div>'+
-    '<div class="action-reason">'+(f.reason||'')+'</div>'+
-    '<span class="action-tag" style="background:'+c+'22;color:'+c+'">'+f.tier+'</span>'+
-    '</div></div>';
-}).join('');
-
-// Tier bar
-const tb=document.getElementById('tierbar');
-const mx=Math.max(...Object.values(STATS.tiers),1);
-['critical','high','medium','low'].forEach(t=>{
-  const n=STATS.tiers[t]||0;
-  const w=Math.max(n/mx*100,n?8:0);
-  tb.innerHTML+='<div class="tier-row"><span class="tier-label" style="color:'+C[t]+'">'+t+'</span>'+
-    '<div class="tier-fill" style="width:'+w+'%;background:'+C[t]+'" onclick="setView(\''+t+'\')"><span>'+n+'</span></div></div>';
-});
 
 // Treemap
 let currentFilter='all';
@@ -394,18 +398,18 @@ let searchQ='';
 function esc(s){return s.replace(/'/g,"\\'")}
 function htmlEsc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])}
 
+function pressOnly(sel,btn){
+  document.querySelectorAll(sel).forEach(b=>{const on=b===btn;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on)});
+}
 function setView(tier,btn){
   currentFilter=tier;
-  document.querySelectorAll('.controls .fbtn:not([data-sz])').forEach(b=>b.classList.remove('on'));
-  if(btn)btn.classList.add('on');
-  else document.querySelector('.controls .fbtn[onclick*="'+tier+'"]')?.classList.add('on');
+  pressOnly('.fbtn[data-tier]',btn||document.querySelector('.fbtn[data-tier="'+tier+'"]'));
   rerender();
 }
 
 function setSizing(mode,btn){
   currentSizing=mode;
-  document.querySelectorAll('.fbtn[data-sz]').forEach(b=>b.classList.remove('on'));
-  btn.classList.add('on');
+  pressOnly('.fbtn[data-sz]',btn);
   renderTreemap();
 }
 
@@ -506,7 +510,7 @@ function renderTreemap(){
   for(const f of files){
     const mod=currentPath?f.dir:getModuleName(f.path);
     if(!modules[mod])modules[mod]={name:mod,files:[],totalValue:0,maxHeat:0,tier:'low'};
-    const val=currentSizing==='heat'?Math.max(f.heat_score*f.heat_score/10,5):Math.max(f.lines,10);
+    const val=currentSizing==='impact'?Math.max(f.impact*f.impact/10,5):Math.max(f.lines,10);
     modules[mod].files.push({...f,value:val});
     modules[mod].totalValue+=val;
     if(f.heat_score>modules[mod].maxHeat){modules[mod].maxHeat=f.heat_score;modules[mod].tier=f.tier}
@@ -549,11 +553,9 @@ function renderTreemap(){
       html+='<div class="tm-node" style="left:'+fr.x+'px;top:'+fr.y+'px;width:'+fr.w+'px;height:'+fr.h+'px;'+
         'background:'+fc+';filter:saturate('+sat.toFixed(0)+'%);opacity:'+(0.35+fr.heat_score/100*0.65).toFixed(2)+'" '+
         'onclick="event.stopPropagation();selectFile(\''+esc(fr.path)+'\')" '+
-        'title="'+fr.path+'  (score: '+fr.heat_score+')\n'+(fr.reason||'')+'">';
+        'title="'+attr(fr.path+'\n'+(POSTURE[fr.tier]||'')+'\n'+axesText(fr)+(fr.reason?'\n'+fr.reason:''))+'">';
       if(fr.w>55&&fr.h>30){
-        html+='<div class="tm-score">'+fr.heat_score+'</div><div class="tm-label">'+fr.name+'</div>';
-      }else if(fr.w>35&&fr.h>18){
-        html+='<div class="tm-label" style="font-size:9px">'+fr.name+'</div>';
+        html+='<div class="tm-label">'+htmlEsc(fr.name)+'</div>';
       }
       html+='</div>';
     }
@@ -583,79 +585,129 @@ function updateBreadcrumb(){
   el.innerHTML=html;
 }
 
+// meter is the signature readout: the score as a bar with a tick at the repo cutoff.
+function meter(v,cut,color){
+  return '<div class="meter" aria-hidden="true"><div class="fill" style="width:'+Math.max(0,Math.min(100,v))+'%;background:'+color+'"></div>'+
+    (cut>0?'<div class="tick" style="left:calc('+Math.min(100,cut)+'% - 1px)"></div>':'')+'</div>';
+}
+function level(v,cut){return cut>0&&v>=cut?'high':'low'}
+function axesText(f){
+  return 'Will it break? '+f.likelihood+' (cutoff '+STATS.likely_cutoff+') · How bad if it breaks? '+
+    (f.impact_assessed?f.impact+' (cutoff '+STATS.impact_threshold+')':'~'+f.impact+' estimate');
+}
+function verdictOf(f){return (f.explanation&&f.explanation.verdict)||(f.quadrant?QUAD[f.quadrant].label:'Not assessed')}
+
+function cmdRow(cmd){
+  return '<div class="cmd"><code>'+htmlEsc(cmd)+'</code><button class="copy" data-cmd="'+attr(cmd)+'" aria-label="Copy command">Copy</button></div>';
+}
+// copyCommand copies a backlog command; when the clipboard is blocked it
+// selects the text so it can be copied by hand, and says so.
+function copyCommand(btn){
+  const cmd=btn.dataset.cmd;
+  const done=ok=>{btn.textContent=ok?'Copied':'Select and copy';setTimeout(()=>{btn.textContent='Copy'},1600)};
+  const fallback=()=>{
+    const code=btn.parentElement.querySelector('code');const r=document.createRange();r.selectNodeContents(code);
+    const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);
+    let ok=false;try{ok=document.execCommand('copy')}catch(e){ok=false}
+    done(ok);
+  };
+  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(cmd).then(()=>done(true),fallback);
+  else fallback();
+}
+document.addEventListener('click',e=>{const b=e.target.closest('.copy');if(b)copyCommand(b)});
+
 function selectFile(path){
   const f=FILES.find(x=>x.path===path);
   if(!f)return;
   const d=document.getElementById('detail');
-  const c=C[f.tier]||C.low;
-
-  let h='<h3>'+f.path+'</h3>';
-  h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+f.tier+' '+f.heat_score+'</span>';
-
-  h+='<div class="sec"><div class="sec-title">Two axes</div>';
-  [{l:'Impact',v:f.impact,n:f.impact_assessed?'damage if it breaks':'estimate (no LLM)'},{l:'Likelihood',v:f.likelihood,n:'chance it needs fixes'}].forEach(a=>{
-    const v=a.v||0, bc=v>=86?C.critical:v>=61?C.high:v>=31?C.medium:C.low;
-    h+='<div class="bar-r"><span class="bl">'+a.l+'</span><div class="b"><div class="bf" style="width:'+v+'%;background:'+bc+'"></div></div><span class="bv" style="color:'+bc+'">'+v+'</span></div>';
-    h+='<div class="reason" style="font-size:11px;color:var(--muted);margin:0 0 4px 78px">'+a.n+'</div>';
-  });
-  if(f.quadrant)h+='<div class="reason"><strong>'+QUAD[f.quadrant].label+'</strong>: '+QUAD[f.quadrant].guide+'</div>';
-  h+='</div>';
+  const v=verdictOf(f), vc=VC[v]||VC['Not assessed'];
+  let h='<h3>'+htmlEsc(f.path)+'</h3><div class="verdict" style="color:'+vc+'">'+htmlEsc(v)+'</div>';
+  const lc=STATS.likely_cutoff, ic=STATS.impact_threshold;
+  h+='<div class="q"><div class="ql"><span>Will it break?</span><span><span class="qv">'+f.likelihood+'</span> <span class="qc">'+level(f.likelihood,lc)+' · repo cutoff '+lc+'</span></span></div>'+meter(f.likelihood,lc,vc)+'</div>';
+  if(f.impact_assessed){
+    h+='<div class="q"><div class="ql"><span>How bad if it breaks?</span><span><span class="qv">'+f.impact+'</span> <span class="qc">'+level(f.impact,ic)+' · repo cutoff '+ic+'</span></span></div>'+meter(f.impact,ic,vc)+'</div>';
+  }else{
+    h+='<div class="q"><div class="ql"><span>How bad if it breaks?</span><span><span class="qv">~'+f.impact+'</span> <span class="qc">estimate, run analyze with an LLM</span></span></div>'+meter(f.impact,0,'#8c8c92')+'</div>';
+  }
+  h+='<div class="note">'+NOTE+' '+htmlEsc(EVIDENCE)+'</div>';
 
   const x=f.explanation;
+  if(x&&x.actions){
+    [['before_merge','Do before the next merge'],['backlog','Put on the backlog']].forEach(([scope,title])=>{
+      const as=x.actions.filter(a=>a.scope===scope);
+      if(!as.length)return;
+      h+='<div class="sec"><div class="sec-title">'+title+'</div><ul class="check">';
+      as.forEach(a=>{
+        h+='<li><span class="box">'+(a.done?'[x]':'[ ]')+'</span><span>'+htmlEsc(a.text)+(a.signal?'<span class="sig">'+htmlEsc(a.signal)+'</span>':'')+'</span>'+(a.command?cmdRow(a.command):'')+'</li>';
+      });
+      h+='</ul></div>';
+    });
+  }
+
+  h+='<details><summary>Why</summary>';
   if(x){
-    h+='<div class="reason" style="font-size:11px;color:var(--muted)">'+htmlEsc(x.headline)+'</div>';
-    [{t:f.impact_title,r:x.impact_reasons},{t:f.likely_title,r:x.likelihood_reasons}].forEach(sec=>{
+    [{t:f.likely_title,r:x.likelihood_reasons},{t:f.impact_title,r:x.impact_reasons}].forEach(sec=>{
       if(!sec.r||!sec.r.length)return;
       h+='<div class="sec"><div class="sec-title">'+htmlEsc(sec.t)+'</div>';
       sec.r.forEach(r=>{h+='<div class="reason">'+htmlEsc(r)+'</div>'});
       h+='</div>';
     });
-    if(x.actions&&x.actions.length){
-      h+='<div class="sec"><div class="sec-title">What to do</div>';
-      x.actions.forEach(a=>{h+='<div class="reason">&#8226; '+htmlEsc(a.text)+'</div>'});
-      h+='</div>';
-    }
+  }else if(f.reason){
+    h+='<div class="sec"><div class="reason">'+htmlEsc(f.reason)+'</div>'+(f.crit_reason?'<div class="reason">'+htmlEsc(f.crit_reason)+'</div>':'')+'</div>';
   }
-
-  if(f.reason&&!x){
-    h+='<div class="sec"><div class="sec-title">Blast Radius</div>';
-    h+='<div class="reason">'+f.reason+'</div>';
-    if(f.crit_reason)h+='<div class="crit">'+f.crit_reason+'</div>';
-    h+='</div>';
-  }
-
-  h+='<div class="sec"><div class="sec-title">Impact Dimensions</div>';
-  [{l:'Security',k:'security'},{l:'Data',k:'data'},{l:'Availability',k:'availability'},{l:'User',k:'user'}].forEach(d=>{
-    const v=f[d.k]||0;
-    const bc=v>=80?C.critical:v>=60?C.high:v>=40?C.medium:C.low;
-    h+='<div class="bar-r"><span class="bl">'+d.l+'</span><div class="b"><div class="bf" style="width:'+v+'%;background:'+bc+'"></div></div><span class="bv" style="color:'+bc+'">'+v+'</span></div>';
+  h+='<div class="sec"><div class="sec-title">Break cost by dimension</div>';
+  [{l:'Security',k:'security'},{l:'Data',k:'data'},{l:'Availability',k:'availability'},{l:'User',k:'user'}].forEach(dm=>{
+    const val=f[dm.k]||0;
+    h+='<div class="bar-r"><span class="bl">'+dm.l+'</span><div class="b"><div class="bf" style="width:'+val+'%;background:'+vc+'"></div></div><span class="bv">'+val+'</span></div>';
   });
   h+='</div>';
-
-  if(f.imported_by>0){
-    h+='<div class="sec"><div class="sec-title">Breakage Impact</div>';
-    h+='<div class="reason" style="color:var(--critical)"><strong>'+f.imported_by+' files break</strong> if this changes</div>';
-    h+='</div>';
-  }
-
-  h+='<div class="sec"><div class="sec-title">Details</div><div class="rev">';
-  h+='<div>Reviewers: <strong>'+f.reviewers+'</strong></div>';
-  h+='<div>Complexity: <strong>'+f.complexity+'</strong></div>';
-  h+='<div>Lines: <strong>'+f.lines+'</strong></div>';
-  h+='<div>Language: <strong>'+(f.language||'?')+'</strong></div>';
-  h+='</div></div>';
-
-  h+=f.auto_merge?'<span class="atag safe">AUTO-MERGE OK</span>':'<span class="atag block">HUMAN REVIEW REQUIRED</span>';
-
+  h+='<div class="sec"><div class="reason">'+f.imported_by+' files import it · '+f.lines+' lines · cyclomatic '+f.complexity+' · '+htmlEsc(f.language||'unknown language')+'</div></div>';
+  h+='</details>';
   d.innerHTML=h;
 }
 
+// Action inbox: before-merge cards for Harden now and Protect files, and
+// backlog cards with copyable commands. Posture filter and search apply.
+const INBOX_PAGE=8;
+const inboxOpen={before_merge:false,backlog:false};
+function inboxCards(list){
+  const want=currentFilter==='all'?null:POSTURE[currentFilter];
+  return (list||[]).filter(c=>(!want||c.verdict===want)&&(!searchQ||c.path.toLowerCase().includes(searchQ)||c.text.toLowerCase().includes(searchQ)||(c.signal||'').toLowerCase().includes(searchQ)));
+}
+function cardHTML(c){
+  const vc=VC[c.verdict]||VC['Not assessed'];
+  let h='<article class="card"><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
+  h+='<div class="do">'+htmlEsc(c.text)+'</div>';
+  h+='<div class="why">'+htmlEsc(c.signal||'')+'</div>';
+  h+='<div class="who"><button class="file" data-path="'+attr(c.path)+'">'+htmlEsc(c.path)+'</button>'+(c.owner?'<span>'+htmlEsc(c.owner)+'</span>':'')+(c.more?'<span>+'+c.more+' more before merge</span>':'')+'</div>';
+  h+='<div class="side"><span class="posture" style="color:'+vc+'">'+htmlEsc(c.verdict)+'</span></div>';
+  if(c.command)h+=cmdRow(c.command);
+  return h+'</article>';
+}
+function inboxSection(key,title,sub,unit){
+  const all=inboxCards(INBOX[key]);
+  const shown=inboxOpen[key]?all:all.slice(0,INBOX_PAGE);
+  let h='<section aria-labelledby="h-'+key+'"><h2 id="h-'+key+'">'+title+' <span class="count">'+all.length+' '+unit+'</span></h2><div class="sub">'+sub+'</div>';
+  h+=all.length?shown.map(cardHTML).join(''):'<div class="empty">Nothing here for this filter</div>';
+  if(all.length>INBOX_PAGE)h+='<button class="more" data-more="'+key+'">'+(inboxOpen[key]?'Show fewer':'Show all '+all.length)+'</button>';
+  return h+'</section>';
+}
+function renderInbox(){
+  const el=document.getElementById('inbox');
+  el.innerHTML='<p class="inbox-intro">What to do about the riskiest files. Before merge is what any PR touching the file needs; backlog is what to fix in the file over time. '+NOTE+'</p>'+
+    '<div class="inbox-cols">'+
+    inboxSection('before_merge','Before merge','Harden now and Protect files, most at stake first','files')+
+    inboxSection('backlog','Backlog','Open each once as an issue or CODEOWNERS line, then work them down','items')+'</div>';
+  el.querySelectorAll('.file').forEach(b=>b.addEventListener('click',()=>selectFile(b.dataset.path)));
+  el.querySelectorAll('.more').forEach(b=>b.addEventListener('click',()=>{inboxOpen[b.dataset.more]=!inboxOpen[b.dataset.more];renderInbox()}));
+}
+
 // View mode toggle
-let viewMode='treemap';
+let viewMode='inbox';
 function setMode(mode,btn){
   viewMode=mode;
-  document.querySelectorAll('.view-toggle button').forEach(b=>b.classList.remove('on'));
-  btn.classList.add('on');
+  document.querySelectorAll('.view-toggle button').forEach(b=>{const on=b===btn;b.classList.toggle('on',on);b.setAttribute('aria-selected',on);b.tabIndex=on?0:-1});
+  document.getElementById('inbox').style.display=mode==='inbox'?'block':'none';
   document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
   document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
   document.getElementById('arch').style.display=mode==='arch'?'flex':'none';
@@ -710,8 +762,8 @@ function renderExplorer(){
       html+='<div class="ex-row ex-dir" style="padding-left:'+(indent+8)+'px" onclick="toggleDir(\''+id+'\',this)">';
       html+='<span class="arrow" id="arr-'+id+'">▼</span>';
       html+='<span class="dname">'+name+'/</span>';
-      html+='<span style="font:11px var(--font-t);color:var(--dim);margin-left:6px">'+fileCount+'</span>';
-      html+='<span class="dheat" style="color:'+dc+'">'+child.maxHeat+'</span>';
+      html+='<span style="font:12px var(--font-t);color:var(--dim);margin-left:8px">'+fileCount+'</span>';
+      html+='<span class="dheat" style="color:'+dc+'">'+POSTURE[child.tier]+'</span>';
       html+='</div>';
       html+='<div id="'+id+'">';
       renderNode(child,depth+1,fullPath);
@@ -727,7 +779,7 @@ function renderExplorer(){
       html+='<span class="fname">'+f.name+'</span>';
       html+='<div class="ex-heat-bar"><div class="fill" style="width:'+barW+'%;background:'+fc+'"></div></div>';
       if(f.reason){html+='<span class="freason">'+f.reason+'</span>';}
-      html+='<span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span>';
+      html+='<span class="fheat" style="color:'+fc+'">'+POSTURE[f.tier]+'</span>';
       html+='</div>';
     }
   }
@@ -750,8 +802,19 @@ function toggleDir(id,row){
   else{el.style.display='none';arr.textContent='▶'}
 }
 
+// Tabs: arrow keys, Home and End move between views.
+document.querySelector('.view-toggle').addEventListener('keydown',e=>{
+  const tabs=[...document.querySelectorAll('.view-toggle button')];
+  const i=tabs.indexOf(document.activeElement);
+  if(i<0)return;
+  const j={ArrowRight:(i+1)%tabs.length,ArrowLeft:(i-1+tabs.length)%tabs.length,Home:0,End:tabs.length-1}[e.key];
+  if(j===undefined)return;
+  e.preventDefault();tabs[j].focus();tabs[j].click();
+});
+
 function rerender(){
-  if(viewMode==='treemap')renderTreemap();
+  if(viewMode==='inbox')renderInbox();
+  else if(viewMode==='treemap')renderTreemap();
   else if(viewMode==='arch')renderArch();
   else if(viewMode==='quadrant')renderQuadrant();
   else renderExplorer();
@@ -998,11 +1061,11 @@ function renderQuadrant(){
     s+='<text class="qtick" x="'+X(v)+'" y="'+(T+ph+14)+'" text-anchor="middle">'+v+'</text>';
     s+='<text class="qtick" x="'+(L-6)+'" y="'+(Y(v)+3)+'" text-anchor="end">'+v+'</text>';
   }
-  s+='<text class="qlab" x="'+(L+pw/2)+'" y="'+(H-8)+'" text-anchor="middle">Likelihood of needing fixes (churn, complexity) &#8594;</text>';
-  s+='<text class="qlab" transform="translate(14,'+(T+ph/2)+') rotate(-90)" text-anchor="middle">Impact if it breaks &#8594;</text>';
+  s+='<text class="qlab" x="'+(L+pw/2)+'" y="'+(H-8)+'" text-anchor="middle">Will it break? (churn, complexity) &#8594;</text>';
+  s+='<text class="qlab" transform="translate(14,'+(T+ph/2)+') rotate(-90)" text-anchor="middle">How bad if it breaks? &#8594;</text>';
   const xm=cut?X(cut):X(80), ym=Y(thr);
-  if(cut)s+='<line class="qline" x1="'+xm+'" y1="'+T+'" x2="'+xm+'" y2="'+(T+ph)+'"><title>likely: top 20% of non-test files (likelihood &#8805; '+cut+')</title></line>';
-  s+='<line class="qline" x1="'+L+'" y1="'+ym+'" x2="'+(L+pw)+'" y2="'+ym+'"><title>impactful: impact &#8805; '+thr+'</title></line>';
+  if(cut)s+='<line class="qline" x1="'+xm+'" y1="'+T+'" x2="'+xm+'" y2="'+(T+ph)+'"><title>will it break: top 20% of non-test files (&#8805; '+cut+')</title></line>';
+  s+='<line class="qline" x1="'+L+'" y1="'+ym+'" x2="'+(L+pw)+'" y2="'+ym+'"><title>how bad: &#8805; '+thr+'</title></line>';
   const corner=(q,x,y,anchor)=>{const c=q==='fragile-critical'?C.critical:q==='protect'?C.high:q==='watch'?C.medium:C.low;
     const room=anchor==='end'?(L+pw-xm-16):(xm-L-16);
     return '<text class="qtitle" x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" fill="'+c+'">'+QUAD[q].label+'</text>'+
@@ -1013,14 +1076,14 @@ function renderQuadrant(){
     const c=C[f.tier]||C.low;
     const cx=X(Math.min(100,Math.max(0,f.likelihood+jit(f.path)))), cy=Y(Math.min(100,Math.max(0,f.impact+jit(f.path+'#'))));
     s+='<circle class="qd'+(quadSel===f.path?' sel':'')+'" data-path="'+attr(f.path)+'" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+(f.impact_assessed?5:4)+'" fill="'+c+'" fill-opacity="'+(f.impact_assessed?0.85:0.45)+'">'+
-      '<title>'+html(f.path)+'\nimpact '+f.impact+(f.impact_assessed?'':' (estimate)')+', likelihood '+f.likelihood+(f.quadrant?'\n'+QUAD[f.quadrant].label:'')+(f.reason?'\n'+html(f.reason):'')+'</title></circle>';
+      '<title>'+html(f.path+'\n'+verdictOf(f)+'\n'+axesText(f)+(f.reason?'\n'+f.reason:''))+'</title></circle>';
   }
   // Labels after the dots so they stay readable on top.
   s+=corner('protect',L+8,T+16,'start')+corner('fragile-critical',L+pw-8,T+16,'end');
   s+=corner('low',L+8,T+ph-34,'start')+corner('watch',L+pw-8,T+ph-34,'end');
   s+='</svg>';
   const note=assessed?'':' Impact is estimated from centrality and path keywords (no LLM assessment); tiers come from heat.';
-  el.innerHTML='<div class="arch-hint">Each dot is a file (tests left out). Right of the vertical line: top 20% likelihood in this repo. Above the horizontal line: impact &#8805; '+thr+'. Color = tier. Click a dot for details.'+note+'</div>'+s;
+  el.innerHTML='<div class="arch-hint">Each dot is a file (tests left out). Right of the vertical line: Will it break? at or above the repo cutoff ('+(cut||'n/a')+'). Above the horizontal line: How bad if it breaks? at or above '+thr+'. Color = posture. '+NOTE+' Pick a dot for details.'+note+'</div>'+s;
   el.querySelectorAll('.qd').forEach(d=>d.addEventListener('click',()=>{quadSel=d.dataset.path;renderQuadrant();selectFile(d.dataset.path)}));
 }
 
@@ -1031,7 +1094,7 @@ function attr(t){return html(t).replace(/"/g,'&quot;')}
 // fileRow renders a clickable file; with axes it adds impact, likelihood and quadrant.
 function fileRow(f,label,axes){
   const fc=C[f.tier]||C.low;
-  const meta=axes?'<span class="fmeta">I '+f.impact+(f.impact_assessed?'':'~')+' · L '+f.likelihood+(f.quadrant?' · '+QUAD[f.quadrant].label:'')+'</span>':'<span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span>';
+  const meta=axes?'<span class="fmeta">break '+f.likelihood+' · bad '+(f.impact_assessed?'':'~')+f.impact+' · '+verdictOf(f)+'</span>':'<span class="fheat" style="color:'+fc+'">'+POSTURE[f.tier]+'</span>';
   return '<div class="ex-row ex-file" data-path="'+attr(f.path)+'"><span class="ftier" style="background:'+fc+'"></span><span class="fname">'+html(label)+'</span>'+meta+'</div>';
 }
 
@@ -1095,7 +1158,7 @@ function selectEdge(from,to){
 }
 
 window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap();else if(viewMode==='quadrant')renderQuadrant()});
-renderTreemap();
+renderInbox();
 </script>
 </body>
 </html>`

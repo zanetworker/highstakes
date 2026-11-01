@@ -4,92 +4,39 @@ Code Heatmap can run in any CI system to automatically assess PR risk and gate m
 
 ## GitHub Actions
 
-### Quick Setup
+### Setup
 
-```sh
-highstakes github install
-```
+Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/highstakes/blob/main/.github/workflows/heatmap-triage.yml) into your repo. Each run:
 
-This creates `.github/workflows/heatmap-triage.yml`. Commit and push to activate.
+1. Runs `highstakes init` only when `.heatmap/config.yaml` is missing (a committed config is kept), then `highstakes analyze` (cached by file content).
+2. Collects the reviewers whose latest review is an approval, with `gh api repos/<repo>/pulls/<n>/reviews`.
+3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins>`, which renders the comment in Go and exits 5 when the PR changes a Harden now file.
+4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
+5. Fails the `triage` job when `pr check` exited 5.
 
-### Manual Setup
-
-Create `.github/workflows/heatmap-triage.yml`:
+The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run. The core step:
 
 ```yaml
-name: Code Heatmap Triage
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  contents: read
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-
-      - name: Install highstakes
-        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
-
-      - name: Analyze
+      - name: Assess PR risk
+        id: risk
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: highstakes init && highstakes analyze
-
-      - name: Check PR risk
-        run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-
-      - name: Post comment
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
-            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let body = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
-            body += '| File | Score | Tier | Lines |\n|------|-------|------|-------|\n';
-            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
-              body += '| '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' '+f.tier+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
-            body += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
-            if (risk.review_requirements.requires_senior) body += ' (senior)';
-            body += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number});
-            const existing = comments.data.find(c => c.body.includes('Code Heatmap:'));
-            if (existing) await github.rest.issues.updateComment({
-              owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body});
-            else await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body});
+          BASE: origin/${{ github.base_ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
+        run: |
+          set +e
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
+
+The comment leads with the verdict (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize` or `✅ Routine`) and one sentence naming the riskiest file, then **Do before merge** as a checklist (`[x]` for items the PR already satisfies: a test next to the risky file changed, CODEOWNERS covers it, a suggested owner approved), a short file table (File, Will it break?, How bad?, Action), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers and backlog commands. See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 ### Secrets
 
 Add `OPENROUTER_API_KEY` in **Settings > Secrets and variables > Actions > New repository secret**.
 
-### Block Merge on High-Risk PRs
+### Block Merge on Harden Now Files
 
-Add a gate step after the PR check:
-
-```yaml
-      - name: Gate on risk tier
-        run: |
-          TIER=$(jq -r .tier pr-risk.json)
-          if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-            echo "::error::PR touches $TIER-tier files. Requires senior review."
-            exit 1
-          fi
-```
-
-Then in **Settings > Branches > Branch protection rules**, add `triage` as a required status check. PRs touching critical or high files cannot merge until a senior reviewer approves.
+The shipped workflow already gates with `--fail-on critical` (exit 5 on Harden now files). In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to block Protect files too, or `--shadow` to log decisions without failing while you calibrate.
 
 ## GitLab CI
 
@@ -100,14 +47,10 @@ heatmap:
   image: golang:1.25
   script:
     - go install github.com/zanetworker/highstakes/cmd/highstakes@latest
-    - highstakes init && highstakes analyze
-    - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --json > risk.json
-    - |
-      TIER=$(jq -r .tier risk.json)
-      if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-        echo "PR touches $TIER-tier files. Requires senior review."
-        exit 1
-      fi
+    - '[ -f .heatmap/config.yaml ] || highstakes init'
+    - highstakes analyze
+    # Markdown for a merge request note; exit 5 fails the job on Harden now files.
+    - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --format markdown --fail-on critical > risk.md
   variables:
     OPENROUTER_API_KEY: $OPENROUTER_API_KEY
   rules:
@@ -124,22 +67,15 @@ go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
 # Analyze (cached, only re-assesses changed files)
 export OPENROUTER_API_KEY="$YOUR_KEY"
-highstakes init && highstakes analyze
+[ -f .heatmap/config.yaml ] || highstakes init
+highstakes analyze
 
-# Check PR risk
+# The PR comment body; exit 5 blocks Harden now files
+highstakes pr check --base origin/main --format markdown --fail-on critical > comment.md
+
+# Or read the JSON: verdict, checklist (each with done) and backlog
 highstakes pr check --base origin/main --json > risk.json
-
-# Read results
-TIER=$(jq -r .tier risk.json)
-SCORE=$(jq -r .heat_score risk.json)
-FILES=$(jq -r '.files_changed | length' risk.json)
-echo "PR risk: $TIER (score $SCORE), $FILES files changed"
-
-# Gate
-if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-  echo "Requires human review"
-  exit 1
-fi
+jq -r '.verdict, (.checklist[] | "\(if .done then "[x]" else "[ ]" end) \(.text)")' risk.json
 ```
 
 ## Caching in CI

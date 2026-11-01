@@ -53,7 +53,7 @@ func runCLI(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { os.Stdout = orig }()
 
 	// Reset flags that persist across Execute calls in one process.
-	for _, c := range []*cobra.Command{tourCmd, listUnitsCmd, architectureCmd} {
+	for _, c := range []*cobra.Command{tourCmd, listUnitsCmd, architectureCmd, prCheckCmd} {
 		c.Flags().VisitAll(func(f *pflag.Flag) {
 			if sv, ok := f.Value.(pflag.SliceValue); ok {
 				_ = sv.Replace(nil)
@@ -161,7 +161,7 @@ func TestGetFile_StillWorks(t *testing.T) {
 }
 
 func TestPrintTour(t *testing.T) {
-	tr, err := tour.Build(&types.Heatmap{Files: map[string]*types.FileHeat{
+	tr, err := tour.Build(&types.Heatmap{Metadata: types.Metadata{LikelyCutoff: 33, ImpactThreshold: 61}, Files: map[string]*types.FileHeat{
 		"core/a.go": {Path: "core/a.go", HeatScore: 80, Tier: types.TierHigh,
 			Impact: 80, Likelihood: 20, ImpactAssessed: true, Quadrant: types.QuadrantProtect,
 			Dependencies: types.Dependencies{ImportedBy: []types.Dependency{{Path: "cmd/main.go"}}}},
@@ -174,7 +174,8 @@ func TestPrintTour(t *testing.T) {
 	printTour(&buf, tr)
 	out := buf.String()
 	for _, want := range []string{"2 stops", "1. core", "1. core/a.go:1", "used by: cmd/main.go", "2. cmd", "2. cmd/main.go:1", "depends on: core/a.go",
-		"impact 80, likelihood 20, protect", "max impact 80", "impact ~0 (estimate), likelihood 0"} {
+		"1. core/a.go:1  Protect", "Will it break? 20 LOW, cutoff 33 · How bad if it breaks? 80 HIGH, cutoff 61",
+		"max how bad 80, Protect", "How bad if it breaks? ~0 (estimate)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -220,9 +221,9 @@ func TestPrintTour_ShowsExplanation(t *testing.T) {
 	exp := &types.Explanation{
 		LikelihoodReasons: []string{"40 commits in the last 90 days (top 3% of this repo)", "2 recent fixes"},
 		Actions: []types.Action{
-			{ID: "owner-review", Text: "Every PR: owner review (@alice)"},
-			{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"},
-			{ID: "stable-interface", Text: "Keep its public interface stable"},
+			{ID: "owner-review", Text: "Get an owner's review (@alice)", Scope: types.ScopeBeforeMerge},
+			{ID: "no-auto-merge", Text: "Block auto-merge", Scope: types.ScopeBeforeMerge},
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog},
 		},
 	}
 	tr, err := tour.Build(&types.Heatmap{Files: map[string]*types.FileHeat{
@@ -243,18 +244,29 @@ func TestPrintTour_ShowsExplanation(t *testing.T) {
 	printTour(&buf, tr)
 	out := buf.String()
 	for _, want := range []string{
-		"likely because: 40 commits in the last 90 days (top 3% of this repo)",
-		"do: Every PR: owner review (@alice); Add to CODEOWNERS; never auto-merge",
+		"break signals: 40 commits in the last 90 days (top 3% of this repo)",
+		"before merge: Get an owner's review (@alice)",
+		"backlog: Add a CODEOWNERS line",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "Keep its public interface stable") {
-		t.Errorf("tour should show only the top two actions:\n%s", out)
+	if strings.Contains(out, "Block auto-merge") {
+		t.Errorf("tour should show only the top action of each scope:\n%s", out)
 	}
-	if strings.Count(out, "do:") != 1 {
+	if strings.Count(out, "before merge:") != 1 {
 		t.Errorf("files without an explanation should print no actions:\n%s", out)
+	}
+	for _, s := range tr.Sections {
+		for _, st := range s.Stops {
+			if st.Path != "core/a.go" {
+				continue
+			}
+			if st.TopBeforeMerge == nil || st.TopBeforeMerge.ID != "owner-review" || st.TopBacklog == nil || st.TopBacklog.ID != "codeowners" {
+				t.Errorf("stop JSON top actions = %+v / %+v", st.TopBeforeMerge, st.TopBacklog)
+			}
+		}
 	}
 }
 

@@ -121,7 +121,7 @@ func TestBuild_AllUnitsFit(t *testing.T) {
 		if gw.Files[0].Path != "crates/gw/src/grpc.rs" || gw.Files[1].Path != "crates/gw/src/auth.rs" || gw.Files[2].Path != "crates/gw/src/main.rs" {
 			t.Errorf("gw files = %+v, want grpc, auth, main", gw.Files)
 		}
-		if f := gw.Files[0]; f.Line != 3 || f.Note != "fragile-critical: Add tests for grpc.rs" {
+		if f := gw.Files[0]; f.Line != 3 || f.Note != "Harden now: Add tests for grpc.rs" {
 			t.Errorf("top file = %+v, want line 3 and note quadrant: action", f)
 		}
 		if lib := nodeByID(d, "lib-core"); len(lib.Files) != 2 || lib.Files[0].Path != "crates/core/src/policy.rs" {

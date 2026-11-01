@@ -17,12 +17,13 @@ func TestRenderFileDetail_ShowsAxes(t *testing.T) {
 		{
 			name: "assessed shows impact, likelihood and quadrant",
 			heat: &types.FileHeat{Path: "core/auth.go", Tier: types.TierHigh, Impact: 90, Likelihood: 10, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
-			want: []string{"Impact      90", "Likelihood  10", "protect"},
+			want: []string{"How bad if it breaks?  90", "Will it break?         10", "PROTECT"},
+			not:  []string{"Likelihood", "Impact "},
 		},
 		{
 			name: "unassessed marks impact as an estimate",
 			heat: &types.FileHeat{Path: "lib/x.go", Tier: types.TierLow, Impact: 20, Likelihood: 45},
-			want: []string{"Impact     ~20 (estimate)", "Likelihood  45"},
+			want: []string{"How bad if it breaks? ~20 (estimate)", "Will it break?         45"},
 			not:  []string{"QUADRANT"},
 		},
 	}
@@ -48,16 +49,20 @@ func TestRenderFileDetail_ShowsExplanation(t *testing.T) {
 		ImpactHigh: true, Likely: true,
 		ImpactReasons:     []string{"security 92"},
 		LikelihoodReasons: []string{"11 files import it (top 1% of this repo)"},
-		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
+		Actions: []types.Action{
+			{ID: "senior-review", Text: "Get sign-off from a senior owner", Scope: types.ScopeBeforeMerge},
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/a.go @ana"},
+		},
 	}}
 	out := Model{}.renderFileDetail(heat, 80)
-	for _, w := range []string{"WHY IMPACT IS HIGH", "security 92", "WHY IT'S LIKELY TO BREAK", "11 files import it", "WHAT TO DO", "• Add to CODEOWNERS"} {
+	for _, w := range []string{"BREAK COST (HIGH)", "security 92", "BREAK SIGNALS (HIGH)", "11 files import it",
+		"DO BEFORE THE NEXT MERGE", "[ ] Get sign-off from a senior owner", "PUT ON THE BACKLOG", "[ ] Add a CODEOWNERS line", "/a.go @ana"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in:\n%s", w, out)
 		}
 	}
 	plain := Model{}.renderFileDetail(&types.FileHeat{Path: "b.go"}, 80)
-	if strings.Contains(plain, "WHAT TO DO") {
-		t.Error("file without explanation shows a WHAT TO DO section")
+	if strings.Contains(plain, "BEFORE THE NEXT MERGE") {
+		t.Error("file without explanation shows an actions section")
 	}
 }

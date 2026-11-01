@@ -42,13 +42,13 @@ Analysis continues without git history (no `git` binary, a repository without co
 
 ## highstakes get
 
-Get why a file is impactful, why it is likely to break, and what to do about it.
+Get a file's verdict, both questions with their repo cutoffs, what to do before the next merge, what to put on the backlog, and why.
 
 ```sh
 highstakes get <file> [--json]
 ```
 
-Text output is a headline with the quadrant, both axes and the repo's likely cutoff, then three sections: why impact is high (or low), why it is likely to break (or the likelihood signals when it is below the cutoff), and what to do. Reasons quote the file's numbers and their repo percentile. A review requirements line follows. `--json` returns the file record, including `explanation` (see [File fields](#file-fields)). Heatmaps written before explanations existed fall back to the per-axis lines and blast radius reasoning; run `analyze` again to get the sections. See [How It Works](how-it-works.md#reasons-and-actions) for the rules.
+Text output, top to bottom: the path; the verdict (`HARDEN NOW`, `PROTECT`, `STABILIZE`, `ROUTINE`, or `NOT ASSESSED` without an LLM); "Will it break?" and "How bad if it breaks?", each with its score, `HIGH` or `LOW`, and the repo cutoff (an unassessed impact shows as `~N estimate`); one line saying scores are a relative signal within the repo, not a probability, and one saying how far each question is backed ("Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings."); **Do before the next merge** and **Put on the backlog** checklists, each item with the signal that triggered it (`why:`) and, for backlog items, a copyable command; **Why** (break signals and break cost, quoting the file's numbers and repo percentiles); and the latest fix commit. `--json` returns the file record, including `quadrant_label` and `explanation` (see [File fields](#file-fields)), plus `likely_cutoff` and `impact_threshold`. Heatmaps written before explanations existed fall back to the per-axis lines and blast radius reasoning; run `analyze` again to get the sections. See [How It Works](how-it-works.md#reasons-and-actions) for the rules.
 
 If the file is not found, suggests similar paths from the heatmap.
 
@@ -96,7 +96,7 @@ A component is the top-level unit a file belongs to, decided in this order:
 
 Every section carries its `component` in the JSON output, in both modes.
 
-Each stop shows impact, likelihood and quadrant, and its `why` leads with the impact reason (LLM `critical_reason`, else `summary`).
+Each stop shows its verdict, both questions with the repo cutoffs ("Will it break? 50 HIGH, cutoff 35 · How bad if it breaks? 92 HIGH, cutoff 78"), its `why` (the impact reason: LLM `critical_reason`, else `summary`), the first break signal, and the top before-merge and top backlog action.
 
 Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`, `tests.rs`, `*_tests.rs`, `*_test.rs`, and any file under a `tests/` directory) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
 
@@ -179,7 +179,9 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 | `stops[].top_impact` | Highest LLM impact dimension: `security`, `data`, `availability` or `user`; omitted when not assessed |
 | `stops[].depends_on` / `used_by` | Up to 5 files, hottest first; `*_count` is the full number |
 | `stops[].owners` | Annotation owner first, then recent commit authors by commit count; up to 3 |
-| `stops[].explanation` | The file's explanation (headline, impact and likelihood reasons, actions); see `get`. The text tour prints the first likelihood reason as `likely because:` and the top two actions as `do:` |
+| `stops[].explanation` | The file's explanation (headline, verdict, impact and likelihood reasons, actions); see `get`. The text tour prints the first likelihood reason as `break signals:` |
+| `stops[].verdict`, `top_before_merge`, `top_backlog` | The file's posture and the first action of each scope (each `{id, text, scope, signal, command}`); the text tour prints them as `before merge:` and `backlog:` |
+| `likely_cutoff`, `impact_threshold` | Top-level: the repo cutoffs the stop scores read against |
 
 ### Walkthrough format
 
@@ -198,9 +200,9 @@ python3 <show-me skill>/scripts/walkthrough_build.py tour-walkthrough.data.json 
 | Step (hop) | One per stop, travelling from the previous stop's box (a self step when it stays in one component) |
 | Payload chip | The stop's `file:line` anchor |
 | Rail gist | `do:` the first action, else `read <file>` |
-| Caption | The anchor, both axes and quadrant, why it matters (critical reason or summary) and the first likelihood reason |
-| Color | The stop's quadrant (fragile-critical, protect, watch, low; grey for an impact estimate) |
-| Key | HighStakes' own legend: the quadrant colors in use, reading order, imports, shared library. The template's network channel labels (browser, server to server, refused) are hidden through `legendExtra` |
+| Caption | The anchor and verdict, both questions with the repo cutoffs, why it matters (critical reason or summary), the first break signal, and the top before-merge and backlog action. The hop's short label is the top before-merge action |
+| Color | The stop's posture (Harden now, Protect, Stabilize, Routine; grey for an impact estimate) |
+| Key | HighStakes' own legend: the posture colors in use, reading order, imports, shared library. The template's network channel labels (browser, server to server, refused) are hidden through `legendExtra` |
 
 All heatmap text is HTML-escaped. The map holds 28 boxes; further components are left out and counted in the intro (narrow with `--components`, `--focus` or `--min-impact`). **Exit code 4** when the tour has no stops.
 
@@ -227,7 +229,7 @@ What it draws:
 - **Arrows**: declared links first (dashed, SeeCode kind `async`, legend "declared (architecture.yaml)"), then imports between boxes labelled with the number of importing files, most first. Arrows over the budget are dropped and counted in the caption. Links into folded units point at "other units".
 - **Groups**: a unit's declared placement (dashed, "(declared)"), else its first inferred deployment hint ("(inferred)": Dockerfile name, `helm <values key>`, `k8s <manifest>`).
 - **Layout**: top to bottom; rows by dependency level over all arrows, drawn or not (callers above what they use), each row centered and ordered to reduce crossings.
-- **Evidence**: every box lists its top 3 files by impact as `{id, file, line, note}`, `note` = quadrant (or impact estimate) and the first action. SeeCode shows them in the box's detail panel.
+- **Evidence**: every box lists its top 3 files by impact as `{id, file, line, note}`, `note` = posture (or impact estimate) and the first action. SeeCode shows them in the box's detail panel.
 
 Text is clipped to SeeCode's limits (box label 40, sub 48, arrow label 28, group label 32 characters).
 
@@ -250,7 +252,7 @@ highstakes list [flags]
 | `--sort` | `heat` | Sort by `heat`, `likelihood` or `impact` (descending, ties by path) |
 | `--json` | `false` | Output as JSON |
 
-JSON rows keep `path`, `heat_score`, `tier` and `reason`, and add `likelihood`, `impact`, `impact_assessed` and `quadrant`.
+JSON rows keep `path`, `heat_score`, `tier` and `reason`, and add `likelihood` ("Will it break?"), `impact` ("How bad if it breaks?"), `impact_assessed` and `quadrant`.
 
 **Exit code 2** if `--tier` or `--sort` is invalid (error includes valid values).
 
@@ -263,10 +265,11 @@ Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axe
 | `likelihood` | 0-100, chance the file needs fixes (churn, complexity, centrality, path keywords, incidents) |
 | `impact` | 0-100, damage if it breaks: LLM blast radius, or an estimate from centrality and path keywords when not assessed |
 | `impact_assessed` | `true` when impact came from the LLM |
-| `quadrant` | `fragile-critical`, `protect`, `watch` or `low`; omitted when impact is not assessed |
+| `quadrant` | `fragile-critical`, `protect`, `watch` or `low` (stable machine IDs, unchanged); omitted when impact is not assessed |
+| `quadrant_label` | The posture people read: `Harden now`, `Protect`, `Stabilize` or `Routine` (same order as `quadrant`) |
 | `heat_score` | `max(likelihood, impact)` when assessed, else likelihood (kept for compatibility) |
 | `tier` | From the quadrant when assessed, else from `heat_score` |
-| `explanation` | `headline`, `impact_high`, `likely`, `impact_reasons`, `likelihood_reasons` and `actions` (each `{id, text}`, most important first) |
+| `explanation` | `headline`, `verdict` (posture, or `Not assessed`), `impact_high`, `likely`, `impact_reasons`, `likelihood_reasons` and `actions`: each `{id, text, scope, signal, done, command, owners}`, `scope` = `before_merge` (this PR) or `backlog` (the file over time), before-merge first. `done` is always false in the heatmap (`pr check` sets it); `command` is a copyable `gh issue create` command or CODEOWNERS line on backlog items; `owners` names suggested owners on review items |
 | `factors.test_coverage.has_test_file` | `true` or `false` when a test sits next to the file by its language's convention; omitted for languages without one |
 | `component` | The crate, package or module the file belongs to |
 | `units` | Runtime units that link the file (see `list units`); omitted when none does |
@@ -286,7 +289,7 @@ highstakes list units [--include-supporting] [--json]
 | `--include-supporting` | `false` | Show supporting units too: entry points in a supporting component (`examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ..., plus `tour.supporting` globs) and helper bins (Rust `src/bin/` targets named like tooling: `perf`, `bench`, `gen`, `codegen`, `xtask`, `tool`, `dev`, `debug`, `test`, `fixture`). Hidden ones are counted on the last line |
 | `--json` | `false` | Output as JSON |
 
-Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when the file supplying it was not LLM-assessed), fragile-critical file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), each declared link (`declared link: -> | <- | <-> <unit>: <label> [evidence]`) and declared placement from `.heatmap/architecture.yaml`, and each inferred placement with its evidence (`none found` when there is none).
+Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when the file supplying it was not LLM-assessed), Harden now file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), each declared link (`declared link: -> | <- | <-> <unit>: <label> [evidence]`) and declared placement from `.heatmap/architecture.yaml`, and each inferred placement with its evidence (`none found` when there is none).
 
 JSON: `{"units": [...], "count": N, "supporting_hidden": N, "declared": {"links": [...], "placement": [...]}}`. Each unit has `name`, `kind` (`rust-bin`, `go-main`, `node-bin`, `node-start`, `python-script`, `python-main`), `entry`, `evidence`, `home` (the entry's component), `components` (home first), `shared`, `files`, `lines`, `max_impact`, `impact_assessed`, `fragile_critical`, `supporting` (omitted when false) and `inferred_placement` (each `{kind, detail, evidence}`, kind `dockerfile`, `helm` or `k8s`). The same list is stored in the heatmap `metadata.units`.
 
@@ -303,21 +306,39 @@ highstakes pr check [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--base` | `main` | Base branch to compare against |
-| `--json` | `false` | Output as JSON |
-| `--fail-on` | (none) | Exit 5 when the PR tier is at or above this tier: `critical`, `high`, `medium`, `low` |
+| `--json` | `false` | Output as JSON (same as `--format json`) |
+| `--format` | `text` | `text`, `markdown` (the PR comment the triage workflow posts) or `json`; anything else exits 2 |
+| `--approvals` | (none) | Comma-separated GitHub logins that approved the PR; a suggested owner among them ticks `senior-review` and `owner-review` items. Only CI knows approvals: the shipped workflow fills it from the GitHub API |
+| `--fail-on` | (none) | Exit 5 when the PR tier is at or above this tier: `critical`, `high`, `medium`, `low` (`critical` blocks Harden now files) |
 | `--shadow` | `false` | Compute the `--fail-on` decision (default gate `critical`), append it to `.heatmap/shadow.jsonl`, always exit 0 |
 | `--author` | HEAD commit author | Email or handle excluded from suggested reviewers |
 | `--reviewers` | `3` | Max suggested reviewers; `0` skips the git history lookup |
 
 Uses `git diff --numstat` to identify changed files, then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
 
-A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a fragile-critical file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW, except dependency manifests and lock files (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...), which inherit heat and count as config/infra changes in change risk.
+A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a Harden now file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW, except dependency manifests and lock files (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...), which inherit heat and count as config/infra changes in change risk.
 
-Each HIGH or CRITICAL changed file is followed by its top three actions (from its `explanation`); in `--json` they are under `files_changed[].actions`.
+### Verdict and checklist
 
-An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low"}`) and still goes through the gate: `--fail-on low` blocks it, and `--shadow` logs its decision. When a gate applies, the JSON adds `decision`, `fail_on` and `shadow`.
+The verdict is the posture of the most severe changed file: `Harden now`, `Protect`, `Stabilize` or `Routine` (it follows the PR tier, so `--fail-on critical` blocks exactly the Harden now verdict). Text output leads with it, then **Do before merge**: the before-merge actions of every changed file, deduplicated (identical items list every file they apply to and are done only when done for all), then each file with both scores, the backlog and the gate decision. Routine files add nothing to the checklist.
 
-**Exit code 2** for an invalid `--fail-on` (error lists valid values). **Exit code 3** if git diff fails (error includes valid base examples). **Exit code 5** when `--fail-on` blocks the PR.
+`pr check` ticks items the PR already satisfies:
+
+| Item | Done when |
+|------|-----------|
+| `regression-tests`, `no-tests`, `stable-interface` | the PR adds or changes a test next to the file: a conventional test path (`foo_test.go`, `test_foo.py`, `foo.test.ts`, `FooTest.java`, ...), a test under the file's module directory (Rust `src/proxy/tests/x.rs` for `src/proxy.rs`), `<stem>_*` test files beside it, or a `tests/` sibling naming the file. Tests added inside a Rust file's own `#[cfg(test)]` module are not detected |
+| `codeowners` | the CODEOWNERS file at HEAD (`.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`, the first found) covers the path, last matching rule with owners wins |
+| `senior-review`, `owner-review` | a login in `--approvals` matches one of the item's owners (case and `@` ignored) |
+
+Harden now files get one change-dependent item, `smaller-pr` ("Ask for a smaller PR"), when the diff changes more than 500 lines or touches non-test files in 3 or more components. Whether exported symbols changed is not detected.
+
+`--format markdown` renders the PR comment: a `<!-- highstakes-triage -->` marker, the verdict heading (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize`, `✅ Routine`), one sentence naming the riskiest file(s), the checklist (`[x]` done, `[ ]` open), a table of at most five non-routine files (File, Will it break?, How bad?, Action) with the rest collapsed into one Routine row, and a folded **Why these actions?** block with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, backlog items with their commands and the gate decision.
+
+JSON adds `verdict`, `checklist` and `backlog` (actions with `id`, `text`, `scope`, `signal`, `done`, `files`, and `command` for backlog items), `likely_cutoff` and `impact_threshold`; each `files_changed[]` entry adds `likelihood`, `impact`, `impact_assessed`, `quadrant`, `quadrant_label`, and `actions` (its before-merge items with `done`).
+
+An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low", "verdict": "Routine"}`) and still goes through the gate: `--fail-on low` blocks it, and `--shadow` logs its decision. When a gate applies, the JSON adds `decision`, `fail_on` and `shadow`.
+
+**Exit code 2** for an invalid `--fail-on` or `--format` (error lists valid values). **Exit code 3** if git diff fails (error includes valid base examples). **Exit code 5** when `--fail-on` blocks the PR.
 
 ### Two-axis risk
 
@@ -459,13 +480,13 @@ highstakes dashboard [--output <path>] [--no-open]
 | `--output` | `.heatmap/dashboard.html` | Output file path |
 | `--no-open` | `false` | Don't open in browser |
 
-The dashboard has four views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support tier filtering, search, and a detail panel with both axes, the quadrant guidance and the blast radius reasoning.
+The dashboard opens on the action inbox: before-merge cards (one per Harden now or Protect file: its top before-merge action, triggering signal, file and owner) and backlog cards (every backlog action, with a **Copy** button for its command; when the clipboard is blocked the command is selected for copying by hand). Behind tabs (arrow keys, Home and End move between them) are four investigation views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support the posture filter (one per tier), search, and a detail panel with the verdict, both questions with their repo cutoffs and the evidence note, the before-merge and backlog checklists, and the reasons and impact dimensions folded under **Why**. The page is static: it copies commands and never calls GitHub.
 
 The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. Clicking an arrow lists the file-level imports behind it (importer -> imported, with each file's impact; at most 200 per arrow). The layout is computed in the page (layered, with barycenter ordering to reduce crossings; layers wider than about 1500px wrap into extra rows), so the HTML stays self-contained. The `-`, `+`, **Fit** and **1:1** buttons, the mouse wheel and trackpad or touch pinch zoom; drag to pan. The view fits the screen when first opened.
 
 **Group by: Unit** redraws the view by runtime unit (see `list units`): a top row of unit boxes, each holding the components only that unit links, and a band below with the shared libraries, layered by their own imports. Unit boxes are coloured by the max impact of their own files, carry the same fragility marker, and show the inferred placement (Dockerfile name, Helm values key, Kubernetes manifest). Clicking a unit shows its entry point and evidence, placement evidence, totals across everything it links, own components, shared libraries and files with impact, likelihood and quadrant; clicking a shared library shows the units that link it. The hint line counts non-test files no unit links. The toggle is disabled when the heatmap has no units. Supporting units are hidden until **Supporting units** is on (the hint line counts them; the button is disabled when there are none). Links declared in `.heatmap/architecture.yaml` draw as dashed accent arrows labelled "(declared)", with the evidence in the tooltip, and a declared placement replaces the inferred one on the box as "declared: <runs_in>". An invalid `architecture.yaml` makes `dashboard` exit 2.
 
-The quadrant view plots every non-test file with likelihood on x and impact on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its review guidance. Faded dots have an estimated impact. Click a dot to open the file in the detail panel.
+The quadrant view plots every non-test file with "Will it break?" on x and "How bad if it breaks?" on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its posture and what it asks for. Faded dots have an estimated impact. Click a dot to open the file in the detail panel.
 
 ## highstakes github install
 
@@ -475,7 +496,7 @@ Generate a GitHub Actions workflow for automated PR triage.
 highstakes github install
 ```
 
-Creates `.github/workflows/heatmap-triage.yml`.
+Creates `.github/workflows/heatmap-triage.yml`, the same workflow this repo runs (installing highstakes with `go install ...@latest`): it posts `pr check --format markdown` as a PR comment, fills `--approvals` from the PR's reviews, and fails the `triage` job on Harden now files (`--fail-on critical`). See [CI Integration](ci-integration.md#github-actions).
 
 ## highstakes agent-context
 

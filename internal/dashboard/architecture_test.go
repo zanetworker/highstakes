@@ -220,11 +220,15 @@ func TestGenerate_EmbedsExplanation(t *testing.T) {
 	hm := archHeatmap()
 	f := hm.Files["api/a.go"]
 	f.ImpactAssessed = true
+	f.Quadrant = types.QuadrantProtect
 	f.Explanation = &types.Explanation{
-		Headline: "PROTECT (impact 90, likelihood 10)", ImpactHigh: true,
+		Headline: "PROTECT (will it break 10; how bad 90)", Verdict: "Protect", ImpactHigh: true,
 		ImpactReasons:     []string{"security 90"},
 		LikelihoodReasons: []string{`recent fix: "<b>x</b>"`},
-		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
+		Actions: []types.Action{
+			{ID: "owner-review", Text: "Get an owner's review (@ana)", Scope: types.ScopeBeforeMerge, Signal: "Protect: costly if it breaks", Owners: []string{"@ana"}},
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Signal: "not covered by CODEOWNERS", Command: "/api/a.go @ana"},
+		},
 	}
 	out := filepath.Join(t.TempDir(), "d.html")
 	if err := Generate(hm, types.DeclaredArchitecture{}, out); err != nil {
@@ -236,10 +240,13 @@ func TestGenerate_EmbedsExplanation(t *testing.T) {
 	}
 	html := string(b)
 	for _, want := range []string{
-		`"impact_title":"Why impact is high"`,
-		`"likely_title":"Likelihood signals (below the likely cutoff)"`,
-		`"text":"Add to CODEOWNERS; never auto-merge"`,
-		`What to do`, `function htmlEsc`,
+		`"impact_title":"Break cost (HIGH)"`,
+		`"likely_title":"Break signals (LOW)"`,
+		`"before_merge":[{"path":"api/a.go","verdict":"Protect","text":"Get an owner's review (@ana)"`,
+		`"command":"/api/a.go @ana"`,
+		`Do before the next merge`, `Put on the backlog`, `function htmlEsc`, `function copyCommand`,
+		`role="tablist"`, `id="inbox"`, `'fragile-critical':{label:'Harden now'`, `Will it break?`, `How bad if it breaks?`,
+		`not a probability`, `validated on bug-fix history`, `AI-assessed, not yet checked against maintainer ratings`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("dashboard missing %q", want)

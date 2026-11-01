@@ -1,0 +1,46 @@
+<!-- highstakes-triage -->
+## ⛔ Harden before merge
+
+`net/proxy.rs` is likely to break and costly if broken: Core egress proxy that enforces network policy.
+
+### Do before merge
+
+- [ ] Get sign-off from a senior owner (@ana, @bo) (`net/proxy.rs`)
+- [x] Add regression tests around the recent fix (`net/proxy.rs`)
+- [ ] Keep auto-merge off (`net/proxy.rs`, `net/policy.rs`)
+
+| File | Will it break? | How bad? | Action |
+|---|---|---|---|
+| `net/proxy.rs` | 50 high | 92 high | Harden now |
+| `net/policy.rs` | 5 low | 80 high | Protect |
+| `net/new\|file.rs` | new file | inherited: protect | Protect |
+| 2 other files | low | low | Routine |
+
+<details><summary>Why these actions?</summary>
+
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings. Repo cutoffs: will it break 33, how bad 78 (a score at or above its cutoff is high).
+
+**`net/proxy.rs`** (Harden now)
+- Break signals: 55 commits in the last 90 days (top 1% of this repo); 11 files import it (top 1%)
+- Break cost: security 92 · availability 85; "Core egress proxy."
+- Get sign-off from a senior owner (@ana, @bo): Harden now: likely to break and costly when it does
+- Add regression tests around the recent fix: recent fix: "fix: align checks" (2026-10-28)
+- Keep auto-merge off: Harden now files never auto-merge
+
+**`net/policy.rs`** (Protect)
+- Break signals: no notable churn, complexity, importers or fixes
+- Break cost: security 80
+- Keep auto-merge off: Harden now files never auto-merge
+
+**`net/new|file.rs`** (Protect)
+- New file: not scored yet, so it takes the tier of its directory
+
+**Suggested reviewers:** @ana, @bo
+
+**Backlog** (the file over time, not this PR)
+- Split it into smaller files (`net/proxy.rs`): 479 functions in one file (top 1%)
+  `gh issue create --title 'Split net/proxy.rs' --body 'x'`
+
+Gate: block at --fail-on critical.
+
+</details>

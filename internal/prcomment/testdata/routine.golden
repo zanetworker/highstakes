@@ -1,0 +1,14 @@
+<!-- highstakes-triage -->
+## ✅ Routine
+
+No changed file is likely to break or costly if it does. Normal review; auto-merge allowed by policy.
+
+| File | Will it break? | How bad? | Action |
+|---|---|---|---|
+| 2 files | low | low | Routine |
+
+<details><summary>Why these actions?</summary>
+
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings. Repo cutoffs: will it break 33, how bad 78 (a score at or above its cutoff is high).
+
+</details>

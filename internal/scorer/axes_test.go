@@ -196,6 +196,9 @@ func TestApplyQuadrants(t *testing.T) {
 			if f.ReviewRequirements != CalculateReviewRequirements(w.tier) {
 				t.Errorf("%s: review requirements not recomputed for tier %s", p, w.tier)
 			}
+			if f.QuadrantLabel != w.q.Label() {
+				t.Errorf("%s: quadrant_label = %q, want %q", p, f.QuadrantLabel, w.q.Label())
+			}
 		}
 	})
 

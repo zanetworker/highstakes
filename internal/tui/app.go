@@ -460,18 +460,17 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		fmt.Sprintf("  %s %s %d", tierIcon(heat.Tier), tierLabel(heat.Tier), heat.HeatScore)))
 	b.WriteString("\n")
 
-	// The two axes: damage if it breaks, and chance it needs fixes.
+	// The verdict, then the two axes as questions.
 	b.WriteString("\n")
-	b.WriteString(labelStyle.Render("AXES"))
-	b.WriteString("\n")
-	if heat.ImpactAssessed {
-		fmt.Fprintf(&b, "  Impact      %d  damage if it breaks\n", heat.Impact)
-	} else {
-		fmt.Fprintf(&b, "  Impact     ~%d (estimate) damage if it breaks\n", heat.Impact)
+	if label := heat.Quadrant.Label(); label != "" {
+		b.WriteString(labelStyle.Render(strings.ToUpper(label)))
+		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "  Likelihood  %d  chance it needs fixes\n", heat.Likelihood)
-	if heat.Quadrant != "" {
-		fmt.Fprintf(&b, "  Quadrant    %s\n", heat.Quadrant)
+	fmt.Fprintf(&b, "  %-22s %d\n", types.AxisLikelihood, heat.Likelihood)
+	if heat.ImpactAssessed {
+		fmt.Fprintf(&b, "  %-22s %d\n", types.AxisImpact, heat.Impact)
+	} else {
+		fmt.Fprintf(&b, "  %-21s ~%d (estimate)\n", types.AxisImpact, heat.Impact)
 	}
 
 	// Why impact, why likely, what to do (shared with get and the dashboard)
@@ -491,12 +490,22 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 				fmt.Fprintf(&b, "  %s\n", l)
 			}
 		}
-		if len(e.Actions) > 0 {
-			b.WriteString("\n")
-			b.WriteString(labelStyle.Render("WHAT TO DO"))
-			b.WriteString("\n")
+		for _, sec := range []struct{ title, scope string }{
+			{"DO BEFORE THE NEXT MERGE", types.ScopeBeforeMerge}, {"PUT ON THE BACKLOG", types.ScopeBacklog},
+		} {
+			first := true
 			for _, a := range e.Actions {
-				fmt.Fprintf(&b, "  • %s\n", a.Text)
+				if a.Scope != sec.scope {
+					continue
+				}
+				if first {
+					b.WriteString("\n" + labelStyle.Render(sec.title) + "\n")
+					first = false
+				}
+				fmt.Fprintf(&b, "  [ ] %s\n", a.Text)
+				if a.Command != "" {
+					fmt.Fprintf(&b, "      %s\n", a.Command)
+				}
 			}
 		}
 	}

@@ -74,13 +74,13 @@ func TestExplain_Headline(t *testing.T) {
 		edit func(*types.FileHeat)
 		want string
 	}{
-		{"fragile-critical", func(*types.FileHeat) {}, "FRAGILE AND CRITICAL (impact 92, likelihood 50; impactful starts at 61, likely at 33 in this repo)"},
-		{"protect", func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect }, "PROTECT (impact 92"},
-		{"watch", func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch }, "WATCH (impact 92"},
-		{"low", func(f *types.FileHeat) { f.Quadrant = types.QuadrantLow }, "LOW STAKES (impact 92"},
+		{"harden now", func(*types.FileHeat) {}, "HARDEN NOW (will it break 50, cutoff 33; how bad 92, cutoff 61)"},
+		{"protect", func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect }, "PROTECT (will it break 50"},
+		{"stabilize", func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch }, "STABILIZE (will it break 50"},
+		{"routine", func(f *types.FileHeat) { f.Quadrant = types.QuadrantLow }, "ROUTINE (will it break 50"},
 		{"not assessed", func(f *types.FileHeat) { f.ImpactAssessed = false; f.Quadrant = ""; f.Impact = 20 },
-			"IMPACT NOT ASSESSED (impact ~20 estimate, likelihood 50; impactful starts at 61, likely at 33 in this repo)"},
-		{"only a likely cutoff", func(f *types.FileHeat) {}, "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)"},
+			"NOT ASSESSED (will it break 50, cutoff 33; how bad ~20 estimate)"},
+		{"only a likely cutoff", func(*types.FileHeat) {}, "HARDEN NOW (will it break 50, cutoff 33; how bad 92)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,6 +93,28 @@ func TestExplain_Headline(t *testing.T) {
 			got := Explain(f, rs, nil).Headline
 			if !strings.HasPrefix(got, tt.want) {
 				t.Errorf("Headline = %q, want prefix %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExplain_Verdict(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*types.FileHeat)
+		want string
+	}{
+		{"harden now", func(*types.FileHeat) {}, "Harden now"},
+		{"stabilize", func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch }, "Stabilize"},
+		{"not assessed", func(f *types.FileHeat) { f.ImpactAssessed = false; f.Quadrant = "" }, "Not assessed"},
+		{"test file is routine", func(f *types.FileHeat) { f.Path = "net/proxy_test.go" }, "Routine"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := hot()
+			tt.edit(f)
+			if got := Explain(f, repo(f), nil).Verdict; got != tt.want {
+				t.Errorf("Verdict = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -248,9 +270,9 @@ func TestTitles(t *testing.T) {
 		assessed           bool
 		wantImpact, wantLk string
 	}{
-		{"high and likely", types.Explanation{ImpactHigh: true, Likely: true}, true, "Why impact is high", "Why it's likely to break"},
-		{"low and unlikely", types.Explanation{}, true, "Why impact is low", "Likelihood signals (below the likely cutoff)"},
-		{"not assessed", types.Explanation{ImpactHigh: true}, false, "Impact (estimate)", "Likelihood signals (below the likely cutoff)"},
+		{"high and likely", types.Explanation{ImpactHigh: true, Likely: true}, true, "Break cost (HIGH)", "Break signals (HIGH)"},
+		{"low and unlikely", types.Explanation{}, true, "Break cost (LOW)", "Break signals (LOW)"},
+		{"not assessed", types.Explanation{ImpactHigh: true}, false, "Break cost (estimate)", "Break signals (LOW)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

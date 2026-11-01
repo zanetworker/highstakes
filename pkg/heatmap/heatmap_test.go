@@ -460,16 +460,17 @@ func TestApplyExplanations(t *testing.T) {
 	}}
 	hm.Files["a.go"].Factors.ChangeFrequency.CommitCount = 9
 	applyAxes(hm, th)
-	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 0.9}}})
+	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 0.9}}}, func(p string) bool { return p == "b.go" })
 
 	tests := []struct {
 		path         string
 		wantHeadline string
 		wantAction   string
 	}{
-		{"a.go", "FRAGILE AND CRITICAL (impact 70, likelihood 80", "single-owner"},
-		{"b.go", "IMPACT NOT ASSESSED", "assess-impact"},
-		{"a_test.go", "LOW STAKES", "light-review"},
+		{"a.go", "HARDEN NOW (will it break 80", "document-invariants"},
+		{"a.go", "HARDEN NOW", "codeowners"}, // a.go is not covered by CODEOWNERS
+		{"b.go", "NOT ASSESSED", "assess-impact"},
+		{"a_test.go", "ROUTINE", "light-review"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -491,9 +492,22 @@ func TestApplyExplanations(t *testing.T) {
 	}
 }
 
+func TestApplyExplanations_CodeownedFileHasNoCodeownersAction(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"a.go": {Path: "a.go", Likelihood: 80, Impact: 70, ImpactAssessed: true},
+	}}
+	applyAxes(hm, DefaultConfig().Tiers)
+	applyExplanations(hm, nil, func(string) bool { return true })
+	for _, a := range hm.Files["a.go"].Explanation.Actions {
+		if a.ID == "codeowners" {
+			t.Fatalf("codeowners action for a covered file: %+v", a)
+		}
+	}
+}
+
 func TestApplyExplanations_EmptyHeatmap(t *testing.T) {
 	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
-	applyExplanations(hm, nil) // must not panic
+	applyExplanations(hm, nil, nil) // must not panic
 }
 
 func TestGenerate_ImportsAreRepoPaths(t *testing.T) {

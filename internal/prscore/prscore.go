@@ -37,6 +37,8 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 		case ok:
 			fc.HeatScore = heat.HeatScore
 			fc.Tier = heat.Tier
+			fc.Likelihood, fc.Impact, fc.ImpactAssessed = heat.Likelihood, heat.Impact, heat.ImpactAssessed
+			fc.Quadrant, fc.QuadrantLabel = heat.Quadrant, heat.Quadrant.Label()
 		case isDocFile(change.Path):
 			fc.HeatScore = 0
 			fc.Tier = types.TierLow
@@ -71,6 +73,8 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 	risk.ChangeRiskLevel = ChangeRiskLevel(risk.ChangeRisk)
 	// The PR takes the most severe file tier, so quadrant tiers carry over.
 	risk.Tier = maxTier
+	risk.Verdict = types.TierPosture(maxTier)
+	risk.LikelyCutoff, risk.ImpactThreshold = hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold
 	risk.ReviewRequirements = scorer.CalculateReviewRequirements(risk.Tier)
 	risk.CircuitBreakerSignals = checkCircuitBreakers(changes, hm)
 	if len(unscored) > 0 {

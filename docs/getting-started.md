@@ -63,11 +63,15 @@ highstakes report
 
 ## What to Do With the Results
 
-**HIGH/CRITICAL files**: These need careful human review on every PR that touches them. Set up branch protection or CI gates (see [CI Integration](ci-integration.md)).
+Every file gets a posture from two questions, "Will it break?" and "How bad if it breaks?", each shown with its repo cutoff. `highstakes get <file>` lists what to do before the next merge and what to put on the backlog; `highstakes dashboard` opens on the same actions as an inbox.
 
-**MEDIUM files**: Worth a human glance. One reviewer is sufficient.
+**Harden now** (tier critical): senior owner sign-off, regression and contract tests, auto-merge off on every PR that touches them. Gate them in CI with `pr check --fail-on critical` (see [CI Integration](ci-integration.md)).
 
-**LOW files**: Safe for AI-assisted review or auto-merge. Don't spend senior engineer time here.
+**Protect** (tier high): owner review and no auto-merge; add tests first when none sit next to the file.
+
+**Stabilize** (tier medium): regression tests when fixes recur, refactor what you touch. Never blocks.
+
+**Routine** (tier low): normal review; auto-merge allowed by policy. Don't spend senior engineer time here.
 
 ## Next Steps
 

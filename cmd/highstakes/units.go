@@ -101,7 +101,7 @@ func formatUnit(u types.Unit, owner map[string]string, decl types.DeclaredArchit
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s  [%s]  %s (%s)\n", u.Name, u.Kind, u.Entry, u.Evidence)
-	fmt.Fprintf(&b, "  impact %s%d  %d fragile-critical  %d files\n", estimate, u.MaxImpact, u.FragileCritical, u.Files)
+	fmt.Fprintf(&b, "  impact %s%d  %d Harden now  %d files\n", estimate, u.MaxImpact, u.FragileCritical, u.Files)
 	fmt.Fprintf(&b, "  own: %s\n", strings.Join(own, ", "))
 	if len(others) > 0 {
 		fmt.Fprintf(&b, "  links units: %s\n", strings.Join(others, ", "))

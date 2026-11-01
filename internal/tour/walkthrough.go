@@ -95,10 +95,10 @@ var quadrantPlanes = []struct {
 	plane, color string
 	label        string
 }{
-	{types.QuadrantFragileCritical, "fragile", "#e06f70", "fragile-critical"},
-	{types.QuadrantProtect, "protect", "#cea451", "protect"},
-	{types.QuadrantWatch, "watch", "#7ea6d9", "watch"},
-	{types.QuadrantLow, "low", "#8fbf88", "low"},
+	{types.QuadrantFragileCritical, "fragile", "#e06f70", types.QuadrantFragileCritical.Label()},
+	{types.QuadrantProtect, "protect", "#cea451", types.QuadrantProtect.Label()},
+	{types.QuadrantWatch, "watch", "#7ea6d9", types.QuadrantWatch.Label()},
+	{types.QuadrantLow, "low", "#8fbf88", types.QuadrantLow.Label()},
 	{"", "estimate", "#9aa3b2", "impact estimate"},
 }
 
@@ -178,7 +178,7 @@ func Walkthrough(tr *Tour, roles map[string]string, links []Link) (*WalkthroughP
 				if from == "" {
 					from = id
 				}
-				h := stopHop(st, from, id)
+				h := stopHop(st, from, id, tr.LikelyCutoff, tr.ImpactThreshold)
 				planes[h.Plane] = true
 				hops = append(hops, h)
 				prev = id
@@ -256,7 +256,7 @@ func linkFlow(links []Link, nodeOf map[string]string, repo string) (WalkFlow, bo
 }
 
 // stopHop is the hop arriving at one stop.
-func stopHop(st Stop, from, to string) WalkHop {
+func stopHop(st Stop, from, to string, likelyCutoff, impactCutoff int) WalkHop {
 	h := WalkHop{F: from, T: to, Ch: "b", Pay: html.EscapeString(path.Base(st.Anchor)), Plane: "estimate"}
 	if from == to {
 		h.Ch = "s"
@@ -270,7 +270,7 @@ func stopHop(st Stop, from, to string) WalkHop {
 	}
 	// Why is the LLM critical reason or summary (else static signals); the
 	// first impact reason, the dimension scores, is only a fallback.
-	why, likely, action := st.Why, "", ""
+	why, likely := st.Why, ""
 	if e := st.Explanation; e != nil {
 		if why == "" && len(e.ImpactReasons) > 0 {
 			why = e.ImpactReasons[0]
@@ -278,23 +278,22 @@ func stopHop(st Stop, from, to string) WalkHop {
 		if len(e.LikelihoodReasons) > 0 {
 			likely = e.LikelihoodReasons[0]
 		}
-		if len(e.Actions) > 0 {
-			action = e.Actions[0].Text
-		}
 	}
 	h.Short = "read " + html.EscapeString(path.Base(st.Path))
-	if action != "" {
-		h.Short = "do: " + html.EscapeString(action)
+	if a := st.TopBeforeMerge; a != nil {
+		h.Short = "do: " + html.EscapeString(a.Text)
 	}
-	axes := fmt.Sprintf("impact %d, likelihood %d", st.Impact, st.Likelihood)
-	if !st.ImpactAssessed {
-		axes = fmt.Sprintf("impact ~%d (estimate), likelihood %d", st.Impact, st.Likelihood)
-	} else if st.Quadrant != "" {
-		axes += ", " + string(st.Quadrant)
-	}
-	h.Txt = fmt.Sprintf("<b>%s</b> · %s<br>Why it matters: %s", html.EscapeString(st.Anchor), axes, html.EscapeString(why))
+	h.Txt = fmt.Sprintf("<b>%s</b> · %s<br>%s", html.EscapeString(st.Anchor), html.EscapeString(st.Verdict),
+		html.EscapeString(StopAxes(st, likelyCutoff, impactCutoff)))
+	h.Txt += "<br>Why it matters: " + html.EscapeString(why)
 	if likely != "" {
-		h.Txt += "<br>Likely to need fixes: " + html.EscapeString(likely)
+		h.Txt += "<br>Break signals: " + html.EscapeString(likely)
+	}
+	if a := st.TopBeforeMerge; a != nil {
+		h.Txt += "<br>Before merge: " + html.EscapeString(a.Text)
+	}
+	if a := st.TopBacklog; a != nil {
+		h.Txt += "<br>Backlog: " + html.EscapeString(a.Text)
 	}
 	return h
 }
@@ -382,4 +381,20 @@ func clipText(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// StopAxes states a stop's two axes as questions with the repo cutoffs:
+// "Will it break? 50 HIGH, cutoff 33 · How bad if it breaks? 92 HIGH, cutoff 78".
+func StopAxes(st Stop, likelyCutoff, impactCutoff int) string {
+	axis := func(q string, score, cutoff int) string {
+		if cutoff <= 0 {
+			return fmt.Sprintf("%s %d", q, score)
+		}
+		return fmt.Sprintf("%s %d %s, cutoff %d", q, score, types.AxisLevel(score, cutoff), cutoff)
+	}
+	bad := axis(types.AxisImpact, st.Impact, impactCutoff)
+	if !st.ImpactAssessed {
+		bad = fmt.Sprintf("%s ~%d (estimate)", types.AxisImpact, st.Impact)
+	}
+	return axis(types.AxisLikelihood, st.Likelihood, likelyCutoff) + " · " + bad
 }

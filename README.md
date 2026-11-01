@@ -23,23 +23,23 @@
 
 Point it at any codebase. In under 2 minutes, you know:
 
-- **Where to focus**: "sandbox.py handles isolation. Breakage causes container escapes." (score: 73, HIGH)
-- **What's safe**: "theme.rs sets terminal colors. Breakage causes cosmetic issues." (score: 6, LOW)
-- **What to do**: 2 senior reviewers + security scan, or auto-merge OK
+- **Where to focus**: "sandbox.py handles isolation. Breakage causes container escapes." (Harden now)
+- **What's safe**: "theme.rs sets terminal colors. Breakage causes cosmetic issues." (Routine)
+- **What to do**: a checklist for the next merge (owner sign-off, regression tests, no auto-merge) and backlog items with a copyable command
 
 Static analysis alone can't do this. A complexity counter sees `auth.rs` and `theme.rs` as "both Rust files." The LLM reads the code and understands that one is a security boundary and the other formats colors.
 
 Every file gets two scores, because they answer different questions:
 
-- **Impact**: what breaks if this file has a bug (LLM blast radius).
-- **Likelihood**: how likely this file is to need fixes (churn, complexity, centrality, incidents).
+- **Will it break?** How likely the file is to need fixes (churn, complexity, centrality, incidents). JSON: `likelihood`. Validated on bug-fix history: on a merged-PR calibration over 7 repos, its top 10 files caught later bug-fix PRs with precision 0.57 to 1.00 (lift 2.2 to 4.4).
+- **How bad if it breaks?** What breaks if the file has a bug (LLM blast radius). JSON: `impact`. AI-assessed and not yet checked against maintainer ratings: on the same calibration it was positive but weaker than plain PR activity in 5 of 7 repos.
 
-Together they place each file in a 2x2 that sets its tier and review guidance:
+Each score is shown with its repo cutoff (top 20% of the repo; for "How bad", at least 61), because scores are a relative signal within the repo, not a probability. Together they give each file a posture, the thing to do about it:
 
-|  | Low likelihood | High likelihood (top 20% of the repo) |
+|  | Will it break? low | Will it break? high |
 |---|---|---|
-| **High impact (top 20% of the repo, at least 61)** | **Protect** (HIGH): stable but costly if broken; keep owners on review, never auto-merge | **Fragile and critical** (CRITICAL): senior review, add tests first |
-| **Low impact** | **Low stakes** (LOW): light review | **Watch** (MEDIUM): changes and breaks often, limited damage; refactor or add tests |
+| **How bad? high** | **Protect**: owner review, block auto-merge, tests before merge when none sit next to the file | **Harden now**: senior owner sign-off, regression and contract tests, smaller PRs, auto-merge off |
+| **How bad? low** | **Routine**: normal review, auto-merge allowed by policy | **Stabilize**: regression tests when fixes recur, refactor what you touch, a second reviewer for single-owner files; never blocks |
 
 ## Quick Start
 
@@ -77,7 +77,7 @@ highstakes list --tier high
 
 ## Terminal TUI
 
-Navigate the file tree with colored tier indicators. Select any file to see blast radius, impact dimensions, and review requirements.
+Navigate the file tree with colored tier indicators. Select any file to see its posture, both questions, the before-merge and backlog checklists, and the impact dimensions.
 
 <p align="center">
   <img src="docs/images/tui-view.png" width="820" alt="Terminal TUI with file tree, blast radius detail, and impact dimension bars">
@@ -85,23 +85,29 @@ Navigate the file tree with colored tier indicators. Select any file to see blas
 
 ## Dashboard
 
-Four views, one detail panel. Click any file to see its impact and likelihood, quadrant guidance, blast radius reasoning, impact dimensions, and review requirements.
+It opens on the **Action inbox**; four investigation views sit behind tabs. One detail panel: pick a card or a file to see its verdict, both questions with their repo cutoffs (a bar with a tick at the cutoff), the before-merge and backlog checklists, and the reasons folded under **Why**.
 
-**Treemap**: blocks sized by code volume, colored by heat. Your eye goes to the big red blocks first.
+**Action inbox**: cards grouped **Before merge** (one per Harden now or Protect file: its top before-merge action, the signal that triggered it, the file and an owner) and **Backlog** (every backlog action, with a **Copy** button for its `gh issue create` command or CODEOWNERS line). The dashboard is static HTML: it copies commands, it never calls GitHub.
 
-**Explorer**: collapsible file tree sorted hottest-first, with heat bars and reasoning inline.
+<p align="center">
+  <img src="docs/images/action-inbox.png" width="820" alt="Action inbox with before-merge and backlog cards, and the detail panel for proxy.rs">
+</p>
+
+**Treemap**: blocks sized by code volume (or break cost), colored by posture. Your eye goes to the big red blocks first.
+
+**Explorer**: collapsible file tree sorted hottest-first, with each file's posture and reasoning inline.
 
 <p align="center">
   <img src="docs/images/explorer-view.png" width="820" alt="Explorer view with file tree, heat scores, and blast radius reasoning">
 </p>
 
-All views respond to tier filters (Critical / High / Medium / Low) and search; the treemap also has the size toggle (Lines vs Heat).
+All views respond to the posture filter (Harden now / Protect / Stabilize / Routine, one per tier) and search; the treemap also has the size toggle (Lines vs Break cost).
 
 **Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `api/src/routes.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
 
-**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. A sandbox runtime and its supervisor built as two binaries show as two boxes, each with the libraries only it links. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Supporting units (examples, scripts, helper bins) stay hidden until **Supporting units** is on, and links declared in `.heatmap/architecture.yaml` draw dashed. Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
+**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. A sandbox runtime and its supervisor built as two binaries show as two boxes, each with the libraries only it links. Click a unit for its entry point, placement evidence, components and files (both questions and posture). Supporting units (examples, scripts, helper bins) stay hidden until **Supporting units** is on, and links declared in `.heatmap/architecture.yaml` draw dashed. Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
 
-**Quadrant**: every file as a dot, likelihood on x and impact on y, with the two thresholds drawn and each quadrant labelled with its review guidance. Click a dot to open the file in the detail panel.
+**Quadrant**: every file as a dot, "Will it break?" on x and "How bad if it breaks?" on y, with the two repo cutoffs drawn and each quadrant labelled with its posture. Click a dot to open the file in the detail panel.
 
 ## How It Works
 
@@ -136,12 +142,16 @@ Impact is the highest of the four LLM dimensions. Without an LLM it is an estima
 
 ### Tier System
 
-| Tier | Quadrant (with LLM) | Heat score (without LLM) | Review Required |
+Postures are what people read. Tiers stay as machine-readable metadata (`tier` in JSON, `--tier` and `--fail-on` filters), one per posture:
+
+| Posture | `quadrant` (JSON, unchanged) | `tier` | Heat score (without LLM) |
 |------|------|-------|-----------------|
-| 🔥🔥🔥 **CRITICAL** | Fragile and critical | 86-100 | 2 senior reviewers + security scan |
-| 🔥🔥 **HIGH** | Protect | 61-85 | 2 reviewers + integration tests |
-| 🔥 **MEDIUM** | Watch | 31-60 | 1 reviewer |
-| 🟢 **LOW** | Low stakes | 0-30 | Auto-review safe |
+| Harden now | `fragile-critical` | `critical` | 86-100 |
+| Protect | `protect` | `high` | 61-85 |
+| Stabilize | `watch` | `medium` | 31-60 |
+| Routine | `low` | `low` | 0-30 |
+
+JSON keeps the `quadrant` values and adds `quadrant_label` with the posture, so existing scripts keep working.
 
 ## Commands
 
@@ -164,7 +174,7 @@ highstakes                                              # Terminal TUI
 ### Query
 
 ```sh
-highstakes get <file>                                   # Why impact, why likely, what to do
+highstakes get <file>                                   # Verdict, both questions, before-merge and backlog checklists
 highstakes list --tier high --limit 10                  # Filter files
 highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
 highstakes list units                                   # Binaries and scripts, what each links, where it is packaged
@@ -176,33 +186,45 @@ All commands support `--json` for machine-readable output.
 
 <details open><summary><b>Example: highstakes get</b></summary>
 
-`get` says why a file is impactful, why it is likely to break and what to do, quoting the file's numbers and where they rank in the repo:
+`get` gives the verdict, both questions with their repo cutoffs, what to do before the next merge, what to put on the backlog (with a copyable command), and why:
 
 ```
-$ highstakes get src/utils/jwt/jwt.ts        # honojs/hono, owners trimmed
+$ highstakes get crates/openshell-supervisor-network/src/proxy.rs     # NVIDIA/OpenShell, commands trimmed
 
-src/utils/jwt/jwt.ts  🔥🔥🔥 CRITICAL  (score: 92)
+crates/openshell-supervisor-network/src/proxy.rs
+HARDEN NOW
+Will it break?         50  HIGH  repo cutoff 35
+How bad if it breaks?  92  HIGH  repo cutoff 78
+Scores are a relative signal within this repo, not a probability.
+Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.
 
-FRAGILE AND CRITICAL (impact 92, likelihood 37; impactful starts at 61, likely at 20 in this repo)
-Why impact is high: security 92 · user 75 · availability 65
-  "JWT signing and verification failures can disrupt authentication across dependent services."
-  "JWT verification is a security boundary"
-Why it's likely to break:
-  18 authors overall (top 4% of this repo)
-  9 functions, cyclomatic 70 in one file (top 4%)
-  5 files import it (top 14%)
-  4 recent fixes; latest: "fix(jwt): throw JwtTokenInvalid when the signature is not valid base64ur..." (2026-09-20)
-What to do:
-  • Every PR: senior review and sign-off from a top owner (@calloc134, ...)
-  • Add to CODEOWNERS; never auto-merge
-  • Split it: cyclomatic 70 in one file
-  • Add regression tests around the 4 recent fixes
-  • Spread knowledge: 18 authors change it; document its invariants and keep an owner on review
+Do before the next merge
+  [ ] Get sign-off from a senior owner (@johntmyers, rrhubenov@gmail.com)
+      why: Harden now: likely to break and costly when it does
+  [ ] Add regression tests around the 4 recent fixes
+      why: 4 recent fixes; latest: "fix(network): align destination checks for direct connections (#5004)" (2026-10-28)
+  [ ] Add contract tests for its public interface
+      why: 11 files import it (top 7%)
+  [ ] Keep auto-merge off
+      why: Harden now files never auto-merge
+Put on the backlog
+  [ ] Split it into smaller files
+      why: 479 functions in one file (top 1%)
+      gh issue create --title 'Split crates/openshell-supervisor-network/src/proxy.rs' --body '...'
+  [ ] Add a CODEOWNERS line
+      why: not covered by CODEOWNERS
+      /crates/openshell-supervisor-network/src/proxy.rs @johntmyers rrhubenov@gmail.com
+  [ ] Document its invariants
+      why: 28 authors change it (top 2%)
+      gh issue create --title 'Document the invariants of crates/...' --body '...'
 
-Review: 2 reviewers (senior), security scan, ~60 min, auto-merge blocked
+Why
+  Break signals: 55 commits in the last 90 days, 28 authors overall (top 1% of this repo); 479 functions, cyclomatic 1092 in one file (top 1%); ...
+  Break cost: security 92 · availability 85 · user 85 · data 70; "Core sandbox egress proxy; bugs can block traffic or bypass network policy."
+Latest fix  2026-10-28  fix(network): align destination checks for direct connections (#5004)
 ```
 
-Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the thresholds. `pr check` lists the top three actions under each HIGH or CRITICAL file it touches, and the dashboard and TUI detail panels show the same three sections.
+Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the rules. `pr check` turns the before-merge items of the files a PR touches into one checklist and ticks the ones the PR already satisfies; the dashboard and TUI detail panels show the same sections.
 
 </details>
 
@@ -224,7 +246,7 @@ Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the
 
 ### Tour
 
-A reading path for newcomers, auditors and agents learning the codebase. The most important product code comes first (highest impact, then the most fragile-critical files), and whatever it depends on is read just before it. Examples, scripts, CI, deployment manifests, docs, tests, benchmarks and vendored code are supporting components: hidden by default, shown in a final part with `--include-supporting`. Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
+A reading path for newcomers, auditors and agents learning the codebase. The most important product code comes first (highest impact, then the most Harden now files), and whatever it depends on is read just before it. Examples, scripts, CI, deployment manifests, docs, tests, benchmarks and vendored code are supporting components: hidden by default, shown in a final part with `--include-supporting`. Each stop has a `file:line` anchor at the first top-level declaration, its verdict, both questions with the repo cutoffs, why it matters, the top before-merge and backlog action (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
 
 ```sh
 highstakes get tour --per-component 1 --min-impact 85   # 1 file per crate/package/module, only files with impact 85+
@@ -279,7 +301,7 @@ On this repo the LLM scores impact generously, so a fixed bar would call about a
 $ highstakes list units        # NVIDIA/OpenShell, trimmed
 
 openshell-supervisor  [rust-bin]  crates/openshell-supervisor/src/main.rs (crates/openshell-supervisor/Cargo.toml:13)
-  impact 95  41 fragile-critical  242 files
+  impact 95  41 Harden now  242 files
   own: crates/openshell-supervisor, crates/openshell-otel-test-support, crates/openshell-supervisor-network, crates/openshell-supervisor-process
   links units: openshell-driver-vm (crates/openshell-driver-vm)
   shared: crates/openshell-core, crates/openshell-policy, crates/openshell-sandbox-backend, ...
@@ -287,7 +309,7 @@ openshell-supervisor  [rust-bin]  crates/openshell-supervisor/src/main.rs (crate
   inferred placement: helm chart deploy/helm/openshell: supervisor image openshell/supervisor [deploy/helm/openshell/values.yaml:63]
 
 openshell-sandbox  [rust-bin]  crates/openshell-sandbox/src/main.rs (crates/openshell-sandbox/Cargo.toml:13)
-  impact 95  22 fragile-critical  177 files
+  impact 95  22 Harden now  177 files
   own: crates/openshell-sandbox
   shared: crates/openshell-core, crates/openshell-sandbox-backend, ...
   inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.sandbox [deploy/docker/Dockerfile.sandbox:22]
@@ -305,21 +327,25 @@ $ highstakes get tour --per-component 1 --min-impact 85   # NVIDIA/OpenShell
 Tour: 27 stops across 27 product components, dependencies first
 7 supporting components hidden (--include-supporting shows them)
 
-1. crates/openshell-crypto  [level 0, max impact 90, HIGH]
-   1. crates/openshell-crypto/src/aws_lc.rs:12  🔥🔥 high  impact 90, likelihood 23, protect
+1. crates/openshell-crypto  [level 0, max how bad 90, Protect]
+   1. crates/openshell-crypto/src/aws_lc.rs:12  Protect
+      Will it break? 23 LOW, cutoff 35 · How bad if it breaks? 90 HIGH, cutoff 78
       why: Core cryptographic security boundary
-      likely because: no notable churn, complexity, importers or fixes
-      do: Owner review on every PR (varshaprasad96@gmail.com); Add to CODEOWNERS; never auto-merge
+      break signals: no notable churn, complexity, importers or fixes
+      before merge: Get an owner's review (varshaprasad96@gmail.com)
+      backlog: Add a CODEOWNERS line
 
-2. crates/openshell-extension-core  [level 0, max impact 85, HIGH]
-   2. crates/openshell-extension-core/src/auth.rs:12  🔥🔥 high  impact 85, likelihood 21, protect
+2. crates/openshell-extension-core  [level 0, max how bad 85, Protect]
+   2. crates/openshell-extension-core/src/auth.rs:12  Protect
+      Will it break? 21 LOW, cutoff 35 · How bad if it breaks? 85 HIGH, cutoff 78
       why: Bearer-token authentication boundary
-      likely because: recent fix: "fix(security): authenticate extension services (#2638)" (2026-08-14)
+      break signals: recent fix: "fix(security): authenticate extension services (#2638)" (2026-08-14)
 
-3. crates/openshell-core  [level 1, max impact 90, CRITICAL]
-   3. crates/openshell-core/src/secrets.rs:5  🔥🔥🔥 critical  impact 90, likelihood 39, fragile-critical
+3. crates/openshell-core  [level 1, max how bad 90, Harden now]
+   3. crates/openshell-core/src/secrets.rs:5  Harden now
+      Will it break? 39 HIGH, cutoff 35 · How bad if it breaks? 90 HIGH, cutoff 78
       why: Secret resolution and credential-leak prevention boundary
-      likely because: 7 commits in the last 90 days, 9 authors overall (top 18% of this repo)
+      break signals: 7 commits in the last 90 days, 9 authors overall (top 18% of this repo)
 ```
 
 The first sections are the foundations that `crates/openshell-sandbox-backend` (impact 95, section 5) builds on. `deploy`, `scripts`, `.github`, `e2e` and `examples` appear only with `--include-supporting`, after section 27.
@@ -331,13 +357,15 @@ With its runtime links declared in `.heatmap/architecture.yaml`, `get architectu
 ### PR Risk
 
 ```sh
-highstakes pr check                                     # Score diff vs main
+highstakes pr check                                     # Verdict and before-merge checklist for the diff vs main
+highstakes pr check --format markdown                   # The PR comment the triage workflow posts
+highstakes pr check --approvals ana,bo                  # Tick owner-review items these approvers satisfy
 highstakes pr check --base dev --json                   # For CI pipelines
-highstakes pr check --fail-on high                      # Exit 5 on high/critical PRs
+highstakes pr check --fail-on critical                  # Exit 5 when the PR changes a Harden now file
 highstakes pr check --shadow                            # Log the decision, never fail
 ```
 
-`pr check` reports two numbers: importance (the highest impact among the touched files, or heat where there is no LLM assessment) and change risk (size, new files, config or infra files, deletions in hot files, test ratio). It also names suggested reviewers: the most active recent authors of the hottest changed files, excluding the PR author. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine), then one checklist of before-merge items across the touched files. It ticks the items the PR already satisfies: a test next to a risky file was added or changed ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
 
 ### Review Policy
 
@@ -383,79 +411,27 @@ Run `highstakes github install` to generate the workflow, or add it manually:
 
 <details><summary><b>GitHub Action: PR triage comments</b></summary>
 
+Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.yml). It runs `init` only when `.heatmap/config.yaml` is missing, analyzes (cached by file content), collects the reviewers whose latest review is an approval, then:
+
 ```yaml
-# .github/workflows/heatmap-triage.yml
-name: HighStakes Triage
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  contents: read
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
-
-      - name: Analyze and check PR
+      - name: Assess PR risk
+        id: risk
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BASE: origin/${{ github.base_ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
         run: |
-          highstakes init
-          highstakes analyze
-          highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-
-      - name: Post risk comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
-            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let body = '## '+e[risk.tier]+' HighStakes: '+risk.tier.toUpperCase()+'\n\n';
-            body += '| File | Score | Tier | Lines |\n|------|-------|------|-------|\n';
-            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
-              body += '| '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' '+f.tier+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
-            body += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
-            if (risk.review_requirements.requires_senior) body += ' (senior)';
-            body += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
-            const comments = await github.rest.issues.listComments({
-              owner:context.repo.owner, repo:context.repo.repo, issue_number:context.issue.number});
-            const existing = comments.data.find(c=>c.body.includes('HighStakes:'));
-            if (existing) await github.rest.issues.updateComment({
-              owner:context.repo.owner, repo:context.repo.repo, comment_id:existing.id, body});
-            else await github.rest.issues.createComment({
-              owner:context.repo.owner, repo:context.repo.repo, issue_number:context.issue.number, body});
+          set +e
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
+
+A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist.
 
 </details>
 
-<details><summary><b>Block merge on HIGH/CRITICAL files</b></summary>
+<details><summary><b>Block merge on Harden now files</b></summary>
 
-Add a required status check that fails when the PR touches high-risk files:
-
-```yaml
-      - name: Gate on risk tier
-        run: |
-          TIER=$(jq -r .tier pr-risk.json)
-          if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-            echo "::error::PR touches $TIER-tier files. Requires senior review before merge."
-            exit 1
-          fi
-```
-
-Then in **Settings > Branches > Branch protection rules**, add `triage` as a required status check. PRs touching critical or high files cannot merge until the check passes (i.e., a senior reviewer approves and the step is skipped or overridden).
+`--fail-on critical` exits 5 when the PR changes a Harden now file (tier `critical`); the shipped workflow turns that into a failed `triage` job. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to also block Protect files. Start with `--shadow` to log decisions without failing.
 
 </details>
 
@@ -464,52 +440,43 @@ Then in **Settings > Branches > Branch protection rules**, add `triage` as a req
 The CLI is the interface. Any CI that can run a binary works:
 
 ```sh
-# Install
 go install github.com/zanetworker/highstakes/cmd/highstakes@latest
+# set OPENROUTER_API_KEY from your CI secrets
+[ -f .heatmap/config.yaml ] || highstakes init
+highstakes analyze                                      # cached: only changed files are re-assessed
 
-# Analyze (uses cache, only re-assesses changed files)
-export OPENROUTER_API_KEY="$OPENROUTER_KEY"
-highstakes init && highstakes analyze
+# The comment body for your CI's merge request API; exit 5 blocks Harden now files.
+highstakes pr check --base origin/main --format markdown --fail-on critical > comment.md
 
-# Check PR risk. Exit code is 0 unless you pass --fail-on <tier>:
-# then it is 5 when the PR tier is at or above that tier.
-highstakes pr check --base origin/main --json > risk.json
-
-# Use the output
-TIER=$(jq -r .tier risk.json)
-SCORE=$(jq -r .heat_score risk.json)
-FILES=$(jq -r '.files_changed | length' risk.json)
-
-echo "PR risk: $TIER ($SCORE), $FILES files changed"
-
-# Fail pipeline on high/critical
-if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-  echo "Requires human review"
-  exit 1
-fi
+# Or JSON: verdict, checklist (with done) and backlog.
+highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] | "\(if .done then "[x]" else "[ ]" end) \(.text)")'
 ```
 
 </details>
 
-**What the PR comment looks like:**
+**What the PR comment looks like** (a real `pr check --format markdown` on NVIDIA/OpenShell after the PR also changed a test next to `proxy.rs`; GitHub folds the details block):
 
 ```markdown
-## 🔥🔥 HighStakes: HIGH
+## ⛔ Harden before merge
 
-| File | Heat | Tier | Lines |
-|------|------|------|-------|
-| ⚠️ src/auth/oidc.rs | 63 | 🔥🔥 HIGH | +45/-12 |
-| ⚠️ src/sandbox/proxy.rs | 63 | 🔥🔥 HIGH | +8/-3 |
-| ✓ src/tui/theme.rs | 6 | 🟢 LOW | +2/-1 |
+`crates/openshell-supervisor-network/src/proxy.rs` and `crates/openshell-supervisor-network/src/egress_audit.rs` are likely to break and costly if broken: Core sandbox egress proxy; bugs can block traffic or bypass network policy.
 
-### ⚠️ Circuit Breaker Signals
-- Large diff (>500 lines)
+### Do before merge
 
-### Review Requirements
-- **Reviewers**: 2 (senior)
-- **Security Scan**: Required
-- **Auto-Merge**: ❌ Blocked
-- **Est. Review Time**: 60 min
+- [ ] Get sign-off from a senior owner (@johntmyers, rrhubenov@gmail.com) (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [x] Add regression tests around the 4 recent fixes (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [x] Add contract tests for its public interface (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [ ] Keep auto-merge off (`crates/openshell-supervisor-network/src/proxy.rs`)
+
+| File | Will it break? | How bad? | Action |
+|---|---|---|---|
+| `crates/openshell-supervisor-network/src/proxy.rs` | 50 high | 92 high | Harden now |
+| `crates/openshell-supervisor-network/src/egress_audit.rs` | new file | inherited: harden now | Harden now |
+| 2 other files | low | low | Routine |
+
+<details><summary>Why these actions?</summary>
+(per-file reasons, repo cutoffs, suggested reviewers, backlog commands)
+</details>
 ```
 
 ### Agent Introspection

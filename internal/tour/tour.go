@@ -86,10 +86,14 @@ type Tour struct {
 	TotalStops int    `json:"total_stops"`
 	// ProductComponents and SupportingComponents count the components shown;
 	// SupportingHidden counts supporting components left out.
-	ProductComponents    int       `json:"product_components"`
-	SupportingComponents int       `json:"supporting_components"`
-	SupportingHidden     int       `json:"supporting_hidden"`
-	Sections             []Section `json:"sections"`
+	ProductComponents    int `json:"product_components"`
+	SupportingComponents int `json:"supporting_components"`
+	SupportingHidden     int `json:"supporting_hidden"`
+	// LikelyCutoff and ImpactThreshold are the repo cutoffs stop scores
+	// read against ("Will it break?" and "How bad if it breaks?").
+	LikelyCutoff    int       `json:"likely_cutoff,omitempty"`
+	ImpactThreshold int       `json:"impact_threshold,omitempty"`
+	Sections        []Section `json:"sections"`
 }
 
 // Section groups the stops of one directory (Go package), or of one
@@ -134,6 +138,11 @@ type Stop struct {
 	Notes          string         `json:"notes,omitempty"`
 	// Explanation is the file's why-impact, why-likely and what-to-do.
 	Explanation *types.Explanation `json:"explanation,omitempty"`
+	// Verdict is the file's posture (Harden now, Protect, Stabilize,
+	// Routine, Not assessed); the top actions are the first of each scope.
+	Verdict        string        `json:"verdict,omitempty"`
+	TopBeforeMerge *types.Action `json:"top_before_merge,omitempty"`
+	TopBacklog     *types.Action `json:"top_backlog,omitempty"`
 }
 
 // Dir returns the directory of a slash-separated repo path ("." for root files).
@@ -522,6 +531,9 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		Ordering:   ordering,
 		TotalStops: order,
 
+		LikelyCutoff:    hm.Metadata.LikelyCutoff,
+		ImpactThreshold: hm.Metadata.ImpactThreshold,
+
 		ProductComponents:    len(comps[KindProduct]),
 		SupportingComponents: len(comps[KindSupporting]),
 		SupportingHidden:     hidden,
@@ -669,6 +681,9 @@ func newStop(hm *types.Heatmap, f *types.FileHeat, deps []*types.FileHeat, sourc
 		Owners:         owners(f, ann.Owner),
 		Notes:          ann.Notes,
 		Explanation:    f.Explanation,
+		Verdict:        verdict(f),
+		TopBeforeMerge: f.Explanation.Top(types.ScopeBeforeMerge),
+		TopBacklog:     f.Explanation.Top(types.ScopeBacklog),
 	}
 	if st.Owners == nil {
 		st.Owners = []string{}
@@ -678,6 +693,18 @@ func newStop(hm *types.Heatmap, f *types.FileHeat, deps []*types.FileHeat, sourc
 		st.CriticalReason = br.CriticalReason
 	}
 	return st
+}
+
+// verdict is the explanation's verdict, else the quadrant posture, else
+// "Not assessed" (heatmaps written before verdicts existed).
+func verdict(f *types.FileHeat) string {
+	if f.Explanation != nil && f.Explanation.Verdict != "" {
+		return f.Explanation.Verdict
+	}
+	if l := f.Quadrant.Label(); l != "" && f.ImpactAssessed {
+		return l
+	}
+	return "Not assessed"
 }
 
 // why explains why a file matters: the LLM critical reason, else its

@@ -106,7 +106,8 @@ type FileHeat struct {
 	Likelihood     int      `json:"likelihood"`         // 0-100
 	Impact         int      `json:"impact"`             // 0-100
 	ImpactAssessed bool     `json:"impact_assessed"`    // impact came from the LLM
-	Quadrant       Quadrant `json:"quadrant,omitempty"` // set only when impact is assessed
+	Quadrant       Quadrant `json:"quadrant,omitempty"` // set only when impact is assessed; stable ID
+	QuadrantLabel  string   `json:"quadrant_label,omitempty"` // human posture for Quadrant: Harden now, Protect, Stabilize, Routine
 	LLMSkipped     string   `json:"llm_skipped,omitempty"` // "sensitive": looks like credentials, never sent to the LLM
 	Language           string             `json:"language,omitempty"`
 	Size               FileSize           `json:"size,omitempty"`
@@ -125,7 +126,8 @@ type FileHeat struct {
 // do about it. Every reason quotes the file's numbers; it is deterministic
 // (no LLM) and computed after quadrants are applied.
 type Explanation struct {
-	Headline          string   `json:"headline"`    // e.g. "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)"
+	Headline          string   `json:"headline"`    // e.g. "HARDEN NOW (will it break 50, cutoff 33; how bad 92, cutoff 78)"
+	Verdict           string   `json:"verdict,omitempty"` // posture: Harden now, Protect, Stabilize, Routine, or Not assessed
 	ImpactHigh        bool     `json:"impact_high"` // impact at or above the repo impact threshold
 	Likely            bool     `json:"likely"`      // likelihood at or above the repo likely cutoff
 	ImpactReasons     []string `json:"impact_reasons,omitempty"`
@@ -133,10 +135,18 @@ type Explanation struct {
 	Actions           []Action `json:"actions,omitempty"` // most important first
 }
 
-// Action is one recommended step; ID is stable for tooling.
+// Action is one recommended step; ID is stable for tooling. Scope says
+// whether it belongs to this PR (before_merge) or to the file over time
+// (backlog); Signal is the fact that triggered it.
 type Action struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID      string   `json:"id"`
+	Text    string   `json:"text"`
+	Scope   string   `json:"scope,omitempty"`   // before_merge or backlog
+	Signal  string   `json:"signal,omitempty"`  // why it fired
+	Done    bool     `json:"done"`              // pr check: the PR already satisfies it
+	Command string   `json:"command,omitempty"` // backlog: copyable gh command or CODEOWNERS line
+	Owners  []string `json:"owners,omitempty"`  // review actions: suggested owners
+	Files   []string `json:"files,omitempty"`   // pr check checklist: files the action applies to
 }
 
 // Tier represents risk tier
@@ -319,6 +329,14 @@ type PRRisk struct {
 	ChangeRiskLevel    string     `json:"change_risk_level"`
 	ChangeRiskFactors  []string   `json:"change_risk_factors,omitempty"`
 	SuggestedReviewers []Reviewer `json:"suggested_reviewers,omitempty"`
+	// Verdict is the posture of the most severe changed file (Harden now,
+	// Protect, Stabilize, Routine); Checklist and Backlog are its actions,
+	// deduplicated across files; the cutoffs make file scores readable.
+	Verdict         string   `json:"verdict,omitempty"`
+	Checklist       []Action `json:"checklist,omitempty"`
+	Backlog         []Action `json:"backlog,omitempty"`
+	LikelyCutoff    int      `json:"likely_cutoff,omitempty"`
+	ImpactThreshold int      `json:"impact_threshold,omitempty"`
 	FailOn             Tier       `json:"fail_on,omitempty"`  // gate tier from --fail-on (or critical in shadow mode)
 	Decision           string     `json:"decision,omitempty"` // "pass" or "block" when a gate is set
 	Shadow             bool       `json:"shadow,omitempty"`   // decision logged, not enforced
@@ -341,7 +359,13 @@ type FileChange struct {
 	LinesDeleted int `json:"lines_deleted"`
 	IsNew     bool   `json:"is_new"`
 	Unscored  bool   `json:"unscored,omitempty"` // Not in heatmap; heat inherited from nearest scored directory
-	Actions   []Action `json:"actions,omitempty"` // top actions for HIGH and CRITICAL files
+	Actions   []Action `json:"actions,omitempty"` // before-merge actions for non-routine files, with done set
+	// Two axes of the scored file (absent for unscored files).
+	Likelihood     int      `json:"likelihood,omitempty"`
+	Impact         int      `json:"impact,omitempty"`
+	ImpactAssessed bool     `json:"impact_assessed,omitempty"`
+	Quadrant       Quadrant `json:"quadrant,omitempty"`
+	QuadrantLabel  string   `json:"quadrant_label,omitempty"`
 }
 
 // Config represents heatmap configuration

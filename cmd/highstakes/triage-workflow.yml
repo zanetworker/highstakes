@@ -1,0 +1,96 @@
+name: HighStakes Triage
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Re-run on reviews so owner approvals tick the checklist.
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - uses: actions/cache@v4
+        with:
+          path: .heatmap
+          key: heatmap-${{ github.sha }}
+          restore-keys: heatmap-
+
+      - name: Install highstakes
+        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
+
+      - name: Analyze repository
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ ! -f .heatmap/config.yaml ]; then highstakes init; fi
+          highstakes analyze
+
+      # Each reviewer's latest review counts; logins whose latest review is an
+      # approval tick the owner-review items of the checklist.
+      - name: Collect approvals
+        id: approvals
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          logins=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq '.[] | [.user.login, .state] | @tsv' \
+            | awk -F'\t' '$2 != "COMMENTED" { last[$1] = $2 } END { for (u in last) if (last[u] == "APPROVED") print u }' \
+            | sort | paste -sd, -)
+          echo "logins=$logins" >> "$GITHUB_OUTPUT"
+
+      # Exit 5 means the PR changes a Harden now file (--fail-on critical).
+      - name: Assess PR risk
+        id: risk
+        env:
+          BASE: origin/${{ github.base_ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
+        run: |
+          set +e
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Post PR comment
+        uses: actions/github-script@v9
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('pr-comment.md')) return;
+            const body = fs.readFileSync('pr-comment.md', 'utf8');
+            if (!body.trim()) return;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            // The marker is written by `highstakes pr check --format markdown`.
+            const existing = comments.find(c => c.body.includes('<!-- highstakes-triage -->') || c.body.includes('HighStakes:'));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Gate on Harden now files
+        if: steps.risk.outputs.code != '0'
+        env:
+          CODE: ${{ steps.risk.outputs.code }}
+        run: |
+          if [ "$CODE" = "5" ]; then
+            echo "::error::This PR changes Harden now files. Work through 'Do before merge' in the HighStakes comment."
+          else
+            echo "::error::highstakes pr check failed (exit $CODE)."
+          fi
+          exit 1

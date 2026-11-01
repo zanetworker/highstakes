@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/types"
+	"github.com/zanetworker/highstakes/pkg/heatmap"
 )
 
 func gitIn(t *testing.T, dir string, args ...string) {
@@ -113,5 +114,66 @@ func TestPRCheck_EmptyDiffStillGates(t *testing.T) {
 				t.Errorf("shadow log written without --shadow: %q", log)
 			}
 		})
+	}
+}
+
+// TestPRCheck_MarkdownChecklist: --format markdown renders the PR comment;
+// an adjacent test in the diff and an owner approval tick their items.
+func TestPRCheck_MarkdownChecklist(t *testing.T) {
+	dir := writeHeatmap(t)
+	hm, err := heatmap.Load(filepath.Join(dir, ".heatmap", "heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := hm.Files["core/a.go"]
+	a.Tier, a.Quadrant, a.ImpactAssessed, a.Likelihood = types.TierCritical, types.QuadrantFragileCritical, true, 60
+	a.Explanation = &types.Explanation{Verdict: "Harden now", Actions: []types.Action{
+		{ID: "senior-review", Text: "Get sign-off from a senior owner (@ana)", Scope: types.ScopeBeforeMerge, Owners: []string{"@ana"}},
+		{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge, Signal: "recent fix"},
+		{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/core/a.go @ana"},
+	}}
+	if err := heatmap.Save(hm, filepath.Join(dir, ".heatmap", "heatmap.json")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	gitIn(t, dir, "add", "core/a.go")
+	gitIn(t, dir, "commit", "-q", "-m", "base")
+	gitIn(t, dir, "checkout", "-q", "-b", "feature")
+	write := func(rel, s string) {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("core/a.go", "package core\n\nfunc A() { _ = 1 }\n")
+	gitIn(t, dir, "commit", "-q", "-am", "change a")
+	base := []string{"pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=", "--author=t@x.com", "--reviewers=0"}
+
+	out, err := runCLI(t, dir, base...)
+	if err != nil {
+		t.Fatalf("pr check: %v\n%s", err, out)
+	}
+	for _, want := range []string{"## ⛔ Harden before merge", "- [ ] Get sign-off from a senior owner (@ana)", "- [ ] Add regression tests", "/core/a.go @ana"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	write("core/a_test.go", "package core\n")
+	gitIn(t, dir, "add", "core/a_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "test a")
+	out, err = runCLI(t, dir, append(base, "--approvals", "zed,ANA")...)
+	if err != nil {
+		t.Fatalf("pr check: %v\n%s", err, out)
+	}
+	for _, want := range []string{"- [x] Get sign-off from a senior owner (@ana)", "- [x] Add regression tests"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	_, err = runCLI(t, dir, "pr", "check", "--base", "main", "--format", "yaml")
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != 2 || !strings.Contains(ee.msg, "text, markdown, json") {
+		t.Errorf("invalid --format: err = %v, want exit 2 listing valid values", err)
 	}
 }

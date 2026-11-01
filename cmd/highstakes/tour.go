@@ -155,21 +155,19 @@ func printTour(w io.Writer, tr *tour.Tour) {
 			inSupporting = true
 			fmt.Fprintln(w, "\nSupporting: CI, deployment, scripts and examples")
 		}
-		fmt.Fprintf(w, "\n%d. %s  [level %d, max impact %d, %s]\n", s.Order, s.Title, s.Level, s.MaxImpact, strings.ToUpper(string(s.Tier)))
+		fmt.Fprintf(w, "\n%d. %s  [level %d, max how bad %d, %s]\n", s.Order, s.Title, s.Level, s.MaxImpact, types.TierPosture(s.Tier))
 		for _, st := range s.Stops {
-			fmt.Fprintf(w, "   %d. %s  %s %s  %s\n", st.Order, st.Anchor, tierEmoji(st.Tier), st.Tier, axesLabel(st.Impact, st.Likelihood, st.ImpactAssessed, st.Quadrant))
+			fmt.Fprintf(w, "   %d. %s  %s\n", st.Order, st.Anchor, st.Verdict)
+			fmt.Fprintf(w, "      %s\n", tour.StopAxes(st, tr.LikelyCutoff, tr.ImpactThreshold))
 			fmt.Fprintf(w, "      why: %s\n", st.Why)
-			if e := st.Explanation; e != nil {
-				if len(e.LikelihoodReasons) > 0 {
-					fmt.Fprintf(w, "      likely because: %s\n", e.LikelihoodReasons[0])
-				}
-				if n := min(2, len(e.Actions)); n > 0 {
-					texts := make([]string, n)
-					for i := range texts {
-						texts[i] = e.Actions[i].Text
-					}
-					fmt.Fprintf(w, "      do: %s\n", strings.Join(texts, "; "))
-				}
+			if e := st.Explanation; e != nil && len(e.LikelihoodReasons) > 0 {
+				fmt.Fprintf(w, "      break signals: %s\n", e.LikelihoodReasons[0])
+			}
+			if a := st.TopBeforeMerge; a != nil {
+				fmt.Fprintf(w, "      before merge: %s\n", a.Text)
+			}
+			if a := st.TopBacklog; a != nil {
+				fmt.Fprintf(w, "      backlog: %s\n", a.Text)
 			}
 			if len(st.DependsOn) > 0 {
 				fmt.Fprintf(w, "      depends on: %s%s\n", strings.Join(st.DependsOn, ", "), more(st.DependsOnCount, len(st.DependsOn)))
@@ -185,14 +183,6 @@ func printTour(w io.Writer, tr *tour.Tour) {
 			}
 		}
 	}
-}
-
-// axesLabel renders both axes, marking an impact estimate made without the LLM.
-func axesLabel(impact, likelihood int, assessed bool, q types.Quadrant) string {
-	if !assessed {
-		return fmt.Sprintf("impact ~%d (estimate), likelihood %d", impact, likelihood)
-	}
-	return fmt.Sprintf("impact %d, likelihood %d, %s", impact, likelihood, q)
 }
 
 func more(total, shown int) string {

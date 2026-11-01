@@ -122,7 +122,12 @@
         "quadrant": {
           "type": "string",
           "enum": ["fragile-critical", "protect", "watch", "low"],
-          "description": "Likelihood x impact quadrant; present only when impact is assessed"
+          "description": "Likelihood x impact quadrant, a stable machine ID; present only when impact is assessed. Read quadrant_label for the human posture"
+        },
+        "quadrant_label": {
+          "type": "string",
+          "enum": ["Harden now", "Protect", "Stabilize", "Routine"],
+          "description": "Posture for the quadrant: fragile-critical = Harden now, protect = Protect, watch = Stabilize, low = Routine"
         },
         "llm_skipped": {
           "type": "string",
@@ -412,6 +417,7 @@
           "description": "Why the file is impactful and likely to break, and what to do (deterministic rules, see docs/how-it-works.md)",
           "properties": {
             "headline": {"type": "string"},
+            "verdict": {"type": "string", "description": "Harden now, Protect, Stabilize, Routine, or Not assessed"},
             "impact_high": {"type": "boolean"},
             "likely": {"type": "boolean"},
             "impact_reasons": {"type": "array", "items": {"type": "string"}},
@@ -420,7 +426,16 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "properties": {"id": {"type": "string"}, "text": {"type": "string"}}
+                "properties": {
+                  "id": {"type": "string"},
+                  "text": {"type": "string"},
+                  "scope": {"type": "string", "enum": ["before_merge", "backlog"], "description": "before_merge: this PR; backlog: the file over time"},
+                  "signal": {"type": "string", "description": "The fact that triggered the action"},
+                  "done": {"type": "boolean", "description": "Set by pr check when the PR already satisfies the action; always false in the heatmap"},
+                  "command": {"type": "string", "description": "Backlog items: a copyable gh command or CODEOWNERS line"},
+                  "owners": {"type": "array", "items": {"type": "string"}, "description": "Review actions: suggested owners"},
+                  "files": {"type": "array", "items": {"type": "string"}, "description": "pr check checklist: files the action applies to"}
+                }
               }
             }
           }

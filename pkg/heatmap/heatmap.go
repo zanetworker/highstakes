@@ -13,6 +13,7 @@ import (
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/llm"
 	"github.com/zanetworker/highstakes/internal/ownership"
+	"github.com/zanetworker/highstakes/internal/policy"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
@@ -175,7 +176,9 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  Warning: no owners in explanations: %v\n", err)
 	}
-	applyExplanations(heatmap, owners)
+	// Files an existing CODEOWNERS rule covers get no "add a CODEOWNERS line" action.
+	codeowners, _ := policy.LoadCodeowners(g.repoPath)
+	applyExplanations(heatmap, owners, codeowners.Covers)
 
 	// Units need quadrants (fragile-critical counts); they are optional, so a
 	// failure leaves the heatmap without them.
@@ -323,8 +326,10 @@ func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
 
 // applyExplanations attaches reasons and actions to every file. It runs
 // after applyAxes because reasons cite the likely cutoff and quadrant.
-func applyExplanations(hm *types.Heatmap, owners map[string][]ownership.Owner) {
+// codeowned (may be nil) reports paths an existing CODEOWNERS rule covers.
+func applyExplanations(hm *types.Heatmap, owners map[string][]ownership.Owner, codeowned func(string) bool) {
 	stats := explain.BuildRepoStats(hm, tour.IsTestFile)
+	stats.Codeowned = codeowned
 	for path, f := range hm.Files {
 		e := explain.Explain(f, stats, owners[path])
 		f.Explanation = &e

@@ -1,66 +1,158 @@
 package main
 
 import (
+	"fmt"
+	"path"
+	"sort"
 	"strings"
 
 	"github.com/zanetworker/highstakes/internal/explain"
+	"github.com/zanetworker/highstakes/internal/gitanalyzer"
+	"github.com/zanetworker/highstakes/internal/prscore"
+	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
-// explanationBlock renders a file's explanation for `get`: headline, why
-// impact, why likely, what to do. Empty for heatmaps written before
-// explanations existed.
-func explanationBlock(f *types.FileHeat) string {
+// explanationBlock renders a file for `get`: verdict, the two questions
+// with repo cutoffs, before-merge and backlog checklists, why, latest fix.
+// Empty for heatmaps written before explanations existed.
+func explanationBlock(f *types.FileHeat, likelyCutoff, impactCutoff int) string {
 	e := f.Explanation
 	if e == nil {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(e.Headline + "\n")
-	impactTitle, likelyTitle := explain.Titles(*e, f.ImpactAssessed)
-	writeSection(&b, impactTitle, e.ImpactReasons, true)
-	writeSection(&b, likelyTitle, e.LikelihoodReasons, false)
-	if len(e.Actions) > 0 {
-		b.WriteString("What to do:\n")
+	verdict := e.Verdict
+	if verdict == "" {
+		verdict = explain.Verdict(f, false)
+	}
+	b.WriteString(f.Path + "\n" + strings.ToUpper(verdict) + "\n")
+	b.WriteString(axisLine(types.AxisLikelihood, f.Likelihood, likelyCutoff))
+	if f.ImpactAssessed {
+		b.WriteString(axisLine(types.AxisImpact, f.Impact, impactCutoff))
+	} else {
+		fmt.Fprintf(&b, "%-22s %s\n", types.AxisImpact, fmt.Sprintf("~%d estimate (run analyze with an LLM to assess)", f.Impact))
+	}
+	b.WriteString(types.AxisNote + "\n" + types.AxisEvidence + "\n")
+
+	checklists := []struct{ title, scope string }{
+		{"Do before the next merge", types.ScopeBeforeMerge}, {"Put on the backlog", types.ScopeBacklog},
+	}
+	for i, sec := range checklists {
+		first := true
 		for _, a := range e.Actions {
-			b.WriteString("  • " + a.Text + "\n")
+			if a.Scope != sec.scope {
+				continue
+			}
+			if first {
+				if i == 0 || !hasScope(e.Actions, types.ScopeBeforeMerge) {
+					b.WriteString("\n")
+				}
+				b.WriteString(sec.title + "\n")
+				first = false
+			}
+			b.WriteString("  " + checkbox(a.Done) + " " + a.Text + "\n")
+			if a.Signal != "" {
+				b.WriteString("      why: " + a.Signal + "\n")
+			}
+			if a.Command != "" {
+				b.WriteString("      " + a.Command + "\n")
+			}
+		}
+	}
+
+	if len(e.LikelihoodReasons) > 0 || len(e.ImpactReasons) > 0 {
+		b.WriteString("\nWhy\n")
+		if len(e.LikelihoodReasons) > 0 {
+			b.WriteString("  Break signals: " + strings.Join(e.LikelihoodReasons, "; ") + "\n")
+		}
+		if len(e.ImpactReasons) > 0 {
+			b.WriteString("  Break cost: " + strings.Join(e.ImpactReasons, "; ") + "\n")
+		}
+	}
+	for _, c := range f.RecentChanges { // newest first
+		if gitanalyzer.IsBugFix(c.Message) {
+			fmt.Fprintf(&b, "Latest fix  %s  %s\n", c.Date.Format("2006-01-02"), c.Message)
+			break
 		}
 	}
 	return b.String()
 }
 
-// writeSection prints a title and its reasons, the first on the title line
-// when inline is set.
-func writeSection(b *strings.Builder, title string, reasons []string, inline bool) {
-	if len(reasons) == 0 {
-		return
-	}
-	rest := reasons
-	if inline {
-		b.WriteString(title + ": " + reasons[0] + "\n")
-		rest = reasons[1:]
-	} else {
-		b.WriteString(title + ":\n")
-	}
-	for _, r := range rest {
-		b.WriteString("  " + r + "\n")
-	}
+// axisLine is "Will it break?         50  HIGH  repo cutoff 33".
+func axisLine(question string, score, cutoff int) string {
+	return fmt.Sprintf("%-22s %-3d %-5s repo cutoff %d\n", question, score, types.AxisLevel(score, cutoff), cutoff)
 }
 
-// topActions returns a file's first n actions, most important first.
-func topActions(f *types.FileHeat, n int) []types.Action {
-	if f.Explanation == nil || n <= 0 {
-		return nil
+func checkbox(done bool) string {
+	if done {
+		return "[x]"
 	}
-	return f.Explanation.Actions[:min(n, len(f.Explanation.Actions))]
+	return "[ ]"
 }
 
-// attachActions gives each HIGH or CRITICAL changed file its top 3 actions.
-func attachActions(risk *types.PRRisk, hm *types.Heatmap) {
-	for i := range risk.FilesChanged {
-		fc := &risk.FilesChanged[i]
-		if f, ok := hm.Files[fc.Path]; ok && (fc.Tier == types.TierCritical || fc.Tier == types.TierHigh) {
-			fc.Actions = topActions(f, 3)
+func hasScope(as []types.Action, scope string) bool {
+	for _, a := range as {
+		if a.Scope == scope {
+			return true
 		}
 	}
+	return false
 }
+
+// buildChange collects what explain.ForPR needs to know about the PR.
+// codeowned (may be nil) reports CODEOWNERS coverage at HEAD.
+func buildChange(changes []prscore.FileChange, hm *types.Heatmap, approvals []string, codeowned func(string) bool) explain.Change {
+	c := explain.Change{Approvals: approvals, Codeowned: codeowned}
+	components := map[string]bool{}
+	for _, ch := range changes {
+		c.Paths = append(c.Paths, ch.Path)
+		c.Lines += ch.LinesAdded + ch.LinesDeleted
+		if tour.IsTestFile(ch.Path) {
+			continue
+		}
+		comp := path.Dir(ch.Path)
+		if f, ok := hm.Files[ch.Path]; ok && f.Component != "" {
+			comp = f.Component
+		}
+		components[comp] = true
+	}
+	c.Components = len(components)
+	return c
+}
+
+// attachPRActions sets each scored file's before-merge actions (routine
+// files stay quiet) and the PR's deduplicated checklist and backlog, most
+// severe file first.
+func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
+	order := make([]int, len(risk.FilesChanged))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := risk.FilesChanged[order[i]], risk.FilesChanged[order[j]]
+		if ra, rb := tierOrder[a.Tier], tierOrder[b.Tier]; ra != rb {
+			return ra > rb
+		}
+		return a.Impact > b.Impact
+	})
+	var all []explain.FileActions
+	for _, i := range order {
+		fc := &risk.FilesChanged[i]
+		f, ok := hm.Files[fc.Path]
+		if !ok {
+			continue
+		}
+		acts := explain.ForPR(f, c)
+		fc.Actions = nil
+		for _, a := range acts {
+			if a.Scope == types.ScopeBeforeMerge && a.ID != "light-review" {
+				fc.Actions = append(fc.Actions, a)
+			}
+		}
+		all = append(all, explain.FileActions{Path: fc.Path, Actions: acts})
+	}
+	risk.Checklist, risk.Backlog = explain.Checklist(all)
+}
+
+var tierOrder = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}

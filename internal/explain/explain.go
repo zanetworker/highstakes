@@ -26,9 +26,10 @@ const (
 
 // signals are the repo-relative facts reasons and actions are derived from.
 type signals struct {
-	f      *types.FileHeat
-	owners []ownership.Owner
-	isTest bool
+	f         *types.FileHeat
+	owners    []ownership.Owner
+	isTest    bool
+	codeowned bool // an existing CODEOWNERS rule covers the file
 
 	churnTop, authorsTop, cycTop, fnTop, importersTop, linesTop int
 	fixes                                                       []types.Change // newest first
@@ -59,6 +60,7 @@ func Explain(f *types.FileHeat, rs RepoStats, owners []ownership.Owner) types.Ex
 	isTest := rs.isTest != nil && rs.isTest(f.Path)
 	s := signals{
 		f: f, owners: owners, isTest: isTest,
+		codeowned:    rs.Codeowned != nil && rs.Codeowned(f.Path),
 		churnTop:     topPercent(rs.churn, f.Factors.ChangeFrequency.CommitsLast90d),
 		authorsTop:   topPercent(rs.authors, f.Factors.ChangeFrequency.UniqueAuthors),
 		cycTop:       topPercent(rs.cyclomatic, f.Factors.Complexity.Cyclomatic),
@@ -72,7 +74,8 @@ func Explain(f *types.FileHeat, rs RepoStats, owners []ownership.Owner) types.Ex
 		}
 	}
 	return types.Explanation{
-		Headline:          headline(f, rs.LikelyCutoff, rs.ImpactThreshold),
+		Headline:          headline(f, isTest, rs.LikelyCutoff, rs.ImpactThreshold),
+		Verdict:           Verdict(f, isTest),
 		ImpactHigh:        f.Impact >= rs.ImpactThreshold,
 		Likely:            !isTest && f.Likelihood >= rs.LikelyCutoff,
 		ImpactReasons:     impactReasons(f),
@@ -81,30 +84,33 @@ func Explain(f *types.FileHeat, rs RepoStats, owners []ownership.Owner) types.Ex
 	}
 }
 
-var quadrantLabels = map[types.Quadrant]string{
-	types.QuadrantFragileCritical: "FRAGILE AND CRITICAL",
-	types.QuadrantProtect:         "PROTECT",
-	types.QuadrantWatch:           "WATCH",
-	types.QuadrantLow:             "LOW STAKES",
+// Verdict is the posture a reader acts on: the quadrant label, "Routine"
+// for test files, "Not assessed" when no LLM assessed impact.
+func Verdict(f *types.FileHeat, isTest bool) string {
+	switch {
+	case isTest:
+		return types.QuadrantLow.Label()
+	case !f.ImpactAssessed || f.Quadrant.Label() == "":
+		return "Not assessed"
+	}
+	return f.Quadrant.Label()
 }
 
-// headline names the quadrant and both scores, then the repo's cutoffs so
-// the numbers read relative to this repo. A zero cutoff is left out.
-func headline(f *types.FileHeat, cutoff, impactCutoff int) string {
-	label, impact := quadrantLabels[f.Quadrant], fmt.Sprintf("impact %d", f.Impact)
-	if !f.ImpactAssessed || label == "" {
-		label, impact = "IMPACT NOT ASSESSED", fmt.Sprintf("impact ~%d estimate", f.Impact)
+// headline names the verdict and both axes with the repo's cutoffs, so the
+// numbers read relative to this repo. A zero cutoff is left out.
+func headline(f *types.FileHeat, isTest bool, cutoff, impactCutoff int) string {
+	breaks := fmt.Sprintf("will it break %d", f.Likelihood)
+	if cutoff > 0 {
+		breaks += fmt.Sprintf(", cutoff %d", cutoff)
 	}
-	tail := ""
+	bad := fmt.Sprintf("how bad %d", f.Impact)
 	switch {
-	case impactCutoff > 0 && cutoff > 0:
-		tail = fmt.Sprintf("; impactful starts at %d, likely at %d in this repo", impactCutoff, cutoff)
+	case !f.ImpactAssessed:
+		bad = fmt.Sprintf("how bad ~%d estimate", f.Impact)
 	case impactCutoff > 0:
-		tail = fmt.Sprintf("; impactful starts at %d in this repo", impactCutoff)
-	case cutoff > 0:
-		tail = fmt.Sprintf("; likely starts at %d in this repo", cutoff)
+		bad += fmt.Sprintf(", cutoff %d", impactCutoff)
 	}
-	return fmt.Sprintf("%s (%s, likelihood %d%s)", label, impact, f.Likelihood, tail)
+	return fmt.Sprintf("%s (%s; %s)", strings.ToUpper(Verdict(f, isTest)), breaks, bad)
 }
 
 func impactReasons(f *types.FileHeat) []string {
@@ -203,17 +209,15 @@ func describeChange(c types.Change) string {
 // Titles are the section headings every frontend uses for the two reason
 // lists, so the CLI, TUI and dashboard read the same.
 func Titles(e types.Explanation, assessed bool) (impact, likelihood string) {
-	switch {
-	case !assessed:
-		impact = "Impact (estimate)"
-	case e.ImpactHigh:
-		impact = "Why impact is high"
-	default:
-		impact = "Why impact is low"
+	level := func(high bool) string {
+		if high {
+			return "HIGH"
+		}
+		return "LOW"
 	}
-	likelihood = "Likelihood signals (below the likely cutoff)"
-	if e.Likely {
-		likelihood = "Why it's likely to break"
+	impact = "Break cost (" + level(e.ImpactHigh) + ")"
+	if !assessed {
+		impact = "Break cost (estimate)"
 	}
-	return impact, likelihood
+	return impact, "Break signals (" + level(e.Likely) + ")"
 }

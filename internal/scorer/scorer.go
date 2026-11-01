@@ -152,6 +152,7 @@ func ApplyQuadrants(files map[string]*types.FileHeat, thresholds types.TierThres
 		}
 		likely := !isTest(p) && f.Likelihood >= cutoff
 		f.Quadrant, f.Tier = QuadrantOf(likely, f.Impact >= impactCutoff)
+		f.QuadrantLabel = f.Quadrant.Label()
 		f.ReviewRequirements = CalculateReviewRequirements(f.Tier)
 	}
 	return cutoff, impactCutoff

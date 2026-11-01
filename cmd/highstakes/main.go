@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/highstakes/internal/dashboard"
 	"github.com/zanetworker/highstakes/internal/incidents"
+	"github.com/zanetworker/highstakes/internal/policy"
+	"github.com/zanetworker/highstakes/internal/prcomment"
 	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tui"
@@ -147,7 +150,7 @@ var analyzeCmd = &cobra.Command{
 
 var scoreCmd = &cobra.Command{
 	Use:   "get <file>",
-	Short: "Get heat score and reasoning for a file",
+	Short: "Get a file's verdict, both questions with repo cutoffs, and what to do",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
@@ -176,23 +179,28 @@ var scoreCmd = &cobra.Command{
 		}
 
 		if jsonOut {
-			return printJSON(file)
+			// The file's JSON with the repo cutoffs its scores read against.
+			return printJSON(struct {
+				*types.FileHeat
+				LikelyCutoff    int `json:"likely_cutoff"`
+				ImpactThreshold int `json:"impact_threshold"`
+			}{file, hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold})
 		}
 
-		printFileScore(file)
+		printFileScore(file, hm.Metadata)
 		return nil
 	},
 }
 
-func printFileScore(file *types.FileHeat) {
-	fmt.Printf("%s  %s %s  (score: %d)\n\n",
-		file.Path, tierEmoji(file.Tier), strings.ToUpper(string(file.Tier)), file.HeatScore)
-
-	if block := explanationBlock(file); block != "" {
-		fmt.Println(block)
-		printReview(file.ReviewRequirements)
+func printFileScore(file *types.FileHeat, md types.Metadata) {
+	if block := explanationBlock(file, md.LikelyCutoff, md.ImpactThreshold); block != "" {
+		fmt.Print(block)
 		return
 	}
+
+	// Heatmaps written before explanations existed.
+	fmt.Printf("%s  %s %s  (score: %d)\n\n",
+		file.Path, tierEmoji(file.Tier), strings.ToUpper(string(file.Tier)), file.HeatScore)
 
 	fmt.Println(axesLines(file))
 
@@ -248,24 +256,15 @@ func printReview(req types.ReviewRequirements) {
 	fmt.Println()
 }
 
-// quadrantGuidance is the review advice for each quadrant.
-var quadrantGuidance = map[types.Quadrant]string{
-	types.QuadrantFragileCritical: "likely to break and costly when it does: senior review, add tests first",
-	types.QuadrantProtect:         "stable but costly if broken: keep owners on review, never auto-merge",
-	types.QuadrantWatch:           "changes and breaks often, limited damage: refactor or add tests",
-	types.QuadrantLow:             "low stakes: light review",
-}
-
-// axesLines explains a file's two axes, one line each.
+// axesLines states a file's two axes as questions, one line each.
 func axesLines(f *types.FileHeat) string {
-	impact := fmt.Sprintf("Impact:     %d  (damage if it breaks: LLM blast radius)", f.Impact)
+	impact := fmt.Sprintf("%-22s %d  (LLM blast radius)", types.AxisImpact, f.Impact)
 	if !f.ImpactAssessed {
-		impact = fmt.Sprintf("Impact:     ~%d (estimate of damage if it breaks, from centrality and path keywords; analyze with an LLM to assess)", f.Impact)
+		impact = fmt.Sprintf("%-22s ~%d (estimate from centrality and path keywords; analyze with an LLM to assess)", types.AxisImpact, f.Impact)
 	}
-	lines := impact + "\n" +
-		fmt.Sprintf("Likelihood: %d  (chance it needs fixes: churn, complexity, centrality, incidents)", f.Likelihood)
-	if f.Quadrant != "" {
-		lines += fmt.Sprintf("\nQuadrant:   %s  (%s)", f.Quadrant, quadrantGuidance[f.Quadrant])
+	lines := fmt.Sprintf("%-22s %d  (churn, complexity, centrality, incidents)", types.AxisLikelihood, f.Likelihood) + "\n" + impact
+	if l := f.Quadrant.Label(); l != "" {
+		lines += "\n" + l
 	}
 	return lines + "\n"
 }
@@ -393,10 +392,19 @@ var prCheckCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		base, _ := cmd.Flags().GetString("base")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		format, _ := cmd.Flags().GetString("format")
 		shadow, _ := cmd.Flags().GetBool("shadow")
 		failOn, _ := cmd.Flags().GetString("fail-on")
 		authorFlag, _ := cmd.Flags().GetString("author")
 		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
+		approvals, _ := cmd.Flags().GetStringSlice("approvals")
+
+		if jsonOut {
+			format = "json"
+		}
+		if format != "text" && format != "markdown" && format != "json" {
+			return cliError(2, "--format must be one of: text, markdown, json (got: %q)", format)
+		}
 
 		hm, err := loadHeatmap()
 		if err != nil {
@@ -428,7 +436,8 @@ var prCheckCmd = &cobra.Command{
 		// An empty diff scores LOW and still goes through the gate and shadow log.
 		risk := prscore.CalculatePRRisk(0, changes, hm, configuredTiers())
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
-		attachActions(&risk, hm)
+		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
+		attachPRActions(&risk, hm, buildChange(changes, hm, approvals, codeowners.Covers))
 		gateErr := applyGate(&risk, failOn, shadow)
 		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
 			return gateErr
@@ -441,70 +450,31 @@ var prCheckCmd = &cobra.Command{
 				risk.Tier, risk.ChangeRiskLevel, risk.Decision, shadowLogPath)
 		}
 
-		if len(changes) == 0 {
-			if jsonOut {
-				empty := map[string]interface{}{"changes": 0, "tier": risk.Tier}
-				if risk.Decision != "" {
-					empty["decision"], empty["fail_on"], empty["shadow"] = risk.Decision, risk.FailOn, risk.Shadow
-				}
-				if err := printJSON(empty); err != nil {
-					return err
-				}
-				return gateErr
+		switch {
+		case format == "markdown":
+			fmt.Print(prcomment.Render(&risk, hm))
+			return gateErr
+		case format == "json" && len(changes) == 0:
+			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
+			if risk.Decision != "" {
+				empty["decision"], empty["fail_on"], empty["shadow"] = risk.Decision, risk.FailOn, risk.Shadow
 			}
+			if err := printJSON(empty); err != nil {
+				return err
+			}
+			return gateErr
+		case format == "json":
+			if err := printJSON(risk); err != nil {
+				return err
+			}
+			return gateErr
+		case len(changes) == 0:
 			fmt.Println("No changes detected against", base)
 			printDecision(&risk)
 			return gateErr
 		}
 
-		if jsonOut {
-			if err := printJSON(risk); err != nil {
-				return err
-			}
-			return gateErr
-		}
-
-		sort.Slice(risk.FilesChanged, func(i, j int) bool {
-			return risk.FilesChanged[i].HeatScore > risk.FilesChanged[j].HeatScore
-		})
-
-		fmt.Printf("PR Risk: %s %s (score: %d)\n", tierEmoji(risk.Tier), strings.ToUpper(string(risk.Tier)), risk.HeatScore)
-		printPRExtras(&risk)
-
-		for _, fc := range risk.FilesChanged {
-			icon := " "
-			if fc.Tier == "critical" || fc.Tier == "high" {
-				icon = "!"
-			}
-			reason := ""
-			if f, ok := hm.Files[fc.Path]; ok && f.Factors.BlastRadius.Summary != "" {
-				reason = "  " + f.Factors.BlastRadius.Summary
-			}
-			fmt.Printf(" %s %s %3d %-45s +%d/-%d%s\n",
-				icon, tierEmoji(fc.Tier), fc.HeatScore, fc.Path,
-				fc.LinesAdded, fc.LinesDeleted, reason)
-			for _, a := range fc.Actions {
-				fmt.Printf("       • %s\n", a.Text)
-			}
-		}
-
-		if len(risk.CircuitBreakerSignals) > 0 {
-			fmt.Println("\nCircuit Breakers:")
-			for _, s := range risk.CircuitBreakerSignals {
-				fmt.Printf("  - %s\n", s)
-			}
-		}
-
-		req := risk.ReviewRequirements
-		fmt.Printf("\nReview: %d reviewers", req.MinReviewers)
-		if req.RequiresSenior {
-			fmt.Print(" (senior)")
-		}
-		if req.RequiresSecurityScan {
-			fmt.Print(", security scan")
-		}
-		fmt.Printf(", ~%d min\n", req.EstimatedReviewTimeMinutes)
-		printDecision(&risk)
+		printPRText(&risk)
 		return gateErr
 	},
 }
@@ -742,7 +712,7 @@ func agentContext() map[string]interface{} {
 				},
 			},
 			"get": map[string]interface{}{
-				"description": "Get heat score and blast radius reasoning for a file",
+				"description": "Get a file's verdict (Harden now, Protect, Stabilize, Routine), Will it break? and How bad if it breaks? with repo cutoffs, before-merge and backlog actions (JSON: explanation.actions with scope, signal, command; likely_cutoff, impact_threshold)",
 				"args":        "file_path (required)",
 				"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
 				"subcommands": map[string]interface{}{
@@ -794,9 +764,11 @@ func agentContext() map[string]interface{} {
 				"description": "Assess pull request risk",
 				"subcommands": map[string]interface{}{
 					"check": map[string]interface{}{
-						"description": "Score current diff against a base branch",
+						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist with done items, backlog",
 						"flags": map[string]interface{}{
-							"--json":      flagDef("bool", false, "Output as JSON"),
+							"--json":      flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--format":    flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
+							"--approvals": flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
 							"--base":      flagDef("string", "main", "Base branch"),
 							"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
 							"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
@@ -880,7 +852,7 @@ func agentContext() map[string]interface{} {
 				},
 			},
 			"dashboard": map[string]interface{}{
-				"description": "Generate interactive HTML dashboard and open it in the browser",
+				"description": "Generate the static HTML dashboard (action inbox by default; treemap, explorer, architecture, quadrant tabs) and open it in the browser",
 				"flags": map[string]interface{}{
 					"--output":  flagDef("string", "", "Output path (default: .heatmap/dashboard.html)"),
 					"--no-open": flagDef("bool", false, "Don't open in browser"),
@@ -900,7 +872,7 @@ func agentContext() map[string]interface{} {
 				"description": "GitHub integration",
 				"subcommands": map[string]interface{}{
 					"install": map[string]interface{}{
-						"description": "Install GitHub Action for automated PR triage",
+						"description": "Write .github/workflows/heatmap-triage.yml: posts pr check --format markdown as a PR comment, fills --approvals from reviews, fails on Harden now files (--fail-on critical)",
 					},
 				},
 			},
@@ -927,6 +899,12 @@ func agentContext() map[string]interface{} {
 
 // --- github ---
 
+// triageWorkflow is the workflow `github install` writes: the repo's own
+// heatmap-triage.yml, installing highstakes from the module instead of ./.
+//
+//go:embed triage-workflow.yml
+var triageWorkflow string
+
 var githubCmd = &cobra.Command{
 	Use:   "github",
 	Short: "GitHub integration commands",
@@ -941,65 +919,8 @@ var githubInstallCmd = &cobra.Command{
 			return err
 		}
 
-		workflow := `name: Code Heatmap Triage
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  contents: read
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
-
-      - name: Analyze
-        run: highstakes init && highstakes analyze --json
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
-      - name: Check PR
-        run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-
-      - name: Comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
-            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let b = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
-            b += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
-            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
-              b += '| '+(f.tier==='critical'||f.tier==='high'?'⚠️':'✓')+' '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
-            if (risk.circuit_breaker_signals?.length) {
-              b += '\n### Circuit Breakers\n';
-              risk.circuit_breaker_signals.forEach(s => b += '- '+s+'\n');
-            }
-            b += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
-            if (risk.review_requirements.requires_senior) b += ' (senior)';
-            b += ', ~'+risk.review_requirements.estimated_review_time_minutes+' min';
-            b += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
-            const comments = await github.rest.issues.listComments({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number});
-            const existing = comments.data.find(c=>c.body.includes('Code Heatmap:'));
-            const method = existing ? 'updateComment' : 'createComment';
-            const params = {owner:context.repo.owner,repo:context.repo.repo,...(existing?{comment_id:existing.id}:{issue_number:context.issue.number}),body:b};
-            await github.rest.issues[method](params);
-`
-
 		workflowPath := filepath.Join(workflowDir, "heatmap-triage.yml")
-		if err := os.WriteFile(workflowPath, []byte(workflow), 0644); err != nil {
+		if err := os.WriteFile(workflowPath, []byte(triageWorkflow), 0644); err != nil {
 			return err
 		}
 
@@ -1104,6 +1025,8 @@ func init() {
 	prCheckCmd.Flags().Bool("shadow", false, "Log tier and decision to .heatmap/shadow.jsonl but always exit 0 (gate defaults to critical)")
 	prCheckCmd.Flags().String("author", "", "PR author email or handle to exclude from reviewers (default: HEAD commit author)")
 	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")
+	prCheckCmd.Flags().String("format", "text", "Output format: text, markdown (the PR comment), json")
+	prCheckCmd.Flags().StringSlice("approvals", nil, "GitHub logins that approved the PR (CI fills it); ticks owner-review items when a suggested owner approved")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)
 

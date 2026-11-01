@@ -102,3 +102,30 @@ func ptrStr(b *bool) string {
 	}
 	return "false"
 }
+
+func TestIsAdjacentTest(t *testing.T) {
+	tests := []struct {
+		name, test, src string
+		want            bool
+	}{
+		{"go sibling", "pkg/a/foo_test.go", "pkg/a/foo.go", true},
+		{"go other test in the dir", "pkg/a/bar_test.go", "pkg/a/foo.go", false},
+		{"python tests dir", "pkg/tests/test_foo.py", "pkg/foo.py", true},
+		{"ts __tests__", "src/__tests__/foo.test.ts", "src/foo.ts", true},
+		{"java maven mirror", "src/test/x/FooTest.java", "src/main/x/Foo.java", true},
+		{"rust module tests dir", "crates/n/src/proxy/tests/compat.rs", "crates/n/src/proxy.rs", true},
+		{"rust sibling tests file", "crates/n/src/proxy_tests.rs", "crates/n/src/proxy.rs", true},
+		{"rust tests dir naming the stem", "crates/n/src/tests/proxy_edge.rs", "crates/n/src/proxy.rs", true},
+		{"rust module non-test file", "crates/n/src/proxy/egress.rs", "crates/n/src/proxy.rs", false},
+		{"unrelated test", "crates/n/tests/websocket.rs", "crates/n/src/proxy.rs", false},
+		{"source file is not its own test", "pkg/a/foo.go", "pkg/a/foo.go", false},
+		{"root-level go file", "foo_test.go", "foo.go", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsAdjacentTest(tt.test, tt.src); got != tt.want {
+				t.Errorf("IsAdjacentTest(%q, %q) = %v, want %v", tt.test, tt.src, got, tt.want)
+			}
+		})
+	}
+}

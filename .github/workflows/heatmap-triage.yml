@@ -2,6 +2,9 @@ name: HighStakes Triage
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # Re-run on reviews so owner approvals tick the checklist.
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   pull-requests: write
@@ -32,23 +35,33 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          highstakes init
+          if [ ! -f .heatmap/config.yaml ]; then highstakes init; fi
           highstakes analyze
 
+      # Each reviewer's latest review counts; logins whose latest review is an
+      # approval tick the owner-review items of the checklist.
+      - name: Collect approvals
+        id: approvals
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          logins=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq '.[] | [.user.login, .state] | @tsv' \
+            | awk -F'\t' '$2 != "COMMENTED" { last[$1] = $2 } END { for (u in last) if (last[u] == "APPROVED") print u }' \
+            | sort | paste -sd, -)
+          echo "logins=$logins" >> "$GITHUB_OUTPUT"
+
+      # Exit 5 means the PR changes a Harden now file (--fail-on critical).
       - name: Assess PR risk
         id: risk
+        env:
+          BASE: origin/${{ github.base_ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
         run: |
-          highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-          echo "tier=$(jq -r .tier pr-risk.json)" >> $GITHUB_OUTPUT
-          echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
-
-      - name: Gate on risk tier
-        run: |
-          TIER=$(jq -r .tier pr-risk.json)
-          if [ "$TIER" = "critical" ]; then
-            echo "::error::PR touches critical-tier files. Requires senior review before merge."
-            exit 1
-          fi
+          set +e
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
         uses: actions/github-script@v9
@@ -56,60 +69,28 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            if (!fs.existsSync('pr-risk.json')) return;
-            const risk = JSON.parse(fs.readFileSync('pr-risk.json', 'utf8'));
-
-            const tierEmoji = {
-              critical: '🔥🔥🔥',
-              high: '🔥🔥',
-              medium: '🔥',
-              low: '🟢'
-            };
-
-            let body = '## ' + (tierEmoji[risk.tier] || '🟢') + ' HighStakes: ' + risk.tier.toUpperCase() + '\n\n';
-            body += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
-
-            const sorted = risk.files_changed.sort((a, b) => b.heat_score - a.heat_score);
-            for (const f of sorted) {
-              const icon = (f.tier === 'critical' || f.tier === 'high') ? '⚠️' : '✓';
-              body += '| ' + icon + ' ' + f.path + ' | ' + f.heat_score + ' | ' + (tierEmoji[f.tier] || '🟢') + ' ' + f.tier.toUpperCase() + ' | +' + f.lines_added + '/-' + f.lines_deleted + ' |\n';
-            }
-
-            if (risk.circuit_breaker_signals && risk.circuit_breaker_signals.length > 0) {
-              body += '\n### ⚠️ Circuit Breaker Signals\n';
-              for (const s of risk.circuit_breaker_signals) {
-                body += '- ' + s + '\n';
-              }
-            }
-
-            body += '\n### Review Requirements\n';
-            body += '- **Reviewers**: ' + risk.review_requirements.min_reviewers;
-            if (risk.review_requirements.requires_senior) body += ' (senior)';
-            body += '\n';
-            if (risk.review_requirements.requires_security_scan) body += '- **Security Scan**: Required\n';
-            body += '- **Auto-Merge**: ' + (risk.review_requirements.auto_merge ? '✅ Allowed' : '❌ Blocked') + '\n';
-            body += '- **Est. Review Time**: ' + risk.review_requirements.estimated_review_time_minutes + ' min\n';
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const existing = comments.data.find(c => c.body.includes('HighStakes:'));
-
+            if (!fs.existsSync('pr-comment.md')) return;
+            const body = fs.readFileSync('pr-comment.md', 'utf8');
+            if (!body.trim()) return;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            // The marker is written by `highstakes pr check --format markdown`.
+            const existing = comments.find(c => c.body.includes('<!-- highstakes-triage -->') || c.body.includes('HighStakes:'));
             if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: body
-              });
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+      - name: Gate on Harden now files
+        if: steps.risk.outputs.code != '0'
+        env:
+          CODE: ${{ steps.risk.outputs.code }}
+        run: |
+          if [ "$CODE" = "5" ]; then
+            echo "::error::This PR changes Harden now files. Work through 'Do before merge' in the HighStakes comment."
+          else
+            echo "::error::highstakes pr check failed (exit $CODE)."
+          fi
+          exit 1

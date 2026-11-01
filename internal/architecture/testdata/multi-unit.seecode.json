@@ -8,7 +8,7 @@
     {
       "id": "sup",
       "label": "sup",
-      "sub": "impact 95 · 3 fragile-critical",
+      "sub": "impact 95 · 3 Harden now",
       "tag": "RUST",
       "focal": true,
       "row": 0,
@@ -18,7 +18,7 @@
     {
       "id": "gw",
       "label": "gw",
-      "sub": "impact 95 · 2 fragile-critical",
+      "sub": "impact 95 · 2 Harden now",
       "tag": "RUST",
       "row": 1,
       "col": 3,
@@ -27,7 +27,7 @@
     {
       "id": "sbx",
       "label": "sbx",
-      "sub": "impact 95 · 2 fragile-critical",
+      "sub": "impact 95 · 2 Harden now",
       "tag": "RUST",
       "row": 2,
       "col": 0,
@@ -36,7 +36,7 @@
     {
       "id": "cli",
       "label": "cli",
-      "sub": "impact 95 · 1 fragile-critical",
+      "sub": "impact 95 · 1 Harden now",
       "tag": "RUST",
       "row": 2,
       "col": 6
@@ -44,7 +44,7 @@
     {
       "id": "drv-k8s",
       "label": "drv-k8s",
-      "sub": "impact 95 · 1 fragile-critical",
+      "sub": "impact 95 · 1 Harden now",
       "tag": "RUST",
       "row": 2,
       "col": 2
@@ -52,7 +52,7 @@
     {
       "id": "drv-vm",
       "label": "drv-vm",
-      "sub": "impact 95 · 1 fragile-critical",
+      "sub": "impact 95 · 1 Harden now",
       "tag": "RUST",
       "row": 2,
       "col": 4
@@ -160,67 +160,67 @@
       "id": "sup",
       "file": "crates/sup/src/main.rs",
       "line": 3,
-      "note": "fragile-critical: Add tests for main.rs"
+      "note": "Harden now: Add tests for main.rs"
     },
     {
       "id": "sup",
       "file": "crates/sup/src/vm.rs",
       "line": 3,
-      "note": "low: Add tests for vm.rs"
+      "note": "Routine: Add tests for vm.rs"
     },
     {
       "id": "gw",
       "file": "crates/gw/src/grpc.rs",
       "line": 3,
-      "note": "fragile-critical: Add tests for grpc.rs"
+      "note": "Harden now: Add tests for grpc.rs"
     },
     {
       "id": "gw",
       "file": "crates/gw/src/auth.rs",
       "line": 3,
-      "note": "protect: Add tests for auth.rs"
+      "note": "Protect: Add tests for auth.rs"
     },
     {
       "id": "gw",
       "file": "crates/gw/src/main.rs",
       "line": 3,
-      "note": "protect: Add tests for main.rs"
+      "note": "Protect: Add tests for main.rs"
     },
     {
       "id": "sbx",
       "file": "crates/sbx/src/main.rs",
       "line": 3,
-      "note": "fragile-critical: Add tests for main.rs"
+      "note": "Harden now: Add tests for main.rs"
     },
     {
       "id": "cli",
       "file": "crates/cli/src/main.rs",
       "line": 3,
-      "note": "low: Add tests for main.rs"
+      "note": "Routine: Add tests for main.rs"
     },
     {
       "id": "drv-k8s",
       "file": "crates/drv-k8s/src/main.rs",
       "line": 3,
-      "note": "protect: Add tests for main.rs"
+      "note": "Protect: Add tests for main.rs"
     },
     {
       "id": "drv-vm",
       "file": "crates/drv-vm/src/main.rs",
       "line": 3,
-      "note": "low: Add tests for main.rs"
+      "note": "Routine: Add tests for main.rs"
     },
     {
       "id": "lib-core",
       "file": "crates/core/src/policy.rs",
       "line": 3,
-      "note": "fragile-critical: Add tests for policy.rs"
+      "note": "Harden now: Add tests for policy.rs"
     },
     {
       "id": "lib-core",
       "file": "crates/core/src/lib.rs",
       "line": 3,
-      "note": "protect: Add tests for lib.rs"
+      "note": "Protect: Add tests for lib.rs"
     }
   ]
 }
