@@ -75,6 +75,23 @@ func TestRender_HardenGolden(t *testing.T) {
 	golden(t, "harden", Render(risk, hm))
 }
 
+// TestRender_OverflowGolden: a sixth Harden now file gets its own
+// "needs action" row and keeps its details; only routine files are Routine.
+func TestRender_OverflowGolden(t *testing.T) {
+	risk := &types.PRRisk{Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78}
+	for i := 0; i < 6; i++ {
+		risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: fmt.Sprintf("core/h%d.go", i), Tier: types.TierCritical,
+			Likelihood: 60 - i, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical})
+	}
+	for _, p := range []string{"ui/a.go", "ui/b.go"} {
+		risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: p, Tier: types.TierLow,
+			Likelihood: 3, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantLow})
+	}
+	risk.Checklist = []types.Action{{ID: "senior-review", Text: "Get sign-off from a senior owner", Scope: types.ScopeBeforeMerge,
+		Signal: "Harden now", Files: []string{"core/h0.go", "core/h5.go"}}}
+	golden(t, "overflow", Render(risk, &types.Heatmap{}))
+}
+
 func TestRender_RoutineGolden(t *testing.T) {
 	risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
 		FilesChanged: []types.FileChange{
@@ -85,7 +102,7 @@ func TestRender_RoutineGolden(t *testing.T) {
 }
 
 func TestRender_Rules(t *testing.T) {
-	t.Run("at most five non-routine rows, the rest collapsed", func(t *testing.T) {
+	t.Run("at most five non-routine rows, overflow kept apart from routine", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78}
 		for i := 0; i < 7; i++ {
 			risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: fmt.Sprintf("s%d.go", i), Tier: types.TierMedium,
@@ -96,8 +113,14 @@ func TestRender_Rules(t *testing.T) {
 		if n := strings.Count(out, "| Stabilize |"); n != 5 {
 			t.Errorf("%d Stabilize rows, want 5:\n%s", n, out)
 		}
-		if !strings.Contains(out, "| 3 other files | low | low | Routine |") {
-			t.Errorf("overflow and routine files not collapsed into one row:\n%s", out)
+		if !strings.Contains(out, "| 2 more files need action |  |  | see details |") {
+			t.Errorf("overflow files not shown as their own row:\n%s", out)
+		}
+		if !strings.Contains(out, "| 1 other file | low | low | Routine |") {
+			t.Errorf("routine row should hold only routine files:\n%s", out)
+		}
+		if !strings.Contains(out, "**`s0.go`** (Stabilize)") {
+			t.Errorf("overflow files dropped from the details:\n%s", out)
 		}
 		if !strings.Contains(out, "`s6.go`") || strings.Contains(out, "`s0.go` |") {
 			t.Errorf("rows not ordered by score:\n%s", out)

@@ -20,7 +20,7 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
       - name: Assess PR risk
         id: risk
         env:
-          BASE: origin/${{ github.base_ref }}
+          BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
         run: |
           set +e

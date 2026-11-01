@@ -18,14 +18,16 @@ const (
 // Change is what pr check knows about the PR. Whether exported symbols
 // changed is not detected (it would need a per-language diff parser).
 type Change struct {
-	Paths      []string          // every changed path
+	Paths      []string          // every changed path (renames as old and new path)
+	Deleted    map[string]bool   // paths the PR deletes, including a rename's old path
 	Lines      int               // lines added plus deleted
 	Components int               // distinct components among changed non-test files
 	Approvals  []string          // GitHub logins that approved the PR (from CI)
 	Codeowned  func(string) bool // CODEOWNERS at HEAD covers a path; nil: nothing
 }
 
-// testActions are satisfied by adding or changing a test next to the file.
+// testActions are satisfied by adding or changing a test next to the file;
+// deleting one does not count.
 var testActions = map[string]bool{"regression-tests": true, "no-tests": true, "stable-interface": true}
 
 // ForPR returns a copy of f's actions for this PR: the stored ones plus the
@@ -72,7 +74,7 @@ func satisfied(a types.Action, file string, c Change) bool {
 	switch {
 	case testActions[a.ID]:
 		for _, p := range c.Paths {
-			if analyzer.IsAdjacentTest(p, file) {
+			if !c.Deleted[p] && analyzer.IsAdjacentTest(p, file) {
 				return true
 			}
 		}

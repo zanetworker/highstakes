@@ -2,10 +2,12 @@ package dashboard
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/types"
+	"github.com/zanetworker/highstakes/pkg/heatmap"
 )
 
 func inboxFile(path string, q types.Quadrant, impact, likelihood int, acts ...types.Action) *types.FileHeat {
@@ -183,4 +185,24 @@ func TestBuildInbox_BacklogGroups(t *testing.T) {
 			t.Errorf("backlog = %+v", in.Backlog)
 		}
 	})
+}
+
+// TestBuildInbox_LegacyHeatmap: actions stored before scopes existed still
+// fill both inbox sections once loaded.
+func TestBuildInbox_LegacyHeatmap(t *testing.T) {
+	hm, err := heatmap.Load(filepath.Join("..", "..", "pkg", "heatmap", "testdata", "legacy-heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := buildInbox(hm)
+	if len(in.BeforeMerge) != 1 || len(in.BeforeMerge[0].Steps) != 2 {
+		t.Errorf("before merge = %+v, want one card with 2 steps", in.BeforeMerge)
+	}
+	var kinds []string
+	for _, g := range in.Backlog {
+		kinds = append(kinds, g.Kind)
+	}
+	if len(kinds) != 2 {
+		t.Errorf("backlog kinds = %v, want codeowners and split", kinds)
+	}
 }

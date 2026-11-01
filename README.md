@@ -365,7 +365,7 @@ highstakes pr check --fail-on critical                  # Exit 5 when the PR cha
 highstakes pr check --shadow                            # Log the decision, never fail
 ```
 
-`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine), then one checklist of before-merge items across the touched files. It ticks the items the PR already satisfies: a test next to a risky file was added or changed ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine), then one checklist of before-merge items across the touched files. It ticks the items the PR already satisfies: a test next to a risky file was added or changed, not deleted ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
 
 ### Review Policy
 
@@ -417,7 +417,7 @@ Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.y
       - name: Assess PR risk
         id: risk
         env:
-          BASE: origin/${{ github.base_ref }}
+          BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
         run: |
           set +e

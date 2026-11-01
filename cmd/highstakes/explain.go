@@ -103,10 +103,13 @@ func hasScope(as []types.Action, scope string) bool {
 // buildChange collects what explain.ForPR needs to know about the PR.
 // codeowned (may be nil) reports CODEOWNERS coverage at HEAD.
 func buildChange(changes []prscore.FileChange, hm *types.Heatmap, approvals []string, codeowned func(string) bool) explain.Change {
-	c := explain.Change{Approvals: approvals, Codeowned: codeowned}
+	c := explain.Change{Approvals: approvals, Codeowned: codeowned, Deleted: map[string]bool{}}
 	components := map[string]bool{}
 	for _, ch := range changes {
 		c.Paths = append(c.Paths, ch.Path)
+		if ch.Deleted {
+			c.Deleted[ch.Path] = true
+		}
 		c.Lines += ch.LinesAdded + ch.LinesDeleted
 		if tour.IsTestFile(ch.Path) {
 			continue

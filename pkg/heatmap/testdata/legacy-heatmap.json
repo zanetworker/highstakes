@@ -1,0 +1,28 @@
+{
+  "version": "1",
+  "metadata": {"repo_path": ".", "analyzed_at": "2026-09-01T00:00:00Z", "commit_sha": "abc123"},
+  "files": {
+    "core/a.go": {
+      "path": "core/a.go",
+      "tier": "critical",
+      "heat_score": 90,
+      "likelihood": 60,
+      "impact": 90,
+      "impact_assessed": true,
+      "quadrant": "fragile-critical",
+      "explanation": {
+        "verdict": "Harden now",
+        "impact_high": true,
+        "likely": true,
+        "actions": [
+          {"id": "senior-review", "text": "Get sign-off from a senior owner", "signal": "Harden now", "done": false},
+          {"id": "retired-rule", "text": "An action from an older release", "done": false},
+          {"id": "codeowners", "text": "Add a CODEOWNERS line", "signal": "not covered by CODEOWNERS", "command": "/core/a.go @ana", "done": false},
+          {"id": "split", "text": "Split it into smaller files", "scope": "backlog", "done": false}
+        ]
+      }
+    }
+  },
+  "incidents": [],
+  "annotations": {}
+}

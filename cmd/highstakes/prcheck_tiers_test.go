@@ -117,10 +117,12 @@ func TestPRCheck_EmptyDiffStillGates(t *testing.T) {
 	}
 }
 
-// TestPRCheck_MarkdownChecklist: --format markdown renders the PR comment;
-// an adjacent test in the diff and an owner approval tick their items.
-func TestPRCheck_MarkdownChecklist(t *testing.T) {
-	dir := writeHeatmap(t)
+// checklistRepo is a git repo whose main has core/a.go (Harden now, with
+// sign-off, regression-test and CODEOWNERS actions) plus the extra files,
+// checked out on branch feature. write writes a file in it.
+func checklistRepo(t *testing.T, extra ...string) (dir string, write func(rel, s string)) {
+	t.Helper()
+	dir = writeHeatmap(t)
 	hm, err := heatmap.Load(filepath.Join(dir, ".heatmap", "heatmap.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -135,15 +137,28 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	if err := heatmap.Save(hm, filepath.Join(dir, ".heatmap", "heatmap.json")); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, dir, "init", "-q", "-b", "main")
-	gitIn(t, dir, "add", "core/a.go")
-	gitIn(t, dir, "commit", "-q", "-m", "base")
-	gitIn(t, dir, "checkout", "-q", "-b", "feature")
-	write := func(rel, s string) {
+	write = func(rel, s string) {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, rel), []byte(s), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	for _, rel := range extra {
+		write(rel, "package core\n\nfunc TestX() {}\n")
+	}
+	gitIn(t, dir, append([]string{"add", "core/a.go"}, extra...)...)
+	gitIn(t, dir, "commit", "-q", "-m", "base")
+	gitIn(t, dir, "checkout", "-q", "-b", "feature")
+	return dir, write
+}
+
+// TestPRCheck_MarkdownChecklist: --format markdown renders the PR comment;
+// an adjacent test in the diff and an owner approval tick their items.
+func TestPRCheck_MarkdownChecklist(t *testing.T) {
+	dir, write := checklistRepo(t)
 	write("core/a.go", "package core\n\nfunc A() { _ = 1 }\n")
 	gitIn(t, dir, "commit", "-q", "-am", "change a")
 	base := []string{"pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=", "--author=t@x.com", "--reviewers=0"}
@@ -175,5 +190,44 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	var ee *exitError
 	if !errors.As(err, &ee) || ee.code != 2 || !strings.Contains(ee.msg, "text, markdown, json") {
 		t.Errorf("invalid --format: err = %v, want exit 2 listing valid values", err)
+	}
+}
+
+// TestPRCheck_DeletedTestDoesNotTick: deleting the adjacent test leaves
+// "add tests" open; a test renamed next to the file ticks it at its new path.
+func TestPRCheck_DeletedTestDoesNotTick(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra []string
+		edit  func(t *testing.T, dir string)
+		want  string
+	}{
+		{name: "deleted adjacent test", extra: []string{"core/a_test.go"},
+			edit: func(t *testing.T, dir string) { gitIn(t, dir, "rm", "-q", "core/a_test.go") },
+			want: "- [ ] Add regression tests"},
+		{name: "test renamed away from the file", extra: []string{"core/a_test.go"},
+			edit: func(t *testing.T, dir string) { gitIn(t, dir, "mv", "core/a_test.go", "other/a_test.go") },
+			want: "- [ ] Add regression tests"},
+		{name: "test renamed next to the file", extra: []string{"other/a_test.go"},
+			edit: func(t *testing.T, dir string) { gitIn(t, dir, "mv", "other/a_test.go", "core/a_test.go") },
+			want: "- [x] Add regression tests"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, write := checklistRepo(t, tt.extra...)
+			if err := os.MkdirAll(filepath.Join(dir, "other"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			tt.edit(t, dir)
+			write("core/a.go", "package core\n\nfunc A() { _ = 1 }\n")
+			gitIn(t, dir, "commit", "-q", "-am", "change a, move tests")
+			out, err := runCLI(t, dir, "pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=", "--author=t@x.com", "--reviewers=0")
+			if err != nil {
+				t.Fatalf("pr check: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Errorf("missing %q in:\n%s", tt.want, out)
+			}
+		})
 	}
 }

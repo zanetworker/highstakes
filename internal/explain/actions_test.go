@@ -257,3 +257,21 @@ func TestShellQuote(t *testing.T) {
 		})
 	}
 }
+
+func TestScopeOf(t *testing.T) {
+	tests := []struct{ id, want string }{
+		{"senior-review", types.ScopeBeforeMerge},
+		{"no-auto-merge", types.ScopeBeforeMerge},
+		{"codeowners", types.ScopeBacklog},
+		{"ownership-issue", types.ScopeBacklog},
+		{"retired-rule", types.ScopeBeforeMerge},
+		{"", types.ScopeBeforeMerge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			if got := ScopeOf(tt.id); got != tt.want {
+				t.Errorf("ScopeOf(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}

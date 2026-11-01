@@ -91,6 +91,7 @@ type FileChange struct {
 	LinesAdded   int
 	LinesDeleted int
 	IsNew        bool
+	Deleted      bool // the PR deletes the file (a rename counts as delete plus add)
 }
 
 // checkCircuitBreakers returns warning signals for the PR

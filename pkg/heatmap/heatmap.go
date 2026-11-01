@@ -380,6 +380,18 @@ func Load(path string) (*types.Heatmap, error) {
 	if err := json.Unmarshal(data, &heatmap); err != nil {
 		return nil, fmt.Errorf("unmarshal JSON: %w", err)
 	}
+	// Older heatmaps stored actions without a scope; scope filters would
+	// hide them all.
+	for _, f := range heatmap.Files {
+		if f == nil || f.Explanation == nil {
+			continue
+		}
+		for i, a := range f.Explanation.Actions {
+			if a.Scope == "" {
+				f.Explanation.Actions[i].Scope = explain.ScopeOf(a.ID)
+			}
+		}
+	}
 
 	return &heatmap, nil
 }

@@ -314,7 +314,7 @@ highstakes pr check [flags]
 | `--author` | HEAD commit author | Email or handle excluded from suggested reviewers |
 | `--reviewers` | `3` | Max suggested reviewers; `0` skips the git history lookup |
 
-Uses `git diff --numstat` to identify changed files, then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
+Uses `git diff --no-renames --numstat` to identify changed files (a rename is its old path deleted plus its new path added), then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
 
 A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a Harden now file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW, except dependency manifests and lock files (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...), which inherit heat and count as config/infra changes in change risk.
 
@@ -326,13 +326,13 @@ The verdict is the posture of the most severe changed file: `Harden now`, `Prote
 
 | Item | Done when |
 |------|-----------|
-| `regression-tests`, `no-tests`, `stable-interface` | the PR adds or changes a test next to the file: a conventional test path (`foo_test.go`, `test_foo.py`, `foo.test.ts`, `FooTest.java`, ...), a test under the file's module directory (Rust `src/proxy/tests/x.rs` for `src/proxy.rs`), `<stem>_*` test files beside it, or a `tests/` sibling naming the file. Tests added inside a Rust file's own `#[cfg(test)]` module are not detected |
+| `regression-tests`, `no-tests`, `stable-interface` | the PR adds or changes a test next to the file (deleting one does not count; a renamed test counts at its new path): a conventional test path (`foo_test.go`, `test_foo.py`, `foo.test.ts`, `FooTest.java`, ...), a test under the file's module directory (Rust `src/proxy/tests/x.rs` for `src/proxy.rs`), `<stem>_*` test files beside it, or a `tests/` sibling naming the file. Tests added inside a Rust file's own `#[cfg(test)]` module are not detected |
 | `codeowners` | the CODEOWNERS file at HEAD (`.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`, the first found) covers the path, last matching rule with owners wins |
 | `senior-review`, `owner-review` | a login in `--approvals` matches one of the item's owners (case and `@` ignored) |
 
 Harden now files get one change-dependent item, `smaller-pr` ("Ask for a smaller PR"), when the diff changes more than 500 lines or touches non-test files in 3 or more components. Whether exported symbols changed is not detected.
 
-`--format markdown` renders the PR comment: a `<!-- highstakes-triage -->` marker, the verdict heading (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize`, `✅ Routine`), one sentence naming the riskiest file(s), the checklist (`[x]` done, `[ ]` open), a table of at most five non-routine files (File, Will it break?, How bad?, Action) with the rest collapsed into one Routine row, and a folded **Why these actions?** block with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, backlog items with their commands and the gate decision.
+`--format markdown` renders the PR comment: a `<!-- highstakes-triage -->` marker, the verdict heading (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize`, `✅ Routine`), one sentence naming the riskiest file(s), the checklist (`[x]` done, `[ ]` open), a table of at most five non-routine files (File, Will it break?, How bad?, Action), then one `N more files need action` row for any further non-routine files and one Routine row for the routine ones, and a folded **Why these actions?** block (covering every non-routine file) with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, backlog items with their commands and the gate decision.
 
 JSON adds `verdict`, `checklist` and `backlog` (actions with `id`, `text`, `scope`, `signal`, `done`, `files`, and `command` for backlog items), `likely_cutoff` and `impact_threshold`; each `files_changed[]` entry adds `likelihood`, `impact`, `impact_assessed`, `quadrant`, `quadrant_label`, and `actions` (its before-merge items with `done`).
 
@@ -342,7 +342,7 @@ An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low",
 
 ### Two-axis risk
 
-The tier (the most severe tier among touched files) and importance answer "how important is the code this PR touches". A second, independent number answers "how risky is this change itself". Both appear in text output and in `--json`:
+The tier (the most severe tier among touched files) and importance answer "how important is the code this PR touches". A second, independent number answers "how risky is this change itself". Text output shows the verdict and change risk with its factors; `--json` has all of these:
 
 | JSON field | Meaning |
 |------------|---------|
@@ -383,7 +383,7 @@ The block sits between `# BEGIN highstakes` and `# END highstakes` markers. `--w
 
 JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_score`, `files`, `owners`), `unrepresentable` (hot paths left as comments), `block` (the text), `written` (path, empty unless `--write`).
 
-**Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read, or the GitHub request fails for a reason other than rate limiting (rate limits give partial results instead). **Exit code 4** if there is no heatmap.
+**Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read. **Exit code 4** if there is no heatmap.
 
 ## highstakes create policy
 
@@ -589,7 +589,7 @@ Caveats: labels follow each project's habits (some never label PRs, so bug fixes
 
 It also prints how many files were rated, how many are in the heatmap, and the rated paths it could not find. Under 10 rated files in the heatmap it prints a `WARNING` (`too_few` in JSON). JSON fields: `rated`, `matched`, `unmatched`, `positives`, `base_rate`, `k`, `too_few`, `signals` (each `name`, `available`, `note`, `files`, `precision_at_k`, `lift`, `spearman`).
 
-**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` or `--source` value (the error lists the valid ones), `--events` with `--source prs`, `--repo` without `--source prs` or not `owner/name`, no `--repo` and no GitHub `origin` remote, `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read. **Exit code 4** if no heatmap or labels file exists.
+**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` or `--source` value (the error lists the valid ones), `--events` with `--source prs`, `--repo` without `--source prs` or not `owner/name`, no `--repo` and no GitHub `origin` remote, `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read, or, with `--source prs`, the GitHub request fails for a reason other than rate limiting (rate limits give partial results instead). **Exit code 4** if no heatmap or labels file exists.
 
 ## Exit Codes
 

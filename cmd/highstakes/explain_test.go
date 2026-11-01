@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -144,5 +146,31 @@ func TestBuildChange_Components(t *testing.T) {
 				t.Errorf("components = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestGet_LegacyHeatmapShowsActions: a heatmap.json written before actions
+// had a scope still lists them under both headings after an upgrade.
+func TestGet_LegacyHeatmapShowsActions(t *testing.T) {
+	dir := t.TempDir()
+	b, err := os.ReadFile(filepath.Join("..", "..", "pkg", "heatmap", "testdata", "legacy-heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".heatmap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".heatmap", "heatmap.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, dir, "get", "core/a.go")
+	if err != nil {
+		t.Fatalf("get: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Do before the next merge", "Get sign-off from a senior owner", "An action from an older release",
+		"Put on the backlog", "Add a CODEOWNERS line"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

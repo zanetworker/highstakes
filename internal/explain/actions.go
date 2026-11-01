@@ -129,6 +129,17 @@ var rules = []rule{
 	}},
 }
 
+// ScopeOf is the scope of the rule with this id, else before_merge. It
+// fills in actions stored by releases that did not record a scope.
+func ScopeOf(id string) string {
+	for _, r := range rules {
+		if r.id == id {
+			return r.scope
+		}
+	}
+	return beforeMerge
+}
+
 // actions applies the rule table. Test files are routine.
 func actions(s signals) []types.Action {
 	q := s.f.Quadrant

@@ -23,12 +23,14 @@ func TestGithubInstall_WritesTriageWorkflow(t *testing.T) {
 		`--format markdown --fail-on critical --approvals "$APPROVALS"`,
 		"<!-- highstakes-triage -->",
 		"pull_request_review:",
+		"BASE: origin/${{ github.event.pull_request.base.ref }}",
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("workflow missing %q", want)
 		}
 	}
-	for _, stale := range []string{"heat_score", "cmd/heatmap@", "estimated_review_time"} {
+	// github.base_ref and head_ref are empty on pull_request_review events.
+	for _, stale := range []string{"heat_score", "cmd/heatmap@", "estimated_review_time", "github.base_ref", "github.head_ref"} {
 		if strings.Contains(wf, stale) {
 			t.Errorf("workflow still contains %q", stale)
 		}

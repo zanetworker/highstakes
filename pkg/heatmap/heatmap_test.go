@@ -162,6 +162,33 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+// TestLoad_LegacyActionsGetScope: a heatmap.json from before actions had a
+// scope loads with each action scoped by its rule; unknown ids default to
+// before_merge and a stored scope is kept.
+func TestLoad_LegacyActionsGetScope(t *testing.T) {
+	hm, err := Load(filepath.Join("testdata", "legacy-heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"senior-review": types.ScopeBeforeMerge,
+		"retired-rule":  types.ScopeBeforeMerge,
+		"codeowners":    types.ScopeBacklog,
+		"split":         types.ScopeBacklog,
+	}
+	acts := hm.Files["core/a.go"].Explanation.Actions
+	if len(acts) != len(want) {
+		t.Fatalf("got %d actions, want %d", len(acts), len(want))
+	}
+	for _, a := range acts {
+		t.Run(a.ID, func(t *testing.T) {
+			if a.Scope != want[a.ID] {
+				t.Errorf("scope = %q, want %q", a.Scope, want[a.ID])
+			}
+		})
+	}
+}
+
 func TestLoad_MissingFile(t *testing.T) {
 	_, err := Load("/nonexistent/heatmap.json")
 	if err == nil {

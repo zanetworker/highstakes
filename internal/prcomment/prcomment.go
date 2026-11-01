@@ -14,7 +14,8 @@ import (
 // Marker starts every comment so the workflow can find and update its own.
 const Marker = "<!-- highstakes-triage -->"
 
-// maxRows is how many non-routine files the table lists.
+// maxRows is how many non-routine files the table lists; the rest get one
+// "need action" row and stay in the details.
 const maxRows = 5
 
 var headings = map[string]string{
@@ -116,14 +117,24 @@ func summary(verdict string, files []types.FileChange, hm *types.Heatmap) string
 
 func writeTable(b *strings.Builder, files []types.FileChange, likelyCutoff, impactCutoff int) {
 	b.WriteString("| File | Will it break? | How bad? | Action |\n|---|---|---|---|\n")
-	shown, rest := 0, 0
+	shown, more, rest := 0, 0, 0
 	for _, fc := range files {
-		if posture(fc) == "Routine" || shown == maxRows {
+		switch {
+		case posture(fc) == "Routine":
 			rest++
-			continue
+		case shown == maxRows:
+			more++
+		default:
+			shown++
+			fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", cell(fc.Path), breaks(fc, likelyCutoff), howBad(fc, impactCutoff), posture(fc))
 		}
-		shown++
-		fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", cell(fc.Path), breaks(fc, likelyCutoff), howBad(fc, impactCutoff), posture(fc))
+	}
+	if more > 0 {
+		need := "files need"
+		if more == 1 {
+			need = "file needs"
+		}
+		fmt.Fprintf(b, "| %d more %s action |  |  | see details |\n", more, need)
 	}
 	switch {
 	case rest > 0 && shown > 0:
@@ -155,12 +166,10 @@ func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChan
 	b.WriteString("<details><summary>Why these actions?</summary>\n\n")
 	fmt.Fprintf(b, "%s %s Repo cutoffs: will it break %d, how bad %d (a score at or above its cutoff is high).\n\n",
 		types.AxisNote, types.AxisEvidence, risk.LikelyCutoff, risk.ImpactThreshold)
-	shown := 0
 	for _, fc := range files {
-		if posture(fc) == "Routine" || shown == maxRows {
+		if posture(fc) == "Routine" {
 			continue
 		}
-		shown++
 		fmt.Fprintf(b, "**`%s`** (%s)\n", fc.Path, posture(fc))
 		if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil {
 			if r := f.Explanation.LikelihoodReasons; len(r) > 0 {

@@ -28,20 +28,20 @@ highstakes dashboard
 2. **Git analysis** measures change frequency and contributor patterns
 3. **LLM assessment** reads each file and asks "if this breaks, what's the damage?"
 4. **Scoring** gives every file two 0-100 scores: likelihood of needing fixes (churn, complexity) and impact if it breaks (LLM blast radius)
-5. **Tiering** places each file in the likelihood x impact quadrant and maps it to concrete review requirements
+5. **Postures** place each file in the likelihood x impact quadrant and give it actions: what to do before the next merge, and what to put on the backlog
 
-| Tier | Quadrant | Review |
-|------|-------|--------|
-| CRITICAL | Likely and impactful | 2 senior reviewers + security scan |
-| HIGH | Impactful, stable | 2 reviewers + integration tests |
-| MEDIUM | Likely, low impact | 1 reviewer |
-| LOW | Neither | Auto-merge safe |
+| Posture (tier) | Quadrant | Before merge | Backlog |
+|------|-------|--------|--------|
+| Harden now (CRITICAL) | Likely and impactful | Senior owner sign-off, regression and contract tests, a smaller PR when the change is large, auto-merge off | Split oversized files, add a CODEOWNERS line, document invariants |
+| Protect (HIGH) | Impactful, stable | Owner review, tests when none sit next to the file, contract tests, block auto-merge | Add a CODEOWNERS line, open a test-gap issue |
+| Stabilize (MEDIUM) | Likely, low impact | Regression tests when fixes recur, refactor what you touch, a second reviewer for single-owner files; never blocks | Issues to cut complexity or spread ownership |
+| Routine (LOW) | Neither | Normal review; auto-merge allowed by policy | Nothing |
 
 Likely means the top 20% of the repo by likelihood; impactful means impact in the top 20% of the repo's assessed files, and never below 61. Without an LLM, tiers come from the heat score (86, 61 and 31 thresholds).
 
 ## Three ways to see it
 
-**Dashboard** with treemap, file explorer, architecture and quadrant views:
+**Dashboard** that opens on the **Action inbox** (one before-merge card per Harden now or Protect file, backlog fixes grouped by kind), with treemap, explorer, architecture and quadrant views behind tabs:
 
 ```sh
 highstakes dashboard

@@ -411,12 +411,14 @@ var prCheckCmd = &cobra.Command{
 			return err
 		}
 
-		out, err := exec.Command("git", "diff", "--numstat", base+"...HEAD").Output()
+		// --no-renames: a rename is its old path deleted plus its new path added,
+		// so every path is a real one (no "a => b" forms).
+		out, err := exec.Command("git", "diff", "--no-renames", "--numstat", base+"...HEAD").Output()
 		if err != nil {
 			return cliError(3, "git diff failed against base %q: %v. Valid bases: main, origin/main, HEAD~N", base, err)
 		}
 
-		added := addedFiles(base)
+		added, removed := diffPaths(base, "A"), diffPaths(base, "D")
 		var changes []prscore.FileChange
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if line == "" {
@@ -429,7 +431,7 @@ var prCheckCmd = &cobra.Command{
 			linesAdded, _ := strconv.Atoi(parts[0])
 			deleted, _ := strconv.Atoi(parts[1])
 			changes = append(changes, prscore.FileChange{
-				Path: parts[2], LinesAdded: linesAdded, LinesDeleted: deleted, IsNew: added[parts[2]],
+				Path: parts[2], LinesAdded: linesAdded, LinesDeleted: deleted, IsNew: added[parts[2]], Deleted: removed[parts[2]],
 			})
 		}
 

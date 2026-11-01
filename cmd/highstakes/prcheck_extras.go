@@ -22,20 +22,22 @@ const exitBlocked = 5
 // shadowLogPath collects `pr check --shadow` decisions for later calibration.
 var shadowLogPath = filepath.Join(".heatmap", "shadow.jsonl")
 
-// addedFiles returns paths added between base and HEAD. Errors yield an empty set:
-// the caller already validated the base with git diff --numstat.
-func addedFiles(base string) map[string]bool {
-	added := map[string]bool{}
-	out, err := exec.Command("git", "diff", "--diff-filter=A", "--name-only", base+"...HEAD").Output()
+// diffPaths returns paths between base and HEAD with the given
+// --diff-filter status (A added, D deleted). Renames count as a delete plus
+// an add, matching pr check's --no-renames numstat. Errors yield an empty
+// set: the caller already validated the base with git diff --numstat.
+func diffPaths(base, filter string) map[string]bool {
+	paths := map[string]bool{}
+	out, err := exec.Command("git", "diff", "--no-renames", "--diff-filter="+filter, "--name-only", base+"...HEAD").Output()
 	if err != nil {
-		return added
+		return paths
 	}
 	for _, p := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if p != "" {
-			added[p] = true
+			paths[p] = true
 		}
 	}
-	return added
+	return paths
 }
 
 // prAuthor returns the --author flag, else the HEAD commit's (mailmap-aware) author email.
