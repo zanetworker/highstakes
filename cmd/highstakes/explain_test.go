@@ -277,3 +277,23 @@ func TestAttachPRActions_MissingExplanationStillBlocks(t *testing.T) {
 		t.Errorf("checklist = %v: missing action data must not read as all done", got)
 	}
 }
+
+func TestAttachPRActions_BlockingFileAlwaysHasSafeguards(t *testing.T) {
+	// A scored Harden now file whose explanation has only a test-gap action
+	// (e.g. impact not AI-assessed): review and auto-merge items are added.
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"core/h.go": {Path: "core/h.go", Explanation: &types.Explanation{Actions: []types.Action{
+			{ID: "assess-impact", Scope: types.ScopeBacklog, Text: "Run analyze with an LLM"},
+		}}},
+	}}
+	risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/h.go", Tier: types.TierCritical}}}
+	c := buildChange([]prscore.FileChange{{Path: "core/h.go", LinesAdded: 5}}, hm, nil, nil)
+	attachPRActions(risk, hm, c)
+	var got []string
+	for _, a := range risk.Checklist {
+		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+	}
+	if strings.Join(got, ",") != "senior-review=open,no-auto-merge=open" {
+		t.Errorf("checklist = %v: a blocking file must always need a review and auto-merge off", got)
+	}
+}

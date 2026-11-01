@@ -222,14 +222,14 @@ func TestPRCheck_GateUnblocksWhenItemsDone(t *testing.T) {
 	dir, write := checklistRepo(t)
 	write("core/a.go", "package core\n\nfunc A() { _ = 1 }\n")
 	gitIn(t, dir, "commit", "-q", "-am", "change a")
-	base := []string{"pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=critical", "--author=t@x.com", "--reviewers=0"}
+	base := []string{"pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=critical", "--author=t@x.com", "--reviewers=0", "--auto-merge-enabled=false"}
 
 	out, err := runCLI(t, dir, base...)
 	var ee *exitError
 	if !errors.As(err, &ee) || ee.code != exitBlocked || !strings.Contains(ee.msg, "2 before-merge items open") {
 		t.Fatalf("all open: err = %v, want exit 5 with 2 items open", err)
 	}
-	for _, want := range []string{"### ✅ Do before merge (0 of 2 done)", "⛔ Merge blocked: 2 before-merge items open",
+	for _, want := range []string{"### ✅ Do before merge (1 of 3 done)", "⛔ Merge blocked: 2 before-merge items open",
 		"- [ ] 👀 Get sign-off from @ana on `core/a.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -248,19 +248,19 @@ func TestPRCheck_GateUnblocksWhenItemsDone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("all done: %v\n%s", err, out)
 	}
-	for _, want := range []string{"### ✅ Do before merge (2 of 2 done)", "✅ All before-merge items done: ready to merge",
+	for _, want := range []string{"### ✅ Do before merge (3 of 3 done)", "✅ All before-merge items done: ready to merge",
 		"- [x] 👀 Get sign-off from @ana on `core/a.go`\n", "signed off with the highstakes:signed-off label"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
 
-	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--json", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off")
+	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--json", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off", "--auto-merge-enabled=false")
 	if err != nil || !strings.Contains(out, `"open_items": 0`) || !strings.Contains(out, `"decision_reason": "all before-merge items done"`) {
 		t.Errorf("JSON: err = %v, want open_items 0 and the reason:\n%s", err, out)
 	}
 
-	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off")
+	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off", "--auto-merge-enabled=false")
 	if err != nil || !strings.Contains(out, "Decision: PASS (fail-on critical): all before-merge items done\n") {
 		t.Errorf("text: err = %v, want the decision with its reason:\n%s", err, out)
 	}

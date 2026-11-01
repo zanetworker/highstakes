@@ -156,6 +156,9 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 			// A heatmap from before actions existed: no data is not "done".
 			f = unscoredReview(fc, directoryOwners(hm, fc.Path))
 		}
+		if types.Blocking(fc.Posture()) && !tour.IsTestFile(fc.Path) {
+			f = withSafeguards(f, fc, directoryOwners(hm, fc.Path))
+		}
 		acts := explain.ForPR(f, c)
 		fc.Actions = nil
 		for _, a := range acts {
@@ -228,4 +231,34 @@ func directoryOwners(hm *types.Heatmap, p string) []string {
 			return out
 		}
 	}
+}
+
+// withSafeguards returns f with a review item and the auto-merge item added
+// when its own actions lack them: every Harden now or Protect file needs
+// both, or an unassessed file's empty checklist would read "all done".
+func withSafeguards(f *types.FileHeat, fc *types.FileChange, owners []string) *types.FileHeat {
+	if f.Explanation == nil {
+		return f
+	}
+	has := map[string]bool{}
+	for _, a := range f.Explanation.Actions {
+		has[a.ID] = true
+	}
+	review := has["senior-review"] || has["owner-review"]
+	if review && has["no-auto-merge"] {
+		return f
+	}
+	stand := unscoredReview(fc, owners).Explanation.Actions // [review, no-auto-merge]
+	acts := append([]types.Action(nil), f.Explanation.Actions...)
+	if !review {
+		acts = append(acts, stand[0])
+	}
+	if !has["no-auto-merge"] {
+		acts = append(acts, stand[1])
+	}
+	e := *f.Explanation
+	e.Actions = acts
+	out := *f
+	out.Explanation = &e
+	return &out
 }
