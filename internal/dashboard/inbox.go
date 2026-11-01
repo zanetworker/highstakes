@@ -5,12 +5,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // inboxTop is how many before-merge files the inbox shows by default.
 const inboxTop = 10
+
+// estimateNote marks a posture placed from the static impact estimate.
+const estimateNote = "impact estimated (run with an LLM for an assessment)"
 
 // step is one before-merge action on a file and the signal that fired it.
 type step struct {
@@ -21,19 +25,21 @@ type step struct {
 // fileCard is one Harden now or Protect file: everything a PR touching it
 // needs before merge, and who should review it.
 type fileCard struct {
-	Path    string   `json:"path"`
-	Verdict string   `json:"verdict"`
-	Steps   []step   `json:"steps"`
-	Owners  []string `json:"owners,omitempty"`
+	Path      string   `json:"path"`
+	Verdict   string   `json:"verdict"`
+	Steps     []step   `json:"steps"`
+	Owners    []string `json:"owners,omitempty"`
+	Estimated bool     `json:"estimated,omitempty"` // verdict from the static impact estimate
 }
 
 // groupItem is one file a backlog group applies to.
 type groupItem struct {
-	Path    string `json:"path"`
-	Verdict string `json:"verdict"`
-	Signal  string `json:"signal,omitempty"`
-	Owner   string `json:"owner,omitempty"`
-	Command string `json:"command,omitempty"`
+	Path      string `json:"path"`
+	Verdict   string `json:"verdict"`
+	Signal    string `json:"signal,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	Command   string `json:"command,omitempty"`
+	Estimated bool   `json:"estimated,omitempty"`
 }
 
 // group is one backlog action kind across files, with every file's command
@@ -51,6 +57,17 @@ type inbox struct {
 	BeforeMerge []fileCard `json:"before_merge"` // Harden now and Protect files, most severe first
 	Top         int        `json:"top"`          // shown by default: inboxTop, plus files tied with the last
 	Backlog     []group    `json:"backlog"`      // one group per backlog action kind
+	// EstimateNote is estimateNote when any file's posture is estimated.
+	EstimateNote string `json:"estimate_note,omitempty"`
+}
+
+// rankedFile is a file with the posture the inbox ranks it by: its quadrant,
+// or for a file without an LLM-assessed impact the quadrant its estimated
+// impact falls in against the recorded cutoffs.
+type rankedFile struct {
+	*types.FileHeat
+	posture   types.Quadrant
+	estimated bool
 }
 
 var postureRank = map[types.Quadrant]int{
@@ -67,16 +84,31 @@ var groupTitles = map[string][2]string{
 	"ownership-issue":     {"Spread ownership of %d file", "Spread ownership of %d files"},
 }
 
-// buildInbox ranks files most severe first (posture, then impact, then
-// likelihood). Before merge gets one card per Harden now or Protect file
-// with all its before-merge steps. Backlog groups identical actions across
-// files, kinds covering the most Harden now files first. Test files,
-// routine files and files without an explanation are left out.
+// buildInbox ranks files most severe first (LLM-assessed before estimated,
+// then posture, then impact, then likelihood). Files without an LLM-assessed
+// impact take the posture of their estimated impact when the heatmap records
+// both cutoffs, and are marked estimated. Before merge gets one card per
+// Harden now or Protect file with all its before-merge steps. Backlog groups
+// identical actions across files, kinds covering the most Harden now files
+// first. Test files, routine files and files without an explanation are left
+// out.
 func buildInbox(hm *types.Heatmap) inbox {
-	var files []*types.FileHeat
+	likely, impactful := hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold
+	var files []rankedFile
 	for _, f := range hm.Files {
-		if f.Explanation != nil && f.ImpactAssessed && postureRank[f.Quadrant] > 0 && !tour.IsTestFile(f.Path) {
-			files = append(files, f)
+		if f.Explanation == nil || tour.IsTestFile(f.Path) {
+			continue
+		}
+		fi := rankedFile{FileHeat: f, posture: f.Quadrant}
+		if !f.ImpactAssessed {
+			if likely <= 0 || impactful <= 0 {
+				continue
+			}
+			fi.posture, _ = scorer.QuadrantOf(f.Likelihood >= likely, f.Impact >= impactful)
+			fi.estimated = true
+		}
+		if postureRank[fi.posture] > 0 {
+			files = append(files, fi)
 		}
 	}
 	sort.Slice(files, func(i, j int) bool {
@@ -86,11 +118,14 @@ func buildInbox(hm *types.Heatmap) inbox {
 		return files[i].Path < files[j].Path
 	})
 	in := inbox{BeforeMerge: []fileCard{}, Backlog: []group{}}
-	var cardFiles []*types.FileHeat
+	var cardFiles []rankedFile
 	groups := map[string]*group{}
 	for _, f := range files {
 		owners := fileOwners(f.Explanation)
-		c := fileCard{Path: f.Path, Verdict: f.Quadrant.Label(), Owners: owners}
+		c := fileCard{Path: f.Path, Verdict: f.posture.Label(), Owners: owners, Estimated: f.estimated}
+		if f.estimated {
+			in.EstimateNote = estimateNote
+		}
 		for _, a := range f.Explanation.Actions {
 			switch a.Scope {
 			case types.ScopeBeforeMerge:
@@ -101,17 +136,17 @@ func buildInbox(hm *types.Heatmap) inbox {
 					g = &group{Kind: a.ID, Title: a.Text}
 					groups[a.ID] = g
 				}
-				it := groupItem{Path: f.Path, Verdict: c.Verdict, Signal: a.Signal, Command: a.Command}
+				it := groupItem{Path: f.Path, Verdict: c.Verdict, Signal: a.Signal, Command: a.Command, Estimated: f.estimated}
 				if len(owners) > 0 {
 					it.Owner = owners[0]
 				}
 				g.Items = append(g.Items, it)
-				if f.Quadrant == types.QuadrantFragileCritical {
+				if f.posture == types.QuadrantFragileCritical {
 					g.Harden++
 				}
 			}
 		}
-		if len(c.Steps) > 0 && postureRank[f.Quadrant] >= postureRank[types.QuadrantProtect] {
+		if len(c.Steps) > 0 && postureRank[f.posture] >= postureRank[types.QuadrantProtect] {
 			in.BeforeMerge = append(in.BeforeMerge, c)
 			cardFiles = append(cardFiles, f)
 		}
@@ -135,10 +170,16 @@ func buildInbox(hm *types.Heatmap) inbox {
 	return in
 }
 
-// compareSeverity orders by posture, then impact, then likelihood: >0 when a
-// is more severe, 0 when tied.
-func compareSeverity(a, b *types.FileHeat) int {
-	if ra, rb := postureRank[a.Quadrant], postureRank[b.Quadrant]; ra != rb {
+// compareSeverity orders LLM-assessed before estimated, then by posture,
+// then impact, then likelihood: >0 when a is more severe, 0 when tied.
+func compareSeverity(a, b rankedFile) int {
+	if a.estimated != b.estimated {
+		if b.estimated {
+			return 1
+		}
+		return -1
+	}
+	if ra, rb := postureRank[a.posture], postureRank[b.posture]; ra != rb {
 		return ra - rb
 	}
 	if a.Impact != b.Impact {
@@ -149,7 +190,7 @@ func compareSeverity(a, b *types.FileHeat) int {
 
 // topWithTies is n, or fewer when there are fewer files, extended past n
 // while files tie with the nth so a cut never splits equals.
-func topWithTies(sorted []*types.FileHeat, n int) int {
+func topWithTies(sorted []rankedFile, n int) int {
 	if len(sorted) <= n {
 		return len(sorted)
 	}

@@ -84,6 +84,7 @@ const prQuery = `query($owner:String!,$name:String!,$cursor:String){
         number title mergedAt updatedAt
         mergeCommit{oid}
         author{login}
+        commits{totalCount}
         labels(first:20){nodes{name}}
         closingIssuesReferences(first:5){nodes{number labels(first:10){nodes{name}}}}
         reviews(first:30){totalCount nodes{state author{login}}}
@@ -161,6 +162,9 @@ type gqlPR struct {
 	Author *struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	Commits struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"commits"`
 	Labels        gqlNames `json:"labels"`
 	ClosingIssues struct {
 		Nodes []struct {
@@ -201,7 +205,7 @@ func decodePage(body []byte) (Page, error) {
 		page.RateRemaining = r.Data.RateLimit.Remaining
 	}
 	for _, n := range prs.Nodes {
-		p := PR{Number: n.Number, Title: n.Title, MergedAt: n.MergedAt, UpdatedAt: n.UpdatedAt, Reviews: n.Reviews.TotalCount}
+		p := PR{Number: n.Number, Title: n.Title, MergedAt: n.MergedAt, UpdatedAt: n.UpdatedAt, Reviews: n.Reviews.TotalCount, Commits: n.Commits.TotalCount}
 		if n.MergeCommit != nil {
 			p.MergeCommit = n.MergeCommit.OID
 		}
@@ -249,9 +253,14 @@ type FetchResult struct {
 	PartialReason string `json:"partial_reason,omitempty"`
 }
 
+// cacheSchema is the version of the cached PR fields; bump it when PR gains a
+// field so cached PRs are refetched (2: Commits).
+const cacheSchema = 2
+
 type cacheIndex struct {
 	CoveredFrom time.Time `json:"covered_from"` // every PR merged after this was fetched...
 	FetchedAt   time.Time `json:"fetched_at"`   // ...as of this time
+	Schema      int       `json:"schema"`
 }
 
 // Fetch returns the PRs merged in the window, reading the disk cache and
@@ -268,7 +277,7 @@ func Fetch(ctx context.Context, c Client, repo Repo, opts FetchOptions) (FetchRe
 	stopAt := opts.Since
 	var idx cacheIndex
 	if b, err := os.ReadFile(filepath.Join(dir, "index.json")); err == nil && json.Unmarshal(b, &idx) == nil &&
-		!idx.CoveredFrom.After(opts.Since) {
+		idx.Schema == cacheSchema && !idx.CoveredFrom.After(opts.Since) {
 		stopAt = idx.FetchedAt
 	}
 
@@ -314,7 +323,7 @@ loop:
 		if stopAt.Equal(idx.FetchedAt) && !idx.CoveredFrom.IsZero() && idx.CoveredFrom.Before(covered) {
 			covered = idx.CoveredFrom
 		}
-		if err := writeJSON(filepath.Join(dir, "index.json"), cacheIndex{CoveredFrom: covered, FetchedAt: opts.Now}); err != nil {
+		if err := writeJSON(filepath.Join(dir, "index.json"), cacheIndex{CoveredFrom: covered, FetchedAt: opts.Now, Schema: cacheSchema}); err != nil {
 			return res, err
 		}
 	}

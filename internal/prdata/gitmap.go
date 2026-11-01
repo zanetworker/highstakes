@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -106,7 +107,9 @@ func subjectPRNumber(subject string) (int, bool) {
 // MapPRs maps each PR to the commit that landed it on the default branch:
 // the commit GitHub reports as its merge commit when that commit is in
 // commits, otherwise the newest commit whose subject names the PR. PRs with
-// no such commit are absent from the result.
+// no such commit are absent from the result. A rebase-merged PR (merge commit
+// with one parent and no "(#N)" in its subject, more than one PR commit) is
+// reported as its last commit with Files the union over the PR's commits.
 func MapPRs(prs []PR, commits []Commit) map[int]Commit {
 	bySHA := make(map[string]Commit, len(commits))
 	byNumber := map[int]Commit{}
@@ -121,12 +124,43 @@ func MapPRs(prs []PR, commits []Commit) map[int]Commit {
 	out := map[int]Commit{}
 	for _, pr := range prs {
 		if c, ok := bySHA[pr.MergeCommit]; ok && pr.MergeCommit != "" {
-			out[pr.Number] = c
+			out[pr.Number] = withRebasedFiles(c, pr, bySHA)
 		} else if c, ok := byNumber[pr.Number]; ok {
 			out[pr.Number] = c
 		}
 	}
 	return out
+}
+
+// withRebasedFiles returns c with Files covering every commit of pr when pr
+// was rebase-merged: GitHub reports only the last rebased commit as the merge
+// commit, so the files of the earlier pr.Commits-1 first-parent ancestors are
+// added (as far as commits reach).
+func withRebasedFiles(c Commit, pr PR, bySHA map[string]Commit) Commit {
+	if pr.Commits <= 1 || len(c.Parents) != 1 {
+		return c
+	}
+	if n, ok := subjectPRNumber(c.subject()); ok && n == pr.Number {
+		return c
+	}
+	seen := map[string]bool{}
+	var files []string
+	cur, ok := c, true
+	for i := 0; i < pr.Commits && ok; i++ {
+		for _, f := range cur.Files {
+			if !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+		if len(cur.Parents) == 0 {
+			break
+		}
+		cur, ok = bySHA[cur.Parents[0]]
+	}
+	sort.Strings(files)
+	c.Files = files
+	return c
 }
 
 var (

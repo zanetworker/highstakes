@@ -687,6 +687,7 @@ function selectFile(path){
 // Action inbox: one before-merge card per Harden now or Protect file (its
 // steps and owners) and one backlog card per action kind (its files and one
 // combined snippet). Go does the grouping and ordering; this only renders.
+// Postures from the static impact estimate carry INBOX.estimate_note.
 // Posture filter and search apply.
 const inboxOpen={before_merge:false,groups:new Set()};
 function inboxMatch(path,verdict,text){
@@ -698,6 +699,7 @@ function fileCardHTML(c){
   let h='<article class="card"><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
   h+='<button class="file title" data-path="'+attr(c.path)+'">'+htmlEsc(c.path)+'</button>';
   h+='<div class="side"><span class="posture" style="color:'+vc+'">'+htmlEsc(c.verdict)+'</span></div>';
+  if(c.estimated)h+='<div class="why">'+htmlEsc(INBOX.estimate_note)+'</div>';
   h+='<ul class="steps">'+c.steps.map(s=>'<li><span class="box" aria-hidden="true">[ ]</span><span>'+htmlEsc(s.text)+(s.signal?'<span class="sig">'+htmlEsc(s.signal)+'</span>':'')+'</span></li>').join('')+'</ul>';
   if(c.owners&&c.owners.length)h+='<div class="who">Owners: '+c.owners.map(htmlEsc).join(', ')+'</div>';
   return h+'</article>';
@@ -710,7 +712,7 @@ function groupHTML(g,items){
   let h='<details class="card grp" data-kind="'+attr(g.kind)+'"'+(inboxOpen.groups.has(g.kind)?' open':'')+'><summary><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
   h+='<span class="do">'+htmlEsc(g.title)+'</span><span class="meta">'+htmlEsc(parts.join(' · '))+'</span></summary>';
   if(g.snippet)h+='<div class="snip"><code>'+htmlEsc(g.snippet)+'</code><button class="copy" data-cmd="'+attr(g.snippet)+'" aria-label="Copy all '+g.items.length+' lines">Copy</button></div>';
-  h+='<ul class="gfiles">'+items.map(it=>'<li><button class="file" data-path="'+attr(it.path)+'">'+htmlEsc(it.path)+'</button><span class="sig">'+htmlEsc(it.verdict)+(it.signal?' · '+htmlEsc(it.signal):'')+(it.owner?' · '+htmlEsc(it.owner):'')+'</span></li>').join('')+'</ul>';
+  h+='<ul class="gfiles">'+items.map(it=>'<li><button class="file" data-path="'+attr(it.path)+'">'+htmlEsc(it.path)+'</button><span class="sig">'+htmlEsc(it.verdict)+(it.estimated?' (estimated)':'')+(it.signal?' · '+htmlEsc(it.signal):'')+(it.owner?' · '+htmlEsc(it.owner):'')+'</span></li>').join('')+'</ul>';
   return h+'</details>';
 }
 function renderInbox(){
@@ -721,7 +723,7 @@ function renderInbox(){
   const groups=(INBOX.backlog||[]).map(g=>({g,items:g.items.filter(it=>inboxMatch(it.path,it.verdict,g.title+' '+(it.signal||'')))})).filter(x=>x.items.length);
   const nFiles=new Set(groups.flatMap(x=>x.items.map(it=>it.path))).size;
   const lead=shown.length===1?'The file where a mistake would hurt most: any PR touching it':'The '+shown.length+' files where a mistake would hurt most: any PR touching them';
-  let h='<p class="inbox-intro">'+(shown.length?lead+' needs these steps before merge. ':'')+'The backlog groups the fixes to make once, across files. '+NOTE+'</p><div class="inbox-cols">';
+  let h='<p class="inbox-intro">'+(shown.length?lead+' needs these steps before merge. ':'')+'The backlog groups the fixes to make once, across files. '+(INBOX.estimate_note?'Files without an LLM assessment are placed by the static impact estimate and marked &ldquo;'+htmlEsc(INBOX.estimate_note)+'&rdquo;. ':'')+NOTE+'</p><div class="inbox-cols">';
   h+='<section aria-labelledby="h-before_merge"><h2 id="h-before_merge">Before merge <span class="count">'+shown.length+' of '+cards.length+' files</span></h2><div class="sub">Harden now first, then by how bad, then by will it break</div>';
   h+=cards.length?shown.map(fileCardHTML).join(''):'<div class="empty">Nothing here for this filter</div>';
   if(cards.length>top)h+='<button class="more" data-more="before_merge">'+(inboxOpen.before_merge?'Show top '+top:'Show all '+cards.length)+'</button>';

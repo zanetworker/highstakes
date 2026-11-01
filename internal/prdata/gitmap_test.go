@@ -84,6 +84,42 @@ func TestMapPRs(t *testing.T) {
 	}
 }
 
+func TestMapPRs_LandedFiles(t *testing.T) {
+	// First-parent history, newest first: r3..r1 are PR #7 rebase-merged as
+	// three commits; m is a merge commit; s is a squash merge.
+	commits := []Commit{
+		{SHA: "r3", Parents: []string{"r2"}, Message: "third step", Files: []string{"c.go"}},
+		{SHA: "r2", Parents: []string{"r1"}, Message: "second step", Files: []string{"b.go"}},
+		{SHA: "r1", Parents: []string{"m"}, Message: "first step", Files: []string{"a.go", "c.go"}},
+		{SHA: "m", Parents: []string{"s", "side"}, Message: "Merge pull request #5 from x/y", Files: []string{"m.go"}},
+		{SHA: "s", Parents: []string{"o"}, Message: "fix: thing (#4)", Files: []string{"s.go"}},
+		{SHA: "o", Parents: []string{"z"}, Message: "older", Files: []string{"o.go"}},
+	}
+	tests := []struct {
+		name string
+		pr   PR
+		sha  string
+		want []string
+	}{
+		{"squash merge", PR{Number: 4, MergeCommit: "s", Commits: 3}, "s", []string{"s.go"}},
+		{"merge commit uses the diff against the first parent", PR{Number: 5, MergeCommit: "m", Commits: 4}, "m", []string{"m.go"}},
+		{"rebase merge unions every landed commit", PR{Number: 7, MergeCommit: "r3", Commits: 3}, "r3", []string{"a.go", "b.go", "c.go"}},
+		{"rebase merge with commit count unknown", PR{Number: 7, MergeCommit: "r3"}, "r3", []string{"c.go"}},
+		{"commit count past the read history stops at its end", PR{Number: 8, MergeCommit: "o", Commits: 3}, "o", []string{"o.go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := MapPRs([]PR{tt.pr}, commits)[tt.pr.Number]
+			if !ok {
+				t.Fatalf("PR #%d not mapped", tt.pr.Number)
+			}
+			if got.SHA != tt.sha || !reflect.DeepEqual(got.Files, tt.want) {
+				t.Errorf("PR #%d -> %s %v, want %s %v", tt.pr.Number, got.SHA, got.Files, tt.sha, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsBackportBranch(t *testing.T) {
 	tests := []struct {
 		ref  string

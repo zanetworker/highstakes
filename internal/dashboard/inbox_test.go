@@ -206,3 +206,58 @@ func TestBuildInbox_LegacyHeatmap(t *testing.T) {
 		t.Errorf("backlog kinds = %v, want codeowners and split", kinds)
 	}
 }
+
+func TestBuildInbox_StaticOnly(t *testing.T) {
+	noTestsAct := types.Action{ID: "no-tests", Text: "Add tests before merge: none next to this file", Scope: types.ScopeBeforeMerge, Signal: "no test file next to it"}
+	assessAct := types.Action{ID: "assess-impact", Text: "Run analyze with an LLM to assess impact", Scope: types.ScopeBacklog, Command: "highstakes analyze"}
+	estimated := func(path string, impact, likelihood int) *types.FileHeat {
+		return &types.FileHeat{Path: path, Impact: impact, Likelihood: likelihood,
+			Explanation: &types.Explanation{Verdict: "Not assessed", Actions: []types.Action{noTestsAct, assessAct}}}
+	}
+	meta := types.Metadata{LikelyCutoff: 60, ImpactThreshold: 70}
+
+	t.Run("no LLM: cards by estimated quadrant, marked as estimates", func(t *testing.T) {
+		hm := &types.Heatmap{Metadata: meta, Files: map[string]*types.FileHeat{
+			"hot.go":    estimated("hot.go", 80, 90),    // likely, impactful: Harden now
+			"core.go":   estimated("core.go", 75, 10),   // impactful only: Protect
+			"churn.go":  estimated("churn.go", 20, 95),  // likely only: Stabilize, backlog only
+			"quiet.go":  estimated("quiet.go", 10, 10),  // Routine: left out
+			"x_test.go": estimated("x_test.go", 99, 99), // tests: left out
+		}}
+		in := buildInbox(hm)
+		if got, want := paths(in.BeforeMerge), []string{"hot.go", "core.go"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("before merge = %v, want %v", got, want)
+		}
+		if c := in.BeforeMerge[0]; c.Verdict != "Harden now" || !c.Estimated {
+			t.Errorf("first card = %+v, want Harden now marked estimated", c)
+		}
+		if in.BeforeMerge[1].Verdict != "Protect" {
+			t.Errorf("second card verdict = %q, want Protect", in.BeforeMerge[1].Verdict)
+		}
+		if in.EstimateNote != estimateNote {
+			t.Errorf("estimate note = %q, want %q", in.EstimateNote, estimateNote)
+		}
+		if len(in.Backlog) != 1 || len(in.Backlog[0].Items) != 3 || in.Backlog[0].Harden != 1 || !in.Backlog[0].Items[0].Estimated {
+			t.Errorf("backlog = %+v, want one assess-impact group over 3 estimated files, 1 Harden now", in.Backlog)
+		}
+	})
+	t.Run("LLM-assessed files rank before estimated ones", func(t *testing.T) {
+		hm := &types.Heatmap{Metadata: meta, Files: map[string]*types.FileHeat{
+			"hot.go": estimated("hot.go", 95, 95),
+			"p.rs":   inboxFile("p.rs", types.QuadrantProtect, 72, 5, ownerAct),
+		}}
+		in := buildInbox(hm)
+		if got, want := paths(in.BeforeMerge), []string{"p.rs", "hot.go"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("before merge = %v, want %v", got, want)
+		}
+		if in.BeforeMerge[0].Estimated || !in.BeforeMerge[1].Estimated {
+			t.Errorf("estimated flags = %v, %v; want false, true", in.BeforeMerge[0].Estimated, in.BeforeMerge[1].Estimated)
+		}
+	})
+	t.Run("no cutoffs recorded: nothing to estimate from", func(t *testing.T) {
+		hm := &types.Heatmap{Files: map[string]*types.FileHeat{"hot.go": estimated("hot.go", 95, 95)}}
+		if in := buildInbox(hm); len(in.BeforeMerge) != 0 || in.EstimateNote != "" {
+			t.Errorf("got %+v, want an empty inbox without the estimate note", in)
+		}
+	})
+}

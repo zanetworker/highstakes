@@ -61,7 +61,7 @@ func TestDecodePage(t *testing.T) {
 	body := `{"data":{"rateLimit":{"remaining":4900},"repository":{"pullRequests":{
 	  "pageInfo":{"hasNextPage":true,"endCursor":"CUR"},
 	  "nodes":[{"number":12,"title":"fix: x","mergedAt":"2026-05-02T10:00:00Z","updatedAt":"2026-05-03T10:00:00Z",
-	    "mergeCommit":{"oid":"abc"},"author":{"login":"alice"},
+	    "mergeCommit":{"oid":"abc"},"author":{"login":"alice"},"commits":{"totalCount":3},
 	    "labels":{"nodes":[{"name":"bug"}]},
 	    "closingIssuesReferences":{"nodes":[{"number":7,"labels":{"nodes":[{"name":"security"}]}}]},
 	    "reviews":{"totalCount":4,"nodes":[
@@ -85,7 +85,7 @@ func TestDecodePage(t *testing.T) {
 		UpdatedAt:   time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC),
 		MergeCommit: "abc", Author: "alice", Labels: []string{"bug"},
 		ClosingIssues: []int{7}, ClosingIssueLabels: []string{"security"},
-		Reviews: 4, Approvers: 2,
+		Reviews: 4, Approvers: 2, Commits: 3,
 	}
 	if !reflect.DeepEqual(page.PRs[0], want) {
 		t.Errorf("PR = %+v\nwant %+v", page.PRs[0], want)
@@ -243,6 +243,30 @@ func TestFetch(t *testing.T) {
 		opts.CacheDir = t.TempDir()
 		if _, err := Fetch(context.Background(), c, repo, opts); err == nil {
 			t.Error("want an error")
+		}
+	})
+
+	t.Run("cache index from an older schema refetches the window", func(t *testing.T) {
+		dir := t.TempDir()
+		opts := base
+		opts.CacheDir = dir
+		if err := os.MkdirAll(filepath.Join(dir, "o", "n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		old := `{"covered_from":"2026-05-01T00:00:00Z","fetched_at":"2026-05-24T00:00:00Z"}`
+		if err := os.WriteFile(filepath.Join(dir, "o", "n", "index.json"), []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c := &fakeClient{pages: pages(), errAt: -1}
+		if _, err := Fetch(context.Background(), c, repo, opts); err != nil {
+			t.Fatal(err)
+		}
+		if c.calls != 3 {
+			t.Errorf("stale-schema cache made %d calls, want a full 3-call fetch", c.calls)
+		}
+		c2 := &fakeClient{pages: pages(), errAt: -1}
+		if _, err := Fetch(context.Background(), c2, repo, opts); err != nil || c2.calls != 1 {
+			t.Errorf("rerun on the current schema made %d calls (err %v), want 1", c2.calls, err)
 		}
 	})
 
