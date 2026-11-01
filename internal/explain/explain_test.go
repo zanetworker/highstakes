@@ -191,7 +191,7 @@ func TestExplain_LikelihoodReasons(t *testing.T) {
 		got := Explain(f, repo(f), nil).LikelihoodReasons
 		contains(t, got,
 			"55 commits in the last 90 days, 28 authors overall (top 1% of this repo)",
-			"479 functions, cyclomatic 1092 in one file (top 1%)",
+			"479 functions, cyclomatic 1,092 in one file (top 1%)",
 			"11 files import it (top 1%)",
 			`recent fix: "fix(network): align destination checks" (2026-10-28)`,
 		)
@@ -284,7 +284,7 @@ func TestExplain_LikelihoodReasons(t *testing.T) {
 		f := &types.FileHeat{Path: "a.go", Size: types.FileSize{Lines: 5000}}
 		f.Factors.ChangeFrequency.UniqueAuthors = 9
 		got := Explain(f, repo(f), nil).LikelihoodReasons
-		contains(t, got, "9 authors overall (top 1% of this repo)", "5000 lines in one file (top 1%)")
+		contains(t, got, "9 authors overall (top 1% of this repo)", "5,000 lines in one file (top 1%)")
 	})
 }
 
@@ -306,5 +306,34 @@ func TestTitles(t *testing.T) {
 				t.Errorf("Titles = %q, %q; want %q, %q", i, l, tt.wantImpact, tt.wantLk)
 			}
 		})
+	}
+}
+
+func TestThousands(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"}, {999, "999"}, {1000, "1,000"}, {43274, "43,274"}, {1234567, "1,234,567"}, {-1234, "-1,234"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := Thousands(tt.n); got != tt.want {
+				t.Errorf("Thousands(%d) = %q, want %q", tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCountAndImporters_UseThousands(t *testing.T) {
+	tests := []struct{ got, want string }{
+		{count(43274, "line"), "43,274 lines"},
+		{count(1, "line"), "1 line"},
+		{importedBy(1200), "1,200 files import it"},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("got %q, want %q", tt.got, tt.want)
+		}
 	}
 }

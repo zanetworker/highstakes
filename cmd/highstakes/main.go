@@ -403,6 +403,7 @@ var prCheckCmd = &cobra.Command{
 		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
 		approvals, _ := cmd.Flags().GetStringSlice("approvals")
 		repoFlag, _ := cmd.Flags().GetString("repo")
+		prFlag, _ := cmd.Flags().GetInt("pr")
 
 		if jsonOut {
 			format = "json"
@@ -412,6 +413,10 @@ var prCheckCmd = &cobra.Command{
 		}
 
 		repo, err := commentRepo(repoFlag, os.Getenv("GITHUB_REPOSITORY"), func() (prdata.Repo, error) { return prdata.OriginRepo(".") })
+		if err != nil {
+			return cliError(2, "%v", err)
+		}
+		pr, err := prNumber(prFlag, os.Getenv("GITHUB_REF"))
 		if err != nil {
 			return cliError(2, "%v", err)
 		}
@@ -446,7 +451,7 @@ var prCheckCmd = &cobra.Command{
 		}
 
 		// An empty diff scores LOW and still goes through the gate and shadow log.
-		risk := prscore.CalculatePRRisk(0, changes, hm, configuredTiers())
+		risk := prscore.CalculatePRRisk(pr, changes, hm, configuredTiers())
 		applyAutonomy(&risk, hm)
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
 		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
@@ -465,7 +470,7 @@ var prCheckCmd = &cobra.Command{
 
 		switch {
 		case format == "markdown":
-			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base), Codeowners: codeownersPath()}))
+			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base), Codeowners: codeownersPath(), SHA: headSHA()}))
 			return gateErr
 		case format == "json" && len(changes) == 0:
 			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
@@ -790,6 +795,7 @@ func agentContext() map[string]interface{} {
 							"--format":    flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
 							"--approvals": flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
 							"--repo":      flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
+							"--pr":        flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
 							"--base":      flagDef("string", "main", "Base branch"),
 							"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
 							"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
@@ -1051,6 +1057,7 @@ func init() {
 	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")
 	prCheckCmd.Flags().String("format", "text", "Output format: text, markdown (the PR comment), json")
 	prCheckCmd.Flags().String("repo", "", "GitHub owner/name the markdown comment links to for one-click issues and CODEOWNERS edits (default: $GITHUB_REPOSITORY, then the origin remote)")
+	prCheckCmd.Flags().Int("pr", 0, "PR number the markdown comment's issues link back to (default: from $GITHUB_REF refs/pull/N/merge in GitHub Actions)")
 	prCheckCmd.Flags().StringSlice("approvals", nil, "GitHub logins that approved the PR (CI fills it); ticks owner-review items when a suggested owner approved")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)
@@ -1078,6 +1085,15 @@ func init() {
 
 	githubCmd.AddCommand(githubInstallCmd)
 	rootCmd.AddCommand(githubCmd)
+}
+
+// headSHA is the short HEAD commit the comment's issues name, or "" outside git.
+func headSHA() string {
+	out, err := exec.Command("git", "rev-parse", "--short=12", "HEAD").Output()
+	if err != nil {
+		return "" // optional context: the issues leave the commit out
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // codeownersPath is the repo's CODEOWNERS file relative to the root, or "".

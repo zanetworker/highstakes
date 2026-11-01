@@ -2,9 +2,14 @@ package prcomment
 
 import (
 	"fmt"
+	"math"
 	"net/url"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -22,6 +27,7 @@ func TestPostureCounts(t *testing.T) {
 			fc(types.QuadrantFragileCritical), fc(types.QuadrantLow)}, "⛔ 1 harden · 🛡 1 protect · 🔧 1 stabilize · ✅ 2 routine"},
 		{"zero counts are left out", []types.FileChange{fc(types.QuadrantProtect), fc(types.QuadrantLow)}, "🛡 1 protect · ✅ 1 routine"},
 		{"no files", nil, ""},
+		{"thousands separators", slices.Repeat([]types.FileChange{fc(types.QuadrantLow)}, 1200), "✅ 1,200 routine"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,7 +96,8 @@ func TestBreaksOften(t *testing.T) {
 func TestNextStep(t *testing.T) {
 	risk := &types.PRRisk{
 		Checklist: []types.Action{
-			{ID: "no-auto-merge", Text: "Keep auto-merge off", Files: []string{"h.go", "p.go"}},
+			{ID: "no-auto-merge", Text: "Keep auto-merge off", Files: []string{"h.go", "p.go", "only.go"}},
+			{ID: "smaller-pr", Text: "Ask for a smaller PR: 900 lines across 4 components", Files: []string{"h.go", "only.go"}},
 			{ID: "senior-review", Text: "Get sign-off", Files: []string{"h.go"}, Done: true},
 			{ID: "regression-tests", Text: "Add regression tests", Files: []string{"h.go"}},
 			{ID: "owner-review", Text: "Get an owner's review", Files: []string{"p.go"}},
@@ -101,33 +108,39 @@ func TestNextStep(t *testing.T) {
 			{ID: "complexity-issue", Text: "Cut it", Files: []string{"c.go"}},
 		},
 	}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"fixed.go": {Path: "fixed.go", Explanation: &types.Explanation{LikelihoodReasons: []string{`2 recent fixes; latest: "fix: x" (2026-10-01)`}}},
+	}}
 	tests := []struct {
-		path, want string
+		name, path string
+		q          types.Quadrant
+		want       string
 	}{
-		{"h.go", "🧪 add regression tests"}, // done items and the PR-wide no-auto-merge are skipped
-		{"p.go", "👀 owner review"},
-		{"s.go", "✂️ refactor"},
-		{"c.go", "✂️ cut complexity"},
-		{"none.go", "careful review"},
+		{"done items and PR-level items are skipped", "h.go", types.QuadrantFragileCritical, "🧪 add regression tests"},
+		{"before-merge item", "p.go", types.QuadrantProtect, "👀 owner review"},
+		{"worth-doing item", "s.go", types.QuadrantWatch, "✂️ refactor"},
+		{"backlog item", "c.go", types.QuadrantWatch, "✂️ cut complexity"},
+		{"only PR-level items: posture default", "only.go", types.QuadrantProtect, "👀 owner review"},
+		{"no actions, Protect", "none.go", types.QuadrantProtect, "👀 owner review"},
+		{"no actions, Harden now", "none.go", types.QuadrantFragileCritical, "👀 senior sign-off"},
+		{"no actions, Stabilize with fixes", "fixed.go", types.QuadrantWatch, "🧪 regression tests"},
+		{"no actions, Stabilize without fixes", "none.go", types.QuadrantWatch, "🔍 review the change"},
+		{"routine file without actions", "r.go", types.QuadrantLow, "normal review"},
 	}
-	t.Run("routine file without actions", func(t *testing.T) {
-		fc := types.FileChange{Path: "r.go", ImpactAssessed: true, Quadrant: types.QuadrantLow}
-		if got := nextStep(fc, risk).label; got != "normal review" {
-			t.Errorf("got %q", got)
-		}
-	})
 	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			fc := types.FileChange{Path: tt.path, ImpactAssessed: true, Quadrant: types.QuadrantProtect}
-			if got := nextStep(fc, risk).label; got != tt.want {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := types.FileChange{Path: tt.path, ImpactAssessed: true, Quadrant: tt.q}
+			if got := nextStep(fc, risk, hm).label; got != tt.want {
 				t.Errorf("nextStep(%s) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
 	}
-	t.Run("only no-auto-merge left", func(t *testing.T) {
-		r := &types.PRRisk{Checklist: []types.Action{{ID: "no-auto-merge", Files: []string{"p.go"}}}}
-		if got := nextStep(types.FileChange{Path: "p.go"}, r).label; got != "🚫 no auto-merge" {
-			t.Errorf("got %q", got)
+	t.Run("never the vague careful review", func(t *testing.T) {
+		for _, tier := range []types.Tier{types.TierCritical, types.TierHigh, types.TierMedium} {
+			fc := types.FileChange{Path: "new.go", Tier: tier, Unscored: true}
+			if got := nextStep(fc, &types.PRRisk{}, &types.Heatmap{}).label; got == "careful review" {
+				t.Errorf("tier %s: careful review", tier)
+			}
 		}
 	})
 }
@@ -150,7 +163,7 @@ func TestIssueURL(t *testing.T) {
 		}
 	})
 	t.Run("too long for a link", func(t *testing.T) {
-		if u, ok := issueURL("o/r", "t", strings.Repeat("x", 2000)); ok {
+		if u, ok := issueURL("o/r", "t", strings.Repeat("x", maxURL)); ok {
 			t.Errorf("%d-char URL accepted", len(u))
 		}
 	})
@@ -180,7 +193,7 @@ func issuePR() (*types.PRRisk, *types.Heatmap) {
 func TestIssueLinks(t *testing.T) {
 	t.Run("at most five, riskiest files first, only agent-shaped items", func(t *testing.T) {
 		risk, hm := issuePR()
-		links := issueLinks(risk, ranked(risk.FilesChanged), hm, "o/r")
+		links := issueLinks(risk, ranked(risk.FilesChanged), hm, Links{Repo: "o/r"})
 		if len(links) != maxLinks {
 			t.Fatalf("%d links, want %d", len(links), maxLinks)
 		}
@@ -199,7 +212,8 @@ func TestIssueLinks(t *testing.T) {
 				t.Fatalf("bad url %q (%v)", l.url, err)
 			}
 			body := q.Query().Get("body")
-			for _, want := range []string{"File: `" + l.file + "`", "Why: ", "Done when: ", "Opened from the HighStakes PR comment"} {
+			for _, want := range []string{"## Why it matters\n", "## Why now\n", "## Suggested approach\n1. ", "## Done when\n- [ ] ",
+				"- [ ] tests pass\n", "## Context\n", "_Opened from the HighStakes PR comment_"} {
 				if !strings.Contains(body, want) {
 					t.Errorf("body missing %q:\n%s", want, body)
 				}
@@ -216,7 +230,7 @@ func TestIssueLinks(t *testing.T) {
 		}
 		risk.WorthDoing = nil
 		var got []string
-		for _, l := range issueLinks(risk, ranked(risk.FilesChanged), hm, "o/r") {
+		for _, l := range issueLinks(risk, ranked(risk.FilesChanged), hm, Links{Repo: "o/r"}) {
 			got = append(got, l.title)
 		}
 		want := "Split pkg/s0.go into smaller files|Split pkg/s1.go into smaller files|Add tests next to pkg/s0.go"
@@ -228,7 +242,7 @@ func TestIssueLinks(t *testing.T) {
 		risk, hm := issuePR()
 		risk.Backlog = []types.Action{{ID: "document-invariants", Text: "Document", Signal: "ana@example.com wrote 90% of it", Files: []string{"pkg/s0.go"}}}
 		risk.WorthDoing = nil
-		links := issueLinks(risk, ranked(risk.FilesChanged), hm, "o/r")
+		links := issueLinks(risk, ranked(risk.FilesChanged), hm, Links{Repo: "o/r"})
 		if len(links) != 1 {
 			t.Fatalf("links = %+v", links)
 		}
@@ -237,9 +251,70 @@ func TestIssueLinks(t *testing.T) {
 			t.Errorf("email leaked through URL encoding: %s", u)
 		}
 	})
+	t.Run("the brief links back to the PR and commit and names handles only", func(t *testing.T) {
+		risk, hm := issuePR()
+		risk.PRNumber = 12
+		risk.Checklist = []types.Action{{ID: "owner-review", Owners: []string{"ana@example.com", "7+bo@users.noreply.github.com"}, Files: []string{"pkg/s0.go"}}}
+		risk.SuggestedReviewers = []types.Reviewer{{Handle: "carl@example.com", Files: []string{"pkg/s2.go"}}}
+		fc := risk.FilesChanged[0]
+		fc.Autonomy = &types.Autonomy{Level: 2, Label: "auto-fix, human merges"}
+		risk.FilesChanged[0] = fc
+		links := issueLinks(risk, ranked(risk.FilesChanged), hm, Links{Repo: "o/r", SHA: "6ef6978"})
+		body := func(i int) string {
+			q, err := url.Parse(links[i].url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return q.Query().Get("body")
+		}
+		for _, want := range []string{"- Review by: @bo\n", "- From: [PR #12](https://github.com/o/r/pull/12)\n", "- Commit: `6ef6978`\n",
+			"- AI autonomy: L2 auto-fix, human merges: agents may fix and open a PR; a human merges\n"} {
+			if !strings.Contains(body(0), want) {
+				t.Errorf("missing %q in:\n%s", want, body(0))
+			}
+		}
+		if b := body(2); !strings.Contains(b, "- Review by: someone who knows the file\n") || strings.Contains(b, "example.com") {
+			t.Errorf("private email reviewer should read as someone who knows the file:\n%s", b)
+		}
+		noPR := issueLinks(&types.PRRisk{FilesChanged: risk.FilesChanged, Backlog: risk.Backlog}, ranked(risk.FilesChanged), hm, Links{Repo: "o/r"})
+		if u, _ := url.QueryUnescape(noPR[0].url); strings.Contains(u, "PR #") || strings.Contains(u, "Commit:") {
+			t.Errorf("PR link or commit without a PR number or SHA:\n%s", u)
+		}
+	})
+	t.Run("a huge brief is trimmed to fit the URL, never dropped or broken", func(t *testing.T) {
+		risk, hm := issuePR()
+		f := hm.Files["pkg/s0.go"]
+		f.ImpactAssessed = true
+		f.Factors.BlastRadius = types.BlastRadius{Assessed: true, Summary: strings.Repeat("Huge consequence. ", 600), CriticalReason: strings.Repeat("ünïcode reason ", 400)}
+		var reasons []string
+		for i := 0; i < 200; i++ {
+			reasons = append(reasons, fmt.Sprintf("signal %d by ana@example.com", i))
+		}
+		f.Explanation = &types.Explanation{LikelihoodReasons: reasons}
+		l := issueLinks(risk, ranked(risk.FilesChanged), hm, Links{Repo: "o/r"})[0]
+		if l.url == "" || len(l.url) > maxURL {
+			t.Fatalf("url length %d, want 1..%d", len(l.url), maxURL)
+		}
+		q, err := url.Parse(l.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := q.Query().Get("body")
+		if !utf8.ValidString(body) {
+			t.Error("trimming broke a UTF-8 character")
+		}
+		for _, want := range []string{"## Why it matters\n- Huge consequence.", "## Done when\n", "_Opened from the HighStakes PR comment_"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("trimmed body lost %q:\n%s", want, body)
+			}
+		}
+		if strings.Contains(body, "example.com") {
+			t.Errorf("email in the issue body:\n%s", body)
+		}
+	})
 	t.Run("without a repo there are plain-text items, no URLs", func(t *testing.T) {
 		risk, hm := issuePR()
-		for _, l := range issueLinks(risk, ranked(risk.FilesChanged), hm, "") {
+		for _, l := range issueLinks(risk, ranked(risk.FilesChanged), hm, Links{}) {
 			if l.url != "" {
 				t.Errorf("url without a repo: %+v", l)
 			}
@@ -297,44 +372,101 @@ func TestBreakerLine(t *testing.T) {
 }
 
 func TestQuadrantChart(t *testing.T) {
-	risk := &types.PRRisk{LikelyCutoff: 33, ImpactThreshold: 78}
+	risk := &types.PRRisk{LikelyCutoff: 33, ImpactThreshold: 78,
+		Checklist:  []types.Action{{ID: "senior-review", Files: []string{"net/proxy.rs"}}},
+		WorthDoing: []types.Action{{ID: "refactor", Files: []string{"a/policy.rs"}}}}
 	files := []types.FileChange{
 		{Path: "net/proxy.rs", Likelihood: 50, Impact: 92, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical},
+		// on the impact cutoff: plotted inside Harden now, not on the border
+		{Path: "pkg/heatmap.go", Likelihood: 34, Impact: 78, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical},
 		{Path: "net/policy.rs", Likelihood: 5, Impact: 80, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
 		{Path: "a/policy.rs", Likelihood: 100, Impact: 0, ImpactAssessed: true, Quadrant: types.QuadrantWatch},
 		{Path: "x/we[ir]d:name;.go", Likelihood: 40, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch},
 		{Path: "net/new.rs", Tier: types.TierHigh, Unscored: true}, // no scores to plot
 		{Path: "ui/r.go", Likelihood: 3, Impact: 3, ImpactAssessed: true, Quadrant: types.QuadrantLow},
 	}
-	golden(t, "chart", quadrantChart(files, risk))
+	golden(t, "chart", quadrantChart(ranked(files), risk, &types.Heatmap{}))
 
 	t.Run("no non-routine files, no chart", func(t *testing.T) {
-		if got := quadrantChart(files[5:], risk); got != "" {
+		if got := quadrantChart(files[6:], risk, &types.Heatmap{}); got != "" {
 			t.Errorf("chart for routine-only PR:\n%s", got)
 		}
 	})
-	t.Run("every point lands in its posture's quadrant", func(t *testing.T) {
-		got := quadrantChart([]types.FileChange{
+	t.Run("every point sits inside its posture's quadrant, off the borders", func(t *testing.T) {
+		in := []types.FileChange{
 			// unassessed: posture from the tier, so its scores can sit below the cutoffs
 			{Path: "u.go", Tier: types.TierMedium, Likelihood: 20, Impact: 40},
 			{Path: "at.go", Likelihood: 33, Impact: 78, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical},
 			{Path: "p.go", Tier: types.TierHigh, Likelihood: 90, Impact: 10},
-		}, risk)
-		for _, want := range []string{"  u.go: [0.52, 0.26]\n", "  at.go: [0.52, 0.52]\n", "  p.go: [0.48, 0.52]\n"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("missing %q in:\n%s", want, got)
+		}
+		got := points(t, quadrantChart(in, risk, &types.Heatmap{}))
+		want := map[string][2]bool{"1": {true, false}, "2": {true, true}, "3": {false, true}} // label: high x, high y
+		for label, hi := range want {
+			p, ok := got[label]
+			if !ok {
+				t.Fatalf("no point %s in %v", label, got)
+			}
+			for axis, v := range p {
+				lo, up := 0.1, 0.4
+				if hi[axis] {
+					lo, up = 0.6, 0.9
+				}
+				if v < lo || v > up {
+					t.Errorf("point %s axis %d = %.2f, want within [%.1f, %.1f]", label, axis, v, lo, up)
+				}
 			}
 		}
 	})
-	t.Run("at most fifteen points", func(t *testing.T) {
+	t.Run("points never crowd, even when scores tie or correlate", func(t *testing.T) {
+		for name, score := range map[string]func(i int) (int, int){
+			"ties":       func(int) (int, int) { return 50, 90 },
+			"correlated": func(i int) (int, int) { return 40 + i, 20 + i },
+		} {
+			var fs []types.FileChange
+			for i := 0; i < maxChartPoints; i++ {
+				l, im := score(i)
+				fs = append(fs, types.FileChange{Path: fmt.Sprintf("s%02d.go", i), Tier: types.TierMedium, Likelihood: l, Impact: im})
+			}
+			var ps [][2]float64
+			for _, p := range points(t, quadrantChart(fs, risk, &types.Heatmap{})) {
+				ps = append(ps, p)
+			}
+			for i := range ps {
+				for j := i + 1; j < len(ps); j++ {
+					if d := math.Hypot(ps[i][0]-ps[j][0], ps[i][1]-ps[j][1]); d < 0.05 {
+						t.Errorf("%s: points %v and %v are %.3f apart, want at least 0.05", name, ps[i], ps[j], d)
+					}
+				}
+			}
+		}
+	})
+	t.Run("at most fifteen points, each with a legend line", func(t *testing.T) {
 		var many []types.FileChange
 		for i := 0; i < 20; i++ {
 			many = append(many, types.FileChange{Path: fmt.Sprintf("p/f%d.go", i), Likelihood: 50, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical})
 		}
-		if n := strings.Count(quadrantChart(many, risk), ": ["); n != maxChartPoints {
+		out := quadrantChart(many, risk, &types.Heatmap{})
+		if n := len(points(t, out)); n != maxChartPoints {
 			t.Errorf("%d points, want %d", n, maxChartPoints)
 		}
+		if !strings.Contains(out, "15. ⛔ `p/f14.go`: senior sign-off\n") || strings.Contains(out, "16. ") {
+			t.Errorf("legend should list exactly the fifteen points:\n%s", out)
+		}
 	})
+}
+
+var pointRe = regexp.MustCompile(`(?m)^  (\S+): \[([0-9.]+), ([0-9.]+)\]$`)
+
+// points parses a chart's points by label.
+func points(t *testing.T, chart string) map[string][2]float64 {
+	t.Helper()
+	out := map[string][2]float64{}
+	for _, m := range pointRe.FindAllStringSubmatch(chart, -1) {
+		x, _ := strconv.ParseFloat(m[2], 64)
+		y, _ := strconv.ParseFloat(m[3], 64)
+		out[m[1]] = [2]float64{x, y}
+	}
+	return out
 }
 
 func TestOneClick_SkipsDoneActions(t *testing.T) {

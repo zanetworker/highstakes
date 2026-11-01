@@ -167,7 +167,7 @@ func likelihoodReasons(s signals) []string {
 	cx := f.Factors.Complexity
 	switch {
 	case notable(s.complexTop()):
-		out = append(out, fmt.Sprintf("%s, cyclomatic %d in one file %s", count(cx.FunctionCount, "function"), cx.Cyclomatic, pct(s.complexTop())))
+		out = append(out, fmt.Sprintf("%s, cyclomatic %s in one file %s", count(cx.FunctionCount, "function"), Thousands(cx.Cyclomatic), pct(s.complexTop())))
 	case notable(s.linesTop):
 		out = append(out, fmt.Sprintf("%s in one file %s", count(f.Size.Lines, "line"), pct(s.linesTop)))
 	}
@@ -196,12 +196,12 @@ func likelihoodReasons(s signals) []string {
 	return out
 }
 
-// count is "1 author" or "N authors".
+// count is "1 author" or "N authors", N with thousands separators.
 func count(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
 	}
-	return fmt.Sprintf("%d %ss", n, word)
+	return Thousands(n) + " " + word + "s"
 }
 
 // importedBy is "1 file imports it" or "N files import it".
@@ -209,7 +209,19 @@ func importedBy(n int) string {
 	if n == 1 {
 		return "1 file imports it"
 	}
-	return fmt.Sprintf("%d files import it", n)
+	return Thousands(n) + " files import it"
+}
+
+// Thousands formats n with comma separators: 43274 -> "43,274".
+func Thousands(n int) string {
+	s, sign := fmt.Sprint(n), ""
+	if n < 0 {
+		s, sign = s[1:], "-"
+	}
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return sign + s
 }
 
 // describeChange quotes a commit subject (truncated) with its date.

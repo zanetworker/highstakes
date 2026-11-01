@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -246,6 +247,24 @@ func commentRepo(flag, env string, origin func() (prdata.Repo, error)) (string, 
 		return r.String(), nil
 	}
 	return "", nil
+}
+
+var pullRef = regexp.MustCompile(`^refs/pull/(\d+)/(?:merge|head)$`)
+
+// prNumber is the PR the comment's issues link back to: --pr, else the
+// number in $GITHUB_REF (refs/pull/N/merge in Actions), else 0 (no link).
+func prNumber(flag int, ref string) (int, error) {
+	if flag < 0 {
+		return 0, fmt.Errorf("--pr must be a positive PR number (got: %d)", flag)
+	}
+	if flag > 0 {
+		return flag, nil
+	}
+	if m := pullRef.FindStringSubmatch(ref); m != nil {
+		n, _ := strconv.Atoi(m[1]) // the pattern guarantees digits
+		return n, nil
+	}
+	return 0, nil
 }
 
 var commitish = regexp.MustCompile(`^([0-9a-f]{7,40}|HEAD)$|[~^@:]`)

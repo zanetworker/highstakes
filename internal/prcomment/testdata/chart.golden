@@ -7,8 +7,15 @@ quadrantChart
   quadrant-2 Protect
   quadrant-3 Routine
   quadrant-4 Stabilize
-  proxy.rs: [0.63, 0.82]
-  policy.rs: [0.08, 0.55]
-  policy.rs 2: [0.98, 0.02]
-  weirdname.go: [0.55, 0.06]
+  1: [0.81, 0.75]
+  2: [0.69, 0.75]
+  3: [0.25, 0.75]
+  4: [0.69, 0.25]
+  5: [0.81, 0.25]
 ```
+
+1. ⛔ `net/proxy.rs`: senior sign-off
+2. ⛔ `pkg/heatmap.go`: senior sign-off
+3. 🛡 `net/policy.rs`: owner review
+4. 🔧 `x/we[ir]d:name;.go`: review the change
+5. 🔧 `a/policy.rs`: refactor

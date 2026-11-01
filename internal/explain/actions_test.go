@@ -88,7 +88,7 @@ func TestActions_Rules(t *testing.T) {
 			texts: map[string]string{"senior-review": "Get sign-off from a senior owner"}},
 		{name: "split by cyclomatic when functions are not top 5%",
 			edit:    func(f *types.FileHeat) { f.Factors.Complexity.FunctionCount = 1 },
-			signals: map[string]string{"split": "cyclomatic 1092 in one file (top 1%)"}},
+			signals: map[string]string{"split": "cyclomatic 1,092 in one file (top 1%)"}},
 		{name: "no split, no contract tests when signals are ordinary",
 			edit: func(f *types.FileHeat) {
 				f.Factors.Complexity = types.Complexity{Cyclomatic: 1, FunctionCount: 1}
@@ -142,7 +142,7 @@ func TestActions_Rules(t *testing.T) {
 			has:    []string{"regression-tests", "refactor", "single-owner", "complexity-issue", "ownership-issue"},
 			hasnt:  []string{"codeowners", "senior-review", "no-auto-merge", "stable-interface"},
 			texts: map[string]string{
-				"refactor":     "Refactor the function you touch: cyclomatic 1092 across 479 functions",
+				"refactor":     "Refactor the function you touch: cyclomatic 1,092 across 479 functions",
 				"single-owner": "Add a second reviewer: @solo wrote 80% of it",
 			}},
 		{name: "stabilize with one fix does not ask for tests",

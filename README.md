@@ -457,7 +457,7 @@ highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] |
 
 </details>
 
-**What the PR comment looks like** (a `pr check --format markdown` on NVIDIA/OpenShell after the PR also changed a test next to `proxy.rs`, with `--repo NVIDIA/OpenShell`; issue URLs shortened here; GitHub folds the `<details>` blocks):
+**What the PR comment looks like** (a `pr check --format markdown` on NVIDIA/OpenShell after the PR also changed a test next to `proxy.rs`, with `--repo NVIDIA/OpenShell`; issue URLs and reasons shortened here; GitHub folds the `<details>` blocks):
 
 ```markdown
 ## ⛔ Harden before merge
@@ -476,16 +476,29 @@ highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] |
 |    | File | If it breaks | Breaks often? | Next step |
 |---|---|---|---|---|
 | ⛔ | `crates/openshell-supervisor-network/src/proxy.rs` | Core sandbox egress proxy; bugs can block traffic or bypass network policy. | 🔴 4 recent fixes | 👀 senior sign-off · [📝 open issue](https://github.com/NVIDIA/OpenShell/issues/new?title=Split...) |
-| ⛔ | `crates/openshell-supervisor-network/src/egress_audit.rs` | new file: treated like its directory (harden now) | 🆕 new file | careful review |
+| ⛔ | `crates/openshell-supervisor-network/src/egress_audit.rs` | new file: treated like its directory (harden now) | 🆕 new file | 👀 senior sign-off |
 | ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
 
 ### ⚡ One-click actions
 
 - [📝 Open issue: Split crates/openshell-supervisor-network/src/proxy.rs into smaller files](https://github.com/NVIDIA/OpenShell/issues/new?title=Split...)
+  <details><summary>What's in this issue</summary>
+
+  - **Why it matters:** Core sandbox egress proxy; bugs can block traffic or bypass network policy. · Top impact: security 92 · availability 85
+  - **Why now:** Harden now: likely to break and costly if it does; Will it break? 50 (high, cutoff 33); How bad if it breaks? 92 (high, cutoff 78); Recent fixes: "fix(proxy): ..." (2026-10-28); ...
+  - **Suggested approach:** 1. Identify cohesive groups of the 479 functions (functions that share data or callers) 2. Move one group per PR into a new file in the same package 3. Keep the public API unchanged so importers need no edits 4. Run the tests after each move
+  - **Done when:** the 479 functions of crates/openshell-supervisor-network/src/proxy.rs are spread over smaller files; tests pass
+  - **Who / autonomy:** @johntmyers · L0 assist only
+
+  </details>
 - 🆕 Unscored new file(s), treated like their directory until the next analyze scores them: crates/openshell-supervisor-network/src/egress_audit.rs
 
 <details><summary>🗺 Where this PR lands</summary>
-(a Mermaid quadrant chart of the non-routine files)
+
+(a Mermaid quadrant chart with numbered points, each inside its posture's quadrant, then a legend)
+
+1. ⛔ `crates/openshell-supervisor-network/src/proxy.rs`: senior sign-off
+
 </details>
 
 <details><summary>Why these actions?</summary>

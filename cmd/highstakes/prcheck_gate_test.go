@@ -127,3 +127,29 @@ func TestLinkBase(t *testing.T) {
 		})
 	}
 }
+
+func TestPRNumber(t *testing.T) {
+	tests := []struct {
+		name    string
+		flag    int
+		ref     string
+		want    int
+		wantErr bool
+	}{
+		{"flag wins", 7, "refs/pull/12/merge", 7, false},
+		{"GitHub Actions pull request ref", 0, "refs/pull/12/merge", 12, false},
+		{"head ref form", 0, "refs/pull/345/head", 345, false},
+		{"branch ref: no PR", 0, "refs/heads/main", 0, false},
+		{"malformed ref", 0, "refs/pull/abc/merge", 0, false},
+		{"nothing known", 0, "", 0, false},
+		{"negative flag is invalid", -1, "", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := prNumber(tt.flag, tt.ref)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("prNumber(%d, %q) = %d, %v; want %d, err=%v", tt.flag, tt.ref, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

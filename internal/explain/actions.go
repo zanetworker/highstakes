@@ -63,7 +63,7 @@ var rules = []rule{
 	}},
 	{"refactor", beforeMerge, []types.Quadrant{stabilize}, func(s signals) (fired, bool) {
 		cx := s.f.Factors.Complexity
-		return fired{text: fmt.Sprintf("Refactor the function you touch: cyclomatic %d across %s", cx.Cyclomatic, count(cx.FunctionCount, "function")),
+		return fired{text: fmt.Sprintf("Refactor the function you touch: cyclomatic %s across %s", Thousands(cx.Cyclomatic), count(cx.FunctionCount, "function")),
 			signal: fmt.Sprintf("complexity in the top %d%% of this repo", s.complexTop())}, notable(s.complexTop())
 	}},
 	{"single-owner", beforeMerge, []types.Quadrant{stabilize, unassessed}, func(s signals) (fired, bool) {
@@ -92,7 +92,7 @@ var rules = []rule{
 		case s.fnTop > 0 && s.fnTop <= splitTop:
 			sig = fmt.Sprintf("%s in one file (top %d%%)", count(cx.FunctionCount, "function"), s.fnTop)
 		case s.cycTop > 0 && s.cycTop <= splitTop:
-			sig = fmt.Sprintf("cyclomatic %d in one file (top %d%%)", cx.Cyclomatic, s.cycTop)
+			sig = fmt.Sprintf("cyclomatic %s in one file (top %d%%)", Thousands(cx.Cyclomatic), s.cycTop)
 		default:
 			return fired{}, false
 		}
@@ -118,7 +118,7 @@ var rules = []rule{
 	}},
 	{"complexity-issue", backlog, []types.Quadrant{stabilize}, func(s signals) (fired, bool) {
 		cx := s.f.Factors.Complexity
-		sig := fmt.Sprintf("cyclomatic %d across %s (top %d%%)", cx.Cyclomatic, count(cx.FunctionCount, "function"), s.complexTop())
+		sig := fmt.Sprintf("cyclomatic %s across %s (top %d%%)", Thousands(cx.Cyclomatic), count(cx.FunctionCount, "function"), s.complexTop())
 		return fired{text: "Open an issue to cut its complexity", signal: sig,
 			command: issue("Cut the complexity of "+s.f.Path, sig)}, notable(s.complexTop())
 	}},

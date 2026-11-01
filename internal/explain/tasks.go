@@ -1,7 +1,6 @@
 package explain
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/zanetworker/highstakes/internal/scorer"
@@ -93,9 +92,13 @@ func TaskTitle(id string, f *types.FileHeat) (string, bool) {
 func Acceptance(id string, f *types.FileHeat) string {
 	switch id {
 	case "split":
-		return "tests pass and the " + count(f.Factors.Complexity.FunctionCount, "function") + " of " + f.Path + " are spread over smaller files"
+		fns := "functions"
+		if n := f.Factors.Complexity.FunctionCount; n > 0 {
+			fns = count(n, "function")
+		}
+		return "tests pass and the " + fns + " of " + f.Path + " are spread over smaller files"
 	case "complexity-issue":
-		return fmt.Sprintf("tests pass and cyclomatic complexity drops below %d", f.Factors.Complexity.Cyclomatic)
+		return "tests pass and cyclomatic complexity drops below " + Thousands(f.Factors.Complexity.Cyclomatic)
 	case "codeowners":
 		return "CODEOWNERS covers " + f.Path
 	case "test-gap":

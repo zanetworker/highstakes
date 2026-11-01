@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -55,7 +56,7 @@ func Render(risk *types.PRRisk, hm *types.Heatmap, links Links) string {
 		verdict = types.TierPosture(risk.Tier)
 	}
 	files := ranked(risk.FilesChanged)
-	issues := issueLinks(risk, files, hm, links.Repo)
+	issues := issueLinks(risk, files, hm, links)
 	var b strings.Builder
 	b.WriteString(Marker + "\n")
 	fmt.Fprintf(&b, "## %s\n\n", headings[verdict])
@@ -66,30 +67,37 @@ func Render(risk *types.PRRisk, hm *types.Heatmap, links Links) string {
 		fmt.Fprintf(&b, "🤖 AI may auto-merge: %s (%s)\n\n", map[bool]string{true: "✅ yes", false: "❌ no"}[risk.AutoMergeAllowed], risk.AutonomyReason)
 	}
 	writeChecklist(&b, risk)
-	writeTable(&b, files, risk, hm, issues)
+	writeTable(&b, files, risk, hm, issues, oneClickSize(issues))
 	writeOneClick(&b, risk, issues, links)
-	if chart := quadrantChart(files, risk); chart != "" && fits(&b, chart) {
+	if chart := quadrantChart(files, risk, hm); chart != "" && fits(&b, chart) {
 		b.WriteString("<details><summary>🗺 Where this PR lands</summary>\n\n" + chart + "\n</details>\n\n")
 	}
 	writeDetails(&b, risk, files, hm)
 	return ScrubEmails(b.String())
 }
 
+// writeChecklist writes the before-merge items; a smaller PR is asked for
+// with the one-click actions instead, once for the whole PR.
 func writeChecklist(b *strings.Builder, risk *types.PRRisk) {
-	if len(risk.Checklist) == 0 {
-		return
-	}
+	var items []types.Action
 	done := 0
 	for _, a := range risk.Checklist {
+		if a.ID == "smaller-pr" {
+			continue
+		}
+		items = append(items, a)
 		if a.Done {
 			done++
 		}
 	}
-	fmt.Fprintf(b, "### ✅ Do before merge (%d of %d done)\n\n", done, len(risk.Checklist))
-	for i, a := range risk.Checklist {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "### ✅ Do before merge (%s of %s done)\n\n", explain.Thousands(done), explain.Thousands(len(items)))
+	for i, a := range items {
 		line := checklistLine(a)
 		if !fits(b, line) {
-			fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list_\n", plural(len(risk.Checklist)-i, "item"))
+			fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list_\n", plural(len(items)-i, "item"))
 			break
 		}
 		b.WriteString(line)
@@ -102,39 +110,99 @@ func writeChecklist(b *strings.Builder, risk *types.PRRisk) {
 // files, large diffs, low test ratio) as things to do, since they flag
 // where the scores themselves are not to be trusted.
 func writeOneClick(b *strings.Builder, risk *types.PRRisk, issues []issueLink, links Links) {
-	var lines []string
+	// extra is optional: dropped first when the budget runs out.
+	type entry struct{ line, extra string }
+	var lines []entry
+	smaller := smallerPR(risk)
+	if smaller != "" {
+		lines = append(lines, entry{line: "- ✂️ " + smaller})
+	}
 	for _, l := range issues {
 		if l.url == "" {
-			lines = append(lines, "- 📝 Open an issue: "+l.title)
+			lines = append(lines, entry{line: "- 📝 Open an issue: " + l.title})
 		} else {
-			lines = append(lines, fmt.Sprintf("- [📝 Open issue: %s](%s)", l.title, l.url))
+			lines = append(lines, entry{line: issueLine(l), extra: compactBrief(l.brief)})
 		}
 	}
 	for _, a := range risk.Backlog {
 		if a.ID == "codeowners" && a.Command != "" && !a.Done && len(lines) < maxLinks {
-			lines = append(lines, codeownersAction(a, links))
+			lines = append(lines, entry{line: codeownersAction(a, links)})
 		}
 	}
 	for _, s := range risk.CircuitBreakerSignals {
+		if smaller != "" && strings.HasPrefix(s, "Large diff") {
+			continue // the smaller-PR ask already says it
+		}
 		line := "- " + breakerLine(s, risk)
 		if room := MaxCommentChars - reserve - b.Len(); len(line) > room/2 {
 			// One signal can list thousands of paths: keep its start, cut the rest.
 			line = line[:max(0, room/2-200)] + "... (omitted to fit GitHub's comment size limit)"
 		}
-		lines = append(lines, line)
+		lines = append(lines, entry{line: line})
 	}
 	if len(lines) == 0 {
 		return
 	}
 	b.WriteString("### ⚡ One-click actions\n\n")
-	for i, l := range lines {
-		if !fits(b, l+"\n") {
+	for i, e := range lines {
+		switch {
+		case e.extra != "" && fits(b, e.line+"\n"+e.extra):
+			b.WriteString(e.line + "\n" + e.extra)
+		case fits(b, e.line+"\n"):
+			b.WriteString(e.line + "\n")
+		default:
 			fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit_\n", plural(len(lines)-i, "action"))
-			break
+			b.WriteString("\n")
+			return
 		}
-		b.WriteString(l + "\n")
 	}
 	b.WriteString("\n")
+}
+
+func issueLine(l issueLink) string { return fmt.Sprintf("- [📝 Open issue: %s](%s)", l.title, l.url) }
+
+// maxCompact caps each line of an issue's folded summary.
+const maxCompact = 300
+
+// compactBrief is the folded summary under a one-click issue link, indented
+// to stay inside its list item.
+func compactBrief(br explain.Brief) string {
+	flat := func(xs []string, sep string) string {
+		return cutRunes(strings.Join(strings.Fields(strings.Join(xs, sep)), " "), maxCompact)
+	}
+	steps := make([]string, len(br.Approach))
+	for i, s := range br.Approach {
+		steps[i] = fmt.Sprintf("%d. %s", i+1, s)
+	}
+	who := br.Who
+	if level, _, _ := strings.Cut(br.Autonomy, ":"); level != "" {
+		who += " · " + level
+	}
+	var s strings.Builder
+	s.WriteString("  <details><summary>What's in this issue</summary>\n\n")
+	for _, l := range []struct{ name, v string }{
+		{"Why it matters", flat(br.WhyItMatters, " · ")},
+		{"Why now", flat(br.WhyNow, "; ")},
+		{"Suggested approach", flat(steps, " ")},
+		{"Done when", flat(br.DoneWhen, "; ")},
+		{"Who / autonomy", flat([]string{who}, "")},
+	} {
+		if l.v != "" {
+			fmt.Fprintf(&s, "  - **%s:** %s\n", l.name, l.v)
+		}
+	}
+	s.WriteString("\n  </details>\n")
+	return s.String()
+}
+
+// smallerPR is the open smaller-PR ask, "" when there is none.
+func smallerPR(risk *types.PRRisk) string {
+	for _, a := range risk.Checklist {
+		if a.ID == "smaller-pr" && !a.Done {
+			return a.Text
+		}
+	}
+	return ""
 }
 
 var (
@@ -184,7 +252,20 @@ func ranked(fcs []types.FileChange) []types.FileChange {
 	return out
 }
 
-func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk, hm *types.Heatmap, issues []issueLink) {
+// oneClickSize is the room the one-click issue lines and summaries need.
+func oneClickSize(issues []issueLink) int {
+	n := 0
+	for _, l := range issues {
+		if l.url != "" {
+			n += len(issueLine(l)) + 1 + len(compactBrief(l.brief))
+		}
+	}
+	return n
+}
+
+// writeTable writes the file table. A row links its issue only while the
+// one-click section (keep bytes) still fits after it.
+func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk, hm *types.Heatmap, issues []issueLink, keep int) {
 	b.WriteString("|    | File | If it breaks | Breaks often? | Next step |\n|---|---|---|---|---|\n")
 	var more []types.FileChange
 	shown, rest := 0, 0
@@ -196,10 +277,12 @@ func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk
 			more = append(more, fc)
 		default:
 			shown++
-			do := nextStep(fc, risk).label
+			do := nextStep(fc, risk, hm).label
 			for _, l := range issues {
-				if l.file == fc.Path && l.url != "" {
-					do += fmt.Sprintf(" · [📝 open issue](%s)", l.url)
+				if link := fmt.Sprintf(" · [📝 open issue](%s)", l.url); l.file == fc.Path && l.url != "" {
+					if b.Len()+len(link)+keep+maxCell*4 <= MaxCommentChars-reserve {
+						do += link
+					}
 					break
 				}
 			}
@@ -209,9 +292,9 @@ func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk
 	}
 	switch {
 	case rest > 0 && shown > 0:
-		fmt.Fprintf(b, "| ✅ | %d other %s | limited damage | 🟢 rarely | normal review |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| ✅ | %s other %s | limited damage | 🟢 rarely | normal review |\n", explain.Thousands(rest), plural(rest, "file"))
 	case rest > 0:
-		fmt.Fprintf(b, "| ✅ | %d %s | limited damage | 🟢 rarely | normal review |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| ✅ | %s %s | limited damage | 🟢 rarely | normal review |\n", explain.Thousands(rest), plural(rest, "file"))
 	}
 	b.WriteString("\n")
 	if len(more) == 0 {
@@ -221,16 +304,49 @@ func writeTable(b *strings.Builder, files []types.FileChange, risk *types.PRRisk
 	if len(more) == 1 {
 		need = "file needs"
 	}
-	fmt.Fprintf(b, "<details><summary>📋 %d more %s action</summary>\n\n", len(more), need)
-	for i, fc := range more {
-		line := fmt.Sprintf("- %s `%s`: %s\n", postureEmoji[posture(fc)], fc.Path, nextStep(fc, risk).label)
+	fmt.Fprintf(b, "<details><summary>📋 %s more %s action</summary>\n\n", explain.Thousands(len(more)), need)
+	writeGrouped(b, more, risk, hm)
+	b.WriteString("\n</details>\n\n")
+}
+
+// maxGroupFiles caps the files named on one folded line.
+const maxGroupFiles = 20
+
+// writeGrouped writes the folded files one line per next step, riskiest
+// step first: "- ✂️ refactor: `a.go`, `b.go` (and 12 more)".
+func writeGrouped(b *strings.Builder, files []types.FileChange, risk *types.PRRisk, hm *types.Heatmap) {
+	var order []string
+	groups := map[string][]string{}
+	for _, fc := range files {
+		l := nextStep(fc, risk, hm).label
+		if _, ok := groups[l]; !ok {
+			order = append(order, l)
+		}
+		groups[l] = append(groups[l], fc.Path)
+	}
+	for i, l := range order {
+		paths := groups[l]
+		n := min(len(paths), maxGroupFiles)
+		line := groupLine(l, paths, n)
+		for n > 1 && !fits(b, line) {
+			n /= 2
+			line = groupLine(l, paths, n)
+		}
 		if i == maxFoldLines || !fits(b, line) {
-			fmt.Fprintf(b, "- _%s more; run `highstakes pr check` for the full list_\n", plural(len(more)-i, "file"))
+			fmt.Fprintf(b, "- _%s more; run `highstakes pr check` for the full list_\n", plural(len(order)-i, "next step"))
 			break
 		}
 		b.WriteString(line)
 	}
-	b.WriteString("\n</details>\n\n")
+}
+
+// groupLine names the first n paths of a next-step group.
+func groupLine(label string, paths []string, n int) string {
+	line := "- " + label + ": " + codeList(paths[:n])
+	if rest := len(paths) - n; rest > 0 {
+		line += " (and " + explain.Thousands(rest) + " more)"
+	}
+	return line + "\n"
 }
 
 // maxCell keeps table cells to one readable line.
@@ -311,7 +427,7 @@ func writeFileReasons(b *strings.Builder, risk *types.PRRisk, fc types.FileChang
 		b.WriteString("- New file: not scored yet, so it takes the tier of its directory\n")
 	}
 	for _, a := range risk.Checklist {
-		if contains(a.Files, fc.Path) && a.Signal != "" {
+		if contains(a.Files, fc.Path) && a.Signal != "" && a.ID != "smaller-pr" {
 			fmt.Fprintf(b, "- %s: %s\n", a.Text, a.Signal)
 		}
 	}

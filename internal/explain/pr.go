@@ -63,7 +63,7 @@ func appendSmallerPR(out []types.Action, f *types.FileHeat, c Change) []types.Ac
 	}
 	return append(out, types.Action{
 		ID:     "smaller-pr",
-		Text:   fmt.Sprintf("Ask for a smaller PR: %d lines across %d %s", c.Lines, c.Components, unit),
+		Text:   fmt.Sprintf("Ask for a smaller PR: %s lines across %d %s", Thousands(c.Lines), c.Components, unit),
 		Scope:  types.ScopeBeforeMerge,
 		Signal: fmt.Sprintf("large change to a Harden now file (over %d lines or %d+ components)", largePRLines, unrelatedComponents),
 	})

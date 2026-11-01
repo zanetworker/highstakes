@@ -33,7 +33,7 @@ func golden(t *testing.T, name, got string) {
 
 func hardenPR() (*types.PRRisk, *types.Heatmap) {
 	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
-		"net/proxy.rs": {Path: "net/proxy.rs", Explanation: &types.Explanation{
+		"net/proxy.rs": {Path: "net/proxy.rs", Likelihood: 50, Impact: 92, ImpactAssessed: true, Explanation: &types.Explanation{
 			ImpactReasons:     []string{"security 92 · availability 85", `"Core egress proxy."`},
 			LikelihoodReasons: []string{"55 commits in the last 90 days (top 1% of this repo)", "11 files import it (top 1%)"},
 		}, Factors: types.Factors{BlastRadius: types.BlastRadius{Assessed: true, Summary: "Core egress proxy that enforces network policy."}}},
@@ -71,6 +71,21 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 				Command: "gh issue create --title 'Split net/proxy.rs' --body 'x'", Files: []string{"net/proxy.rs"}},
 		},
 		SuggestedReviewers: []types.Reviewer{{Handle: "@ana"}, {Handle: "@bo"}},
+	}
+	return risk, hm
+}
+
+// issueHeavyPR has many Harden now files whose briefs fill the URL limit.
+func issueHeavyPR() (*types.PRRisk, *types.Heatmap) {
+	risk := &types.PRRisk{Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	for i := 0; i < 12; i++ {
+		p := fmt.Sprintf("core/h%d.go", i)
+		risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: p, Tier: types.TierCritical,
+			Likelihood: 60, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical})
+		hm.Files[p] = &types.FileHeat{Path: p, ImpactAssessed: true, Factors: types.Factors{BlastRadius: types.BlastRadius{
+			Assessed: true, Summary: strings.Repeat("Long consequence. ", 400)}}}
+		risk.Backlog = append(risk.Backlog, types.Action{ID: "split", Text: "Split it", Files: []string{p}, Signal: "x"})
 	}
 	return risk, hm
 }
@@ -161,7 +176,7 @@ func TestRender_Rules(t *testing.T) {
 		if !strings.Contains(out, "| ⛔ | `net/proxy.rs` | Core egress proxy that enforces network policy. | 🔴 55 commits in the last 90 days | 👀 senior sign-off |") {
 			t.Errorf("proxy row not in plain words:\n%s", out)
 		}
-		if !strings.Contains(out, "| 🛡 | `net/policy.rs` | security 80 | 🟢 rarely | 🚫 no auto-merge |") {
+		if !strings.Contains(out, "| 🛡 | `net/policy.rs` | security 80 | 🟢 rarely | 👀 owner review |") {
 			t.Errorf("policy row not in plain words:\n%s", out)
 		}
 		table := out[strings.Index(out, "| File |"):strings.Index(out, "<details>")]
@@ -273,8 +288,8 @@ func TestRender_Rules(t *testing.T) {
 		if n := strings.Count(out, "| 🔧 |"); n != 5 {
 			t.Errorf("%d Stabilize rows, want 5:\n%s", n, out)
 		}
-		if !strings.Contains(out, "<details><summary>📋 2 more files need action</summary>\n\n- 🔧 `s1.go`: careful review\n- 🔧 `s0.go`: careful review\n") {
-			t.Errorf("overflow files not folded one line each:\n%s", out)
+		if !strings.Contains(out, "<details><summary>📋 2 more files need action</summary>\n\n- 🔍 review the change: `s1.go`, `s0.go`\n") {
+			t.Errorf("overflow files not grouped by next step:\n%s", out)
 		}
 		if !strings.Contains(out, "| ✅ | 1 other file | limited damage | 🟢 rarely | normal review |") {
 			t.Errorf("routine row should hold only routine files:\n%s", out)
@@ -284,6 +299,46 @@ func TestRender_Rules(t *testing.T) {
 		}
 		if !strings.Contains(out, "`s6.go`") || strings.Contains(out, "`s0.go` |") {
 			t.Errorf("rows not ordered by score:\n%s", out)
+		}
+	})
+	t.Run("thousands of folded files are grouped by next step", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78}
+		for i := 0; i < 3000; i++ {
+			p := fmt.Sprintf("pkg/f%04d.go", i)
+			risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: p, Tier: types.TierMedium,
+				Likelihood: 40, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch})
+			id := "refactor"
+			if i%2 == 1 {
+				id = "complexity-issue"
+			}
+			risk.WorthDoing = append(risk.WorthDoing, types.Action{ID: id, Text: "x " + p, Files: []string{p}})
+		}
+		out := Render(risk, &types.Heatmap{}, Links{})
+		if len(out) > MaxCommentChars {
+			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
+		}
+		_, fold, _ := strings.Cut(out, "<summary>📋 2,995 more files need action</summary>")
+		fold, _, _ = strings.Cut(fold, "</details>")
+		if n := strings.Count(fold, "\n- "); n != 2 {
+			t.Errorf("%d fold lines, want one per next step (2):\n%s", n, fold)
+		}
+		for _, want := range []string{"- ✂️ refactor: `pkg/f0006.go`, `pkg/f0008.go`", "- ✂️ cut complexity: `pkg/f0005.go`, `pkg/f0007.go`", "more)\n"} {
+			if !strings.Contains(fold, want) {
+				t.Errorf("missing %q in fold:\n%.600s", want, fold)
+			}
+		}
+	})
+	t.Run("routine counts use thousands separators", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierHigh, Verdict: "Protect", LikelyCutoff: 33, ImpactThreshold: 78,
+			FilesChanged: []types.FileChange{{Path: "p.go", Tier: types.TierHigh, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantProtect}}}
+		for i := 0; i < 1500; i++ {
+			risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: fmt.Sprintf("r%d.go", i), Tier: types.TierLow, ImpactAssessed: true, Quadrant: types.QuadrantLow})
+		}
+		out := Render(risk, &types.Heatmap{}, Links{})
+		for _, want := range []string{"🛡 1 protect · ✅ 1,500 routine", "| ✅ | 1,500 other files |"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%.800s", want, out)
+			}
 		}
 	})
 	t.Run("no heat score, review time or tier names", func(t *testing.T) {
@@ -352,6 +407,42 @@ func TestRender_Rules(t *testing.T) {
 			}
 		}
 	})
+	t.Run("each issue link shows what is in the issue", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.PRNumber = 12
+		out := Render(risk, hm, Links{Repo: "acme/net", Base: "main", SHA: "6ef6978"})
+		_, after, ok := strings.Cut(out, "- [📝 Open issue: Split net/proxy.rs into smaller files](")
+		if !ok {
+			t.Fatalf("issue link missing:\n%s", out)
+		}
+		_, block, _ := strings.Cut(after, ")\n")
+		block, _, _ = strings.Cut(block, "  </details>\n")
+		for _, want := range []string{
+			"  <details><summary>What's in this issue</summary>\n\n",
+			"  - **Why it matters:** Core egress proxy that enforces network policy.",
+			"  - **Why now:** Harden now: likely to break and costly if it does; Will it break? 50 (high, cutoff 33)",
+			"  - **Suggested approach:** 1. Identify cohesive groups",
+			"  - **Done when:** the functions of net/proxy.rs are spread over smaller files; tests pass\n",
+			"  - **Who / autonomy:** @ana, @bo\n",
+		} {
+			if !strings.Contains(block, want) {
+				t.Errorf("missing %q in:\n%s", want, block)
+			}
+		}
+	})
+	t.Run("long issue URLs never crowd out the one-click section", func(t *testing.T) {
+		risk, hm := issueHeavyPR()
+		out := Render(risk, hm, Links{Repo: "acme/net"})
+		if len(out) > MaxCommentChars {
+			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
+		}
+		if n := strings.Count(out, "- [📝 Open issue: "); n != maxLinks {
+			t.Errorf("%d one-click issue links, want %d", n, maxLinks)
+		}
+		if n := strings.Count(out, "<summary>What's in this issue</summary>"); n != maxLinks {
+			t.Errorf("%d issue summaries, want %d", n, maxLinks)
+		}
+	})
 	t.Run("without a repo, actions are plain text", func(t *testing.T) {
 		risk, hm := hardenPR()
 		out := Render(risk, hm, Links{})
@@ -367,6 +458,26 @@ func TestRender_Rules(t *testing.T) {
 			FilesChanged: []types.FileChange{{Path: "a.go", LinesAdded: 1200, LinesDeleted: 34, ImpactAssessed: true, Quadrant: types.QuadrantLow}}}
 		if out := Render(risk, &types.Heatmap{}, Links{}); !strings.Contains(out, "- ✂️ Large diff (1,234 lines): consider splitting this PR\n") {
 			t.Errorf("large diff action missing:\n%s", out)
+		}
+	})
+	t.Run("a smaller PR is asked for once, as a PR-level action", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.CircuitBreakerSignals = []string{"Large diff (>500 lines)"}
+		risk.Checklist = append([]types.Action{{ID: "smaller-pr", Text: "Ask for a smaller PR: 1,234 lines across 3 components",
+			Scope: types.ScopeBeforeMerge, Signal: "large change", Files: []string{"net/proxy.rs", "net/other.rs"}}}, risk.Checklist...)
+		out := Render(risk, hm, Links{})
+		if n := strings.Count(out, "smaller PR"); n != 1 {
+			t.Errorf("\"smaller PR\" appears %d times, want once:\n%s", n, out)
+		}
+		_, oneClick, _ := strings.Cut(out, "### ⚡ One-click actions")
+		if !strings.HasPrefix(oneClick, "\n\n- ✂️ Ask for a smaller PR: 1,234 lines across 3 components\n") {
+			t.Errorf("smaller PR not first in one-click actions:\n%s", out)
+		}
+		if strings.Contains(out, "Large diff") {
+			t.Errorf("large-diff warning repeats the smaller-PR ask:\n%s", out)
+		}
+		if !strings.Contains(out, "### ✅ Do before merge (1 of 3 done)") {
+			t.Errorf("smaller PR counted as a checklist item:\n%s", out)
 		}
 	})
 	t.Run("marker lets the workflow update its own comment", func(t *testing.T) {
