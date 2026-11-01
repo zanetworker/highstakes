@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -246,8 +247,8 @@ func TestProcessFile_PersistsDependencies(t *testing.T) {
 	}{
 		{
 			name:           "imports and importers are both persisted",
-			info:           &analyzer.FileInfo{Path: "app/app.go", Imports: []string{"example.com/m/core"}, ImportedBy: []string{"main.go"}},
-			wantImports:    []string{"example.com/m/core"},
+			info:           &analyzer.FileInfo{Path: "app/app.go", Imports: []string{"example.com/m/core"}, DependsOn: []string{"core/core.go"}, ImportedBy: []string{"main.go"}},
+			wantImports:    []string{"core/core.go"},
 			wantImportedBy: []string{"main.go"},
 		},
 		{
@@ -493,4 +494,94 @@ func TestApplyExplanations(t *testing.T) {
 func TestApplyExplanations_EmptyHeatmap(t *testing.T) {
 	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
 	applyExplanations(hm, nil) // must not panic
+}
+
+func TestGenerate_ImportsAreRepoPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	tests := []struct {
+		name  string
+		files map[string]string
+		path  string
+		want  []string
+	}{
+		{
+			name: "go module import resolves to package files, stdlib dropped",
+			files: map[string]string{
+				"go.mod":                 "module github.com/acme/app\n\ngo 1.22\n",
+				"main.go":                "package main\n\nimport (\n\t\"fmt\"\n\t\"github.com/acme/app/internal/auth\"\n)\n\nfunc main() { fmt.Println(auth.Check()) }\n",
+				"internal/auth/auth.go":  "package auth\n\nfunc Check() bool { return true }\n",
+				"internal/auth/token.go": "package auth\n\nfunc token() string { return \"\" }\n",
+			},
+			path: "main.go",
+			want: []string{"internal/auth/auth.go", "internal/auth/token.go"},
+		},
+		{
+			name: "python dotted import resolves to module file, third party dropped",
+			files: map[string]string{
+				"app/main.py": "import requests\nfrom app.auth import check\n",
+				"app/auth.py": "def check():\n    return True\n",
+			},
+			path: "app/main.py",
+			want: []string{"app/auth.py"},
+		},
+		{
+			name:  "file with no imports has empty forward graph",
+			files: map[string]string{"app/leaf.py": "x = 1\n"},
+			path:  "app/leaf.py",
+			want:  []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v: %s", err, out)
+			}
+			for p, body := range tt.files {
+				full := filepath.Join(dir, p)
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			g, err := New(dir, GenerateOptions{NoLLM: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hm, err := g.Generate()
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			f, ok := hm.Files[tt.path]
+			if !ok {
+				t.Fatalf("%s missing from heatmap", tt.path)
+			}
+			got := []string{}
+			for _, d := range f.Dependencies.Imports {
+				got = append(got, d.Path)
+			}
+			sort.Strings(got)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Imports = %v, want %v", got, tt.want)
+			}
+			for _, imp := range got {
+				target, ok := hm.Files[imp]
+				if !ok {
+					t.Errorf("import %s is not a heatmap file", imp)
+					continue
+				}
+				found := false
+				for _, d := range target.Dependencies.ImportedBy {
+					found = found || d.Path == tt.path
+				}
+				if !found {
+					t.Errorf("%s imports %s but %s.ImportedBy lacks it", tt.path, imp, imp)
+				}
+			}
+		})
+	}
 }

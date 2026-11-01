@@ -31,7 +31,8 @@ type FileInfo struct {
 	Lines           int
 	Bytes           int
 	ImportedBy      []string
-	Imports         []string
+	Imports         []string // import specifiers as written (Go/Python) or resolved paths
+	DependsOn       []string // repo files this file imports, resolved; inverse of ImportedBy
 	ExportedSymbols int
 	Cyclomatic      int
 	Cognitive       int
@@ -555,6 +556,7 @@ func (a *Analyzer) buildReverseDependencies() {
 				}
 				seen[key] = true
 				a.files[target].ImportedBy = append(a.files[target].ImportedBy, path)
+				info.DependsOn = append(info.DependsOn, target)
 			}
 		}
 	}

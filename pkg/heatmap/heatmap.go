@@ -275,7 +275,7 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 	// Build dependencies
 	deps := types.Dependencies{
 		ImportedBy: make([]types.Dependency, 0, len(fileInfo.ImportedBy)),
-		Imports:    make([]types.Dependency, 0, len(fileInfo.Imports)),
+		Imports:    make([]types.Dependency, 0, len(fileInfo.DependsOn)),
 	}
 
 	for _, imp := range fileInfo.ImportedBy {
@@ -284,7 +284,7 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 			HeatScore: 0, // Will be filled in second pass if needed
 		})
 	}
-	for _, imp := range fileInfo.Imports {
+	for _, imp := range fileInfo.DependsOn {
 		deps.Imports = append(deps.Imports, types.Dependency{Path: imp})
 	}
 

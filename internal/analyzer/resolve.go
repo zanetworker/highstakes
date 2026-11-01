@@ -205,6 +205,16 @@ func (r *resolver) rust(from, spec string) []string {
 		return r.first(filepath.Join(base, name+".rs"), filepath.Join(base, name, "mod.rs"))
 	}
 
+	if path, ok := strings.CutPrefix(spec, "path:"); ok {
+		// Qualified paths in code resolve only against repo crates: a leading
+		// segment can also be a local type or module (Vec::new, config::load).
+		segs := strings.Split(strings.TrimPrefix(path, "::"), "::")
+		if dir, ok := r.crates[segs[0]]; ok && len(segs) > 1 {
+			return r.rustModuleFile(filepath.Join(dir, "src"), segs[1:])
+		}
+		return nil
+	}
+
 	segs := strings.Split(strings.TrimPrefix(spec, "::"), "::")
 	switch segs[0] {
 	case "crate", "self", "super":

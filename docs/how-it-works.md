@@ -71,7 +71,7 @@ HighStakes scores every file on two separate axes, because they answer different
 - **Likelihood** (0-100): how likely the file is to need fixes. It comes from history and structure, never from the LLM.
 - **Impact** (0-100): how much breaks if the file has a bug. It is the LLM blast radius, the highest of the four dimensions.
 
-The [calibration benchmark](../bench/README.md) showed why they stay apart. Churn and complexity predicted which files needed fixes later: with the weights below, the ten top-ranked files on the primary repos were all fixed after the holdout cutoff (precision@10 1.00, Spearman 0.43). Blast radius was consistent across four models (rank agreement 0.72 to 0.90) but correlated weakly with fixes (Spearman 0.18 in-sample and 0.23 holdout with the default model), because a stable auth module can be critical without ever breaking. Blending blast radius into one score at 40% made fix prediction worse for every model (holdout Spearman 0.37 with the default model). So each axis keeps its meaning, and the tier comes from where a file sits on both.
+The [calibration benchmark](../bench/README.md) showed why they stay apart. Churn and complexity predicted which files needed fixes later: with the weights below, the ten top-ranked files on the primary repos were all fixed after the holdout cutoff (precision@10 1.00, Spearman 0.43). Blast radius was consistent across four models (rank agreement 0.72 to 0.90) but correlated weakly with fixes (Spearman 0.18 in-sample and 0.23 holdout with the default model), because a stable auth module can have high impact without ever breaking. Blending blast radius into one score at 40% made fix prediction worse for every model (holdout Spearman 0.37 with the default model). So each axis keeps its meaning, and the tier comes from where a file sits on both.
 
 ### Likelihood
 
@@ -256,7 +256,7 @@ Owners are derived from one `git log --numstat` pass. Each author's score for a 
 
 `highstakes check calibration` tests the scores against git history: did the files the heatmap calls hot attract reverts, bug fixes, security fixes and incidents? It reports per-tier event rates, precision@K, lift over random and rank correlation, for the heat score, for the two axes (`likelihood`, `impact`) and for each factor on its own. See the [CLI reference](cli-reference.md#highstakes-check-calibration).
 
-Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve CRITICAL with no fixes at all, so expect blast radius and impact to correlate weakly with fix counts. Judge likelihood by fix prediction and impact by whether its ranking matches what your team would protect. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
+Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve HIGH (protect) with no fixes at all, because CRITICAL needs both high impact and high likelihood, so expect blast radius and impact to correlate weakly with fix counts. Judge likelihood by fix prediction and impact by whether its ranking matches what your team would protect. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
 
 ### Validating impact
 

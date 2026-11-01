@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/types"
@@ -60,6 +62,55 @@ func TestPRCheck_UnscoredFileUsesConfiguredTiers(t *testing.T) {
 			}
 			if got := risk.FilesChanged[0].Tier; got != tt.want {
 				t.Errorf("unscored file tier = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPRCheck_EmptyDiffStillGates: an empty diff reports LOW, and the gate and
+// shadow log still apply to that LOW result.
+func TestPRCheck_EmptyDiffStillGates(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantCode  int    // 0 = no error
+		wantErr   string // substring of the error
+		wantOut   string // substring of stdout
+		wantShade bool   // shadow log written
+	}{
+		{"invalid --fail-on lists valid values", []string{"--fail-on=invalid", "--shadow=false"}, 2, "low", "", false},
+		{"--fail-on low blocks a LOW result", []string{"--fail-on=low", "--shadow=false"}, exitBlocked, "tier low", "", false},
+		{"--fail-on critical passes", []string{"--fail-on=critical", "--shadow=false"}, 0, "", `"decision": "pass"`, false},
+		{"--shadow writes its decision record", []string{"--fail-on=", "--shadow=true"}, 0, "", `"tier": "low"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeHeatmap(t)
+			gitIn(t, dir, "init", "-q", "-b", "main")
+			gitIn(t, dir, "add", "core/a.go")
+			gitIn(t, dir, "commit", "-q", "-m", "base")
+
+			args := append([]string{"pr", "check", "--base", "main", "--json", "--author=t@x.com"}, tt.args...)
+			out, err := runCLI(t, dir, args...)
+			if tt.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("pr check: %v\n%s", err, out)
+				}
+			} else {
+				var ee *exitError
+				if !errors.As(err, &ee) || ee.code != tt.wantCode || !strings.Contains(ee.msg, tt.wantErr) {
+					t.Fatalf("err = %v, want exit %d containing %q", err, tt.wantCode, tt.wantErr)
+				}
+			}
+			if !strings.Contains(out, tt.wantOut) {
+				t.Errorf("stdout = %q, want it to contain %q", out, tt.wantOut)
+			}
+			log, readErr := os.ReadFile(filepath.Join(dir, shadowLogPath))
+			if tt.wantShade && (readErr != nil || !strings.Contains(string(log), `"tier":"low"`) || !strings.Contains(string(log), `"files":0`)) {
+				t.Errorf("shadow log = %q (%v), want a LOW record with 0 files", log, readErr)
+			}
+			if !tt.wantShade && readErr == nil {
+				t.Errorf("shadow log written without --shadow: %q", log)
 			}
 		})
 	}

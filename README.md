@@ -122,7 +122,7 @@ The LLM returns structured scores across four dimensions:
 
 ### Why Two Axes
 
-On the [calibration benchmark](bench/README.md) (seven repos, five languages), churn and complexity predicted which files needed fixes later: the ten top-ranked files on the primary repos were all fixed after the holdout cutoff. Blast radius was consistent across four LLMs but measures something else: a stable auth module can be critical and never break. Blending it into one score at 40% made fix prediction worse for every model. So HighStakes reports both and lets the quadrant decide.
+On the [calibration benchmark](bench/README.md) (seven repos, five languages), churn and complexity predicted which files needed fixes later: the ten top-ranked files on the primary repos were all fixed after the holdout cutoff. Blast radius was consistent across four LLMs but measures something else: a stable auth module can have high impact and never break. Blending it into one score at 40% made fix prediction worse for every model. So HighStakes reports both and lets the quadrant decide.
 
 | Likelihood factor | Weight | Source |
 |--------|--------|--------|
@@ -348,7 +348,7 @@ highstakes create policy > .github/highstakes-policy.yaml   # No-auto-approve pa
 highstakes create policy --json --min-tier critical
 ```
 
-Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code (by tier, and by LLM impact so stable but critical code is covered too), and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
+Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code (by tier, and by LLM impact so stable but impactful code is covered too), and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
 
 ### Incidents
 
@@ -471,7 +471,8 @@ go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 export OPENROUTER_API_KEY="$OPENROUTER_KEY"
 highstakes init && highstakes analyze
 
-# Check PR risk (exit code reflects tier)
+# Check PR risk. Exit code is 0 unless you pass --fail-on <tier>:
+# then it is 5 when the PR tier is at or above that tier.
 highstakes pr check --base origin/main --json > risk.json
 
 # Use the output

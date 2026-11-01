@@ -503,6 +503,16 @@ func rustImports(n *ts.Node, src []byte, l *ts.Language, r *parseResult) {
 		if arg := n.ChildByFieldName("argument", l); arg != nil {
 			r.Imports = append(r.Imports, expandRustUse(arg, "", src, l)...)
 		}
+	case "scoped_identifier", "scoped_type_identifier":
+		// A qualified path such as other_crate::run() uses a crate without a
+		// use declaration. Only the outermost path outside a use counts.
+		for p := n.Parent(); p != nil; p = p.Parent() {
+			switch p.Type(l) {
+			case "use_declaration", "scoped_identifier", "scoped_type_identifier":
+				return
+			}
+		}
+		r.Imports = append(r.Imports, "path:"+compact(n.Text(src)))
 	}
 }
 

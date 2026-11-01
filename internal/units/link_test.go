@@ -29,6 +29,8 @@ func fh(p string, impact int, q types.Quadrant) *types.FileHeat {
 func rustRepo() (*types.Heatmap, map[string]bool) {
 	hm := fixture(map[string][]string{
 		"crates/sbx/src/main.rs":    {"crates/core/src/lib.rs"},
+		"crates/sup/src/main.rs":    {"crates/sup/src/lib.rs"}, // use sup::...
+		"crates/drv/src/main.rs":    {"crates/drv/src/lib.rs"},
 		"crates/sup/src/lib.rs":     {"crates/net/src/proxy.rs"},
 		"crates/net/src/proxy.rs":   {"crates/core/src/policy.rs"},
 		"crates/core/src/policy.rs": {"crates/core/src/lib.rs"},
@@ -48,6 +50,7 @@ func rustRepo() (*types.Heatmap, map[string]bool) {
 		fh("crates/drv/src/main.rs", 0, ""),
 		fh("crates/drv/src/lib.rs", 0, ""),
 		fh("crates/sbx/src/bin/perf.rs", 0, ""),
+		fh("crates/sup/src/bin/helper.rs", 0, ""), // never uses the sup library
 	)
 	markers := map[string]bool{}
 	for _, c := range []string{"sbx", "sup", "net", "core", "orphan", "gw", "drv"} {
@@ -66,6 +69,7 @@ func TestLink_Rust(t *testing.T) {
 		// A second bin in sbx's crate: the crate stays sbx's (the unit named
 		// after it), not a shared library.
 		{Name: "sbx-perf", Kind: KindRustBin, Entry: "crates/sbx/src/bin/perf.rs", Evidence: "crates/sbx/Cargo.toml:9"},
+		{Name: "helper", Kind: KindRustBin, Entry: "crates/sup/src/bin/helper.rs", Evidence: "crates/sup/src/bin/helper.rs:1"},
 	}
 	got := Link(hm, entries, markers)
 	byName := map[string]types.Unit{}
@@ -82,8 +86,8 @@ func TestLink_Rust(t *testing.T) {
 		maxImpact       int
 		fragileCritical int
 	}{
-		// sbx and sup both link core: shared. sup's lib.rs is seeded even
-		// though main.rs never imports it (a bin links its own crate).
+		// sbx and sup both link core: shared. sup reaches its lib.rs only
+		// because main.rs imports it.
 		{"sbx", "crates/sbx", []string{"crates/sbx", "crates/core"}, []string{"crates/core"}, 3, 88, 1},
 		{"sup", "crates/sup", []string{"crates/sup", "crates/core", "crates/net"}, []string{"crates/core"}, 5, 92, 2},
 		// drv is the home of exactly one unit, so gw linking it does not
@@ -91,6 +95,9 @@ func TestLink_Rust(t *testing.T) {
 		{"gw", "crates/gw", []string{"crates/gw", "crates/drv"}, []string{}, 2, 0, 0},
 		{"drv", "crates/drv", []string{"crates/drv"}, []string{}, 2, 0, 0},
 		{"sbx-perf", "crates/sbx", []string{"crates/sbx"}, []string{}, 1, 0, 0},
+		// A helper bin next to a library it never imports does not inherit
+		// the library's components.
+		{"helper", "crates/sup", []string{"crates/sup"}, []string{}, 1, 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.unit, func(t *testing.T) {

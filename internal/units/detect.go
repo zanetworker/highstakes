@@ -146,6 +146,7 @@ func join(dir, p string) string {
 var (
 	tomlSection = regexp.MustCompile(`^\s*(\[\[?[^\]]+\]\]?)\s*(#.*)?$`)
 	tomlString  = regexp.MustCompile(`^\s*("?[A-Za-z0-9_.-]+"?)\s*=\s*"([^"]*)"`)
+	tomlNoBins  = regexp.MustCompile(`^\s*autobins\s*=\s*false\s*(#.*)?$`)
 	rustMain    = regexp.MustCompile(`^\s*(pub\s+)?(async\s+)?fn\s+main\s*\(`)
 )
 
@@ -177,8 +178,9 @@ func tomlStrings(data []byte) []tomlEntry {
 	return out
 }
 
-// rustBins lists a crate's binaries: [[bin]] tables, else src/main.rs and
-// src/bin/*.rs (Cargo's auto-discovery). A workspace-only manifest has none.
+// rustBins lists a crate's binaries: [[bin]] tables, plus src/main.rs and
+// src/bin/*.rs (Cargo's auto-discovery) unless [package] sets autobins =
+// false. A workspace-only manifest has none.
 func rustBins(dir string, data []byte, exists map[string]bool, read func(string) []byte) []Entry {
 	pkg := ""
 	type bin struct {
@@ -203,6 +205,7 @@ func rustBins(dir string, data []byte, exists map[string]bool, read func(string)
 	if pkg == "" {
 		return nil
 	}
+	autobins := !packageDisablesAutobins(data)
 	var out []Entry
 	explicit := map[string]bool{}
 	for _, b := range bins {
@@ -240,11 +243,25 @@ func rustBins(dir string, data []byte, exists map[string]bool, read func(string)
 		}
 	}
 	for _, a := range auto {
-		if exists[a.entry] && !explicit[a.entry] && !tour.IsTestFile(a.entry) {
+		if autobins && exists[a.entry] && !explicit[a.entry] && !tour.IsTestFile(a.entry) {
 			out = append(out, Entry{Name: a.name, Kind: KindRustBin, Entry: a.entry, Evidence: fmt.Sprintf("%s:%d", a.entry, lineMatching(read(a.entry), rustMain))})
 		}
 	}
 	return out
+}
+
+// packageDisablesAutobins reports whether the manifest's [package] table sets
+// autobins = false. tomlStrings only reads string values, so scan for it here.
+func packageDisablesAutobins(data []byte) bool {
+	section := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if m := tomlSection.FindStringSubmatch(line); m != nil {
+			section = m[1]
+		} else if section == "[package]" && tomlNoBins.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // lineMatching returns the first line matching re, or 1 when none does.

@@ -3,7 +3,6 @@ package units
 import (
 	"path"
 	"sort"
-	"strings"
 
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
@@ -30,8 +29,10 @@ func Imports(hm *types.Heatmap) map[string][]string {
 }
 
 // seeds are the files a unit links even when the entry file does not import
-// them: the rest of a Go main package (Go builds whole directories) and the
-// crate's src/lib.rs (a Rust bin links its own library).
+// them: the rest of a Go main package (Go builds whole directories). A Rust
+// bin seeds only its entry; it reaches its crate's library through imports
+// (use <crate>::... or <crate>::item paths), so a bin that never uses the
+// library does not inherit it.
 func seeds(hm *types.Heatmap, e Entry) []string {
 	out := []string{e.Entry}
 	switch e.Kind {
@@ -40,13 +41,6 @@ func seeds(hm *types.Heatmap, e Entry) []string {
 		for p := range hm.Files {
 			if p != e.Entry && path.Dir(p) == dir && path.Ext(p) == ".go" && !tour.IsTestFile(p) {
 				out = append(out, p)
-			}
-		}
-	case KindRustBin:
-		if i := strings.LastIndex("/"+e.Entry, "/src/"); i >= 0 {
-			lib := e.Entry[:i] + "src/lib.rs" // i indexes "/"+Entry, so Entry[:i] ends with "/" or is ""
-			if _, ok := hm.Files[lib]; ok && lib != e.Entry {
-				out = append(out, lib)
 			}
 		}
 	}

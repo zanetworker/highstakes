@@ -54,6 +54,32 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "rust autobins = false keeps only explicit bins",
+			fs: fstest.MapFS{
+				"Cargo.toml":       file("[package]\nname = \"tool\"\nautobins = false # explicit only\n\n[[bin]]\nname = \"cli\"\npath = \"src/cli.rs\"\n"),
+				"src/main.rs":      file("fn main() {}\n"),
+				"src/bin/extra.rs": file("fn main() {}\n"),
+				"src/cli.rs":       file("fn main() {}\n"),
+			},
+			want: []Entry{{Name: "cli", Kind: KindRustBin, Entry: "src/cli.rs", Evidence: "Cargo.toml:5"}},
+		},
+		{
+			name: "rust autobins = false with no explicit bins has none",
+			fs: fstest.MapFS{
+				"Cargo.toml":  file("[package]\nname = \"tool\"\nautobins=false\n"),
+				"src/main.rs": file("fn main() {}\n"),
+			},
+			want: []Entry{},
+		},
+		{
+			name: "rust autobins = true still discovers",
+			fs: fstest.MapFS{
+				"Cargo.toml":  file("[package]\nname = \"tool\"\nautobins = true\n"),
+				"src/main.rs": file("fn main() {}\n"),
+			},
+			want: []Entry{{Name: "tool", Kind: KindRustBin, Entry: "src/main.rs", Evidence: "src/main.rs:1"}},
+		},
+		{
 			name: "go main packages, tests and libraries ignored",
 			fs: fstest.MapFS{
 				"go.mod":                file("module example.com/m\n"),

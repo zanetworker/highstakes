@@ -687,3 +687,21 @@ func TestParseSource_ElseIfAndClosuresConsistentAcrossLanguages(t *testing.T) {
 		})
 	}
 }
+
+func TestAnalyzer_RustCratePathsWithoutUse(t *testing.T) {
+	a := analyzeRepo(t, map[string]string{
+		"Cargo.toml":         "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n",
+		"src/lib.rs":         "pub mod config;\npub fn run() {}\n",
+		"src/config.rs":      "pub struct Config;\n",
+		"src/main.rs":        "fn main() { my_app::run(); }\n",
+		"src/bin/typed.rs":   "fn f(_c: my_app::config::Config) {}\nfn main() {}\n",
+		"src/bin/helper.rs":  "fn main() { let _v: Vec<u8> = Vec::new(); std::process::exit(0); }\n",
+		"src/bin/aliased.rs": "use my_app::config;\nfn main() { let _ = config::Config; }\n",
+	})
+	assertEdges(t, a, nil, map[string][]string{
+		"src/main.rs":        {"src/lib.rs"},
+		"src/bin/typed.rs":   {"src/config.rs"},
+		"src/bin/helper.rs":  {},
+		"src/bin/aliased.rs": {"src/config.rs"},
+	})
+}

@@ -315,7 +315,9 @@ A changed file that is not in the heatmap (for example, a file added in this PR)
 
 Each HIGH or CRITICAL changed file is followed by its top three actions (from its `explanation`); in `--json` they are under `files_changed[].actions`.
 
-**Exit code 3** if git diff fails (error includes valid base examples).
+An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low"}`) and still goes through the gate: `--fail-on low` blocks it, and `--shadow` logs its decision. When a gate applies, the JSON adds `decision`, `fail_on` and `shadow`.
+
+**Exit code 2** for an invalid `--fail-on` (error lists valid values). **Exit code 3** if git diff fails (error includes valid base examples). **Exit code 5** when `--fail-on` blocks the PR.
 
 ### Two-axis risk
 

@@ -425,14 +425,7 @@ var prCheckCmd = &cobra.Command{
 			})
 		}
 
-		if len(changes) == 0 {
-			if jsonOut {
-				return printJSON(map[string]interface{}{"changes": 0, "tier": "low"})
-			}
-			fmt.Println("No changes detected against", base)
-			return nil
-		}
-
+		// An empty diff scores LOW and still goes through the gate and shadow log.
 		risk := prscore.CalculatePRRisk(0, changes, hm, configuredTiers())
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
 		attachActions(&risk, hm)
@@ -446,6 +439,22 @@ var prCheckCmd = &cobra.Command{
 			}
 			fmt.Fprintf(os.Stderr, "shadow: tier=%s change_risk=%s decision=%s (not enforced, logged to %s)\n",
 				risk.Tier, risk.ChangeRiskLevel, risk.Decision, shadowLogPath)
+		}
+
+		if len(changes) == 0 {
+			if jsonOut {
+				empty := map[string]interface{}{"changes": 0, "tier": risk.Tier}
+				if risk.Decision != "" {
+					empty["decision"], empty["fail_on"], empty["shadow"] = risk.Decision, risk.FailOn, risk.Shadow
+				}
+				if err := printJSON(empty); err != nil {
+					return err
+				}
+				return gateErr
+			}
+			fmt.Println("No changes detected against", base)
+			printDecision(&risk)
+			return gateErr
 		}
 
 		if jsonOut {
