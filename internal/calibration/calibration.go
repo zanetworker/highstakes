@@ -22,11 +22,19 @@ type Options struct {
 	// (holdout only). Nil means every file in the heatmap.
 	ExistingAtCutoff map[string]bool
 	Events           EventFilter // event kinds to count; empty means EventsAll
+	Source           string      // where events come from: SourceCommits (default) or SourcePRs
 }
+
+// Event sources.
+const (
+	SourceCommits = "commits" // commit-message keywords and recorded incidents
+	SourcePRs     = "prs"     // merged GitHub pull requests mapped to local commits
+)
 
 // Report is the result of a calibration run.
 type Report struct {
-	Mode               string         `json:"mode"` // "in-sample" or "holdout"
+	Mode               string         `json:"mode"`   // "in-sample" or "holdout"
+	Source             string         `json:"source"` // SourceCommits or SourcePRs
 	EventFilter        EventFilter    `json:"event_filter"`
 	From               time.Time      `json:"from"`
 	To                 time.Time      `json:"to"`
@@ -84,6 +92,7 @@ const (
 	CaveatInSample = "In-sample: churn and incident history were computed from the same history the events come from, so they look better than they are. Use --holdout to score with history before a cutoff and count events after it."
 	CaveatHoldout  = "Holdout: churn and incident history were recomputed from history up to the cutoff. Complexity, centrality, path heuristics and blast radius still come from today's file contents, so some leakage remains."
 	CaveatSecurity = "Security-only: events are security fixes, a rough proxy for impact (how bad a break is). Read the blast_radius row first; heat and churn also rise with how often a file changes, so they score on any event kind."
+	CaveatPRLabels = "Events are merged pull requests labelled bug, fix, defect or regression (on the PR or an issue it closes), titled fix: or fix(scope):, or titled Revert, mapped to local commits for their files. Labels depend on each project's habits and unmapped PRs are left out, so treat small differences as noise."
 	CaveatLabels   = "Events come from commit-message keywords and recorded incidents. They are noisy (\"fix typo\" counts as a fix) and measure how often code breaks, while blast radius measures the impact if it breaks, so a weak blast-radius correlation is not by itself a failure."
 )
 
@@ -93,14 +102,27 @@ const MinFilesWithEvents = 10
 
 var tierOrder = []types.Tier{types.TierCritical, types.TierHigh, types.TierMedium, types.TierLow}
 
-// Run scores the heatmap against events in the window.
+// Run scores the heatmap against events in the window, labelled from commit
+// messages and incidents.
 func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.Incident, opts Options) *Report {
 	if opts.Events == "" {
 		opts.Events = EventsAll
 	}
-	events := CountEvents(commits, incidents, opts.From, opts.To, opts.Events)
+	return RunWithEvents(hm, commits, incidents, CountEvents(commits, incidents, opts.From, opts.To, opts.Events), opts)
+}
 
-	r := &Report{Mode: "in-sample", EventFilter: opts.Events, From: opts.From, To: opts.To, K: opts.K}
+// RunWithEvents scores the heatmap against precomputed per-file events (for
+// example from FragilityEvents). commits and incidents are still needed to
+// rescore at the cutoff in holdout mode.
+func RunWithEvents(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.Incident, events map[string]*FileEvents, opts Options) *Report {
+	if opts.Events == "" {
+		opts.Events = EventsAll
+	}
+	if opts.Source == "" {
+		opts.Source = SourceCommits
+	}
+
+	r := &Report{Mode: "in-sample", Source: opts.Source, EventFilter: opts.Events, From: opts.From, To: opts.To, K: opts.K}
 	if opts.Holdout {
 		r.Mode = "holdout"
 	}
@@ -174,7 +196,11 @@ func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.
 	if opts.Events == EventsSecurity {
 		r.Caveats = append(r.Caveats, CaveatSecurity)
 	}
-	r.Caveats = append(r.Caveats, CaveatLabels)
+	if opts.Source == SourcePRs {
+		r.Caveats = append(r.Caveats, CaveatPRLabels)
+	} else {
+		r.Caveats = append(r.Caveats, CaveatLabels)
+	}
 	if r.FilesWithEvents < MinFilesWithEvents {
 		r.TooFewEvents = true
 		r.Caveats = append(r.Caveats, fmt.Sprintf("Only %d file(s) had %s events in the window (under %d): too few for these numbers to mean anything; treat them as anecdotes, not evidence.", r.FilesWithEvents, opts.Events, MinFilesWithEvents))

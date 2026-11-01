@@ -362,7 +362,7 @@ The block sits between `# BEGIN highstakes` and `# END highstakes` markers. `--w
 
 JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_score`, `files`, `owners`), `unrepresentable` (hot paths left as comments), `block` (the text), `written` (path, empty unless `--write`).
 
-**Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read. **Exit code 4** if there is no heatmap.
+**Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read, or the GitHub request fails for a reason other than rate limiting (rate limits give partial results instead). **Exit code 4** if there is no heatmap.
 
 ## highstakes create policy
 
@@ -493,6 +493,7 @@ Compare heat scores with what actually happened in git history.
 
 ```sh
 highstakes check calibration [--since 365d | --holdout <cutoff>] [--events all] [--top 10] [--limit 10] [--json]
+highstakes check calibration --source prs [--repo owner/name] [--since 365d | --holdout <cutoff>] [--top 10] [--limit 10] [--json]
 highstakes check calibration --labels FILE [--top 10] [--json]
 ```
 
@@ -501,7 +502,9 @@ highstakes check calibration --labels FILE [--top 10] [--json]
 | `--since` | `365d` | Count events in the last N days (format `Nd`) |
 | `--holdout` | (off) | Cutoff as `YYYY-MM-DD` or `Nd` ago. Churn and incident history are recomputed from history up to the cutoff, files that did not exist yet are dropped, and events are counted after it. Cannot be combined with `--since` |
 | `--events` | `all` | Event kinds to count: `all` (reverts, bug fixes, security fixes, incidents), `fixes` (bug-fix and security commits), `reverts`, or `security` (security fixes only). Incidents count only with `all` |
-| `--labels` | (off) | Compare with maintainer ratings in this CSV instead of git history. Cannot be combined with `--since`, `--holdout` or `--events` |
+| `--source` | `commits` | Where events come from: `commits` (commit-message keywords, below) or `prs` (merged GitHub pull requests, see [Pull-request source](#pull-request-source)) |
+| `--repo` | (origin remote) | GitHub `owner/name` for `--source prs`; by default read from the `origin` remote URL |
+| `--labels` | (off) | Compare with maintainer ratings in this CSV instead of git history. Cannot be combined with `--since`, `--holdout`, `--events` or `--source` |
 | `--top` | `10` | K for precision@K and recall@K |
 | `--limit` | `10` | Maximum files per surprise list |
 | `--json` | `false` | Output as JSON |
@@ -527,6 +530,32 @@ The report starts with the event kinds counted (`event_filter` in JSON). When fe
 
 **Leakage.** In the default (in-sample) mode, churn and incident history come from the same history as the events, so they look better than they are. `--holdout` removes that for churn and incidents. Complexity, centrality, path heuristics and blast radius still come from today's file contents, so some leakage remains.
 
+### Pull-request source
+
+`--source prs` takes events from merged pull requests instead of commit messages, and adds a second comparison for the impact axis. It needs the `gh` CLI, logged in.
+
+1. **PR metadata from GitHub.** Merged PRs in the window (merged after `--since`'s start or the `--holdout` cutoff), via `gh api graphql`, 50 per page: number, title, merge time, merge commit, author, labels, the issues it closes and their labels, review count and distinct approvers. Each PR is cached in `.heatmap/cache/github/<owner>/<name>/pr-<n>.json`; after a complete run only PRs updated since then are fetched again. A run reads at most 1,500 PRs and stops while 200 GraphQL points remain or when GitHub reports a rate limit; it then reports what it has (`fetch.capped`, `fetch.partial` in JSON) and adds a caveat. A partial run is not recorded as complete, so the next run fetches again.
+2. **Files from local git.** Each PR is mapped to the commit that landed it on HEAD's first-parent history: the merge commit GitHub reports, else a subject ending in `(#123)` (squash merge) or starting with `Merge pull request #123`. Files changed come from that commit (merge commits against their first parent). Unmapped PRs (rebase merges without the PR number, PRs merged after HEAD) are left out; the report shows how many mapped.
+3. **Event rules per PR.**
+
+| Evidence | Axis | Rule |
+|---|---|---|
+| Bug fix | fragility | A label matching `bug`, `fix`, `defect` or `regression` (case-insensitive) on the PR or an issue it closes, or a title `fix:` / `fix(scope):` |
+| Revert | fragility | Title starts with `Revert` |
+| Backported | stakes | A commit on a remote release line (branch name after the remote starting with `release`, `backport`, `stable` or `v<digit>`, or ending in `<digit>.x` such as `tokio-1.43.x`), made on the line itself (on its first-parent history but not HEAD's) and dated in the window, says `(cherry picked from commit <sha>)` for the PR's commit, or has a `(#N)` in its subject that is the PR's number or appears in the subject of the PR's commit (fixes landed on the release line first and merged forward as `fix (#N) (#M)`) |
+| Fast revert | stakes | A commit on HEAD says `This reverts commit <sha>` for the PR's commit, or `Reverts [owner/repo]#N`, within 7 days of the merge |
+| Severity label | stakes | A label on the PR or an issue it closes matching `security`, `critical`, `p0`, `p1`, `sev`, `incident`, `cve` or `vulnerab`, unless it also says `low`, `minor` or `trivial` |
+| Review depth | stakes | 2 or more distinct approvers, or 3 or more reviews |
+| CODEOWNERS | stakes | The file is owned in `.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS` (last matching rule wins; a rule with no owners un-owns). A file-level signal, no PR needed |
+
+PRs touching more than 50 files are skipped, as with commits.
+
+4. **Metrics.** The main report (same layout and JSON fields as the commit source, with `source: "prs"`) ranks files against bug-fix and revert PRs: the "Will it break?" check, normally read on the `likelihood` row with `--holdout`. The same window with commit-keyword events follows side by side (`commit_keyword` in JSON). Then blast radius, on LLM-assessed non-test files, is compared with each stakes signal (PR counts per file) with `combined`, the number of distinct stakes signals per file, and with `pr_activity`, a reference row counting every mapped PR (not a stakes signal and not in `combined`; a signal that does no better than it mostly measures activity): Spearman, precision@K, lift, files with events, and `too_few_events` under 10 files. A signal is `n/a` when its data is missing: no release branches in the clone (fetch them), no CODEOWNERS file, or no LLM assessment.
+
+JSON adds `github` (`repo`, `fetch` with `fetched`, `from_cache`, `api_calls`, `capped`, `cap`, `partial`, `partial_reason`; `in_window`, `mapped`, label counts, `backport_branches`, `codeowners_file`), `commit_keyword` (a full commit-source report) and `stakes` (each `name`, `available`, `note`, `files`, `files_with_events`, `too_few_events`, `base_rate`, `precision_at_k`, `recall_at_k`, `lift`, `spearman`).
+
+Caveats: labels follow each project's habits (some never label PRs, so bug fixes rest on `fix:` titles). Review depth and CODEOWNERS reflect how important maintainers judge a file, which is what blast radius should match, but they also rise with code volume and with how often a file changes, so a positive correlation partly measures activity. Compare each with the `pr_activity` row.
+
 ### Maintainer labels
 
 `--labels FILE` reads a sheet made by [`create labels`](#highstakes-create-labels) and filled in by maintainers. Rows with a blank rating are skipped; columns are found by header name, so extra columns and any order are fine. For `blast_radius` (LLM-assessed files only) and `heat` it reports, over the rated files in the heatmap:
@@ -539,7 +568,7 @@ The report starts with the event kinds counted (`event_filter` in JSON). When fe
 
 It also prints how many files were rated, how many are in the heatmap, and the rated paths it could not find. Under 10 rated files in the heatmap it prints a `WARNING` (`too_few` in JSON). JSON fields: `rated`, `matched`, `unmatched`, `positives`, `base_rate`, `k`, `too_few`, `signals` (each `name`, `available`, `note`, `files`, `precision_at_k`, `lift`, `spearman`).
 
-**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` value (the error lists the valid ones), `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read. **Exit code 4** if no heatmap or labels file exists.
+**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` or `--source` value (the error lists the valid ones), `--events` with `--source prs`, `--repo` without `--source prs` or not `owner/name`, no `--repo` and no GitHub `origin` remote, `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read. **Exit code 4** if no heatmap or labels file exists.
 
 ## Exit Codes
 

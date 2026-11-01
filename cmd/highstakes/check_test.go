@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,6 +70,31 @@ func TestExitCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := exitCode(tt.err); got != tt.want {
 				t.Errorf("exitCode = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSource(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"commits", "commits", false},
+		{"prs", "prs", false},
+		{"PRs", "prs", false},
+		{"issues", "", true},
+		{"", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := parseSource(tt.in)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("parseSource(%q) = (%q, %v), want (%q, err=%v)", tt.in, got, err, tt.want, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "commits, prs") {
+				t.Errorf("error %q should list the valid values", err)
 			}
 		})
 	}

@@ -864,7 +864,7 @@ func agentContext() map[string]interface{} {
 				"description": "Check how well the heatmap matches reality",
 				"subcommands": map[string]interface{}{
 					"calibration": map[string]interface{}{
-						"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history",
+						"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history, or with merged GitHub pull requests (--source prs)",
 						"flags": map[string]interface{}{
 							"--json":    flagDef("bool", false, "Output as JSON"),
 							"--top":     flagDef("int", 10, "K for precision@K and recall@K"),
@@ -873,6 +873,8 @@ func agentContext() map[string]interface{} {
 							"--limit":   flagDef("int", 10, "Max files per surprise list"),
 							"--events":  flagDef("enum", "all", "Event kinds to count. Values: all, fixes, reverts, security"),
 							"--labels":  flagDef("string", "", "Compare with maintainer ratings in this CSV (from create labels) instead of git history"),
+							"--source":  flagDef("enum", "commits", "Where events come from. Values: commits (commit-message keywords), prs (merged GitHub PRs via gh: bug-fix/revert PRs vs likelihood, backports, fast reverts, severity labels, review depth and CODEOWNERS vs blast radius; cached in .heatmap/cache/github/)"),
+							"--repo":    flagDef("string", "", "GitHub owner/name for --source prs (default: from the origin remote)"),
 						},
 					},
 				},

@@ -12,6 +12,8 @@
 #   holdout_days  holdout cutoff in days before the pinned commit (default
 #                 180); young repos need a shorter one
 #   enabled       false skips the entry unless run.sh --include-disabled
+#   github        owner/name for run.sh --source prs (default: read from the
+#                 clone's origin remote)
 #
 # Keep this flat format (one "- name:" entry, indented keys): bench/run.sh
 # parses it with awk, not a YAML library.
@@ -19,6 +21,7 @@ repos:
   - name: openshell
     tier: primary
     url: https://github.com/NVIDIA/OpenShell.git
+    github: NVIDIA/OpenShell
     local_mirror: ~/go/src/github.com/zanetworker/OpenShell
     language: Rust
     commit: 4d4c15c133d40a50234ce9d2d198e5ba79b9553e
@@ -26,6 +29,7 @@ repos:
   - name: openclaw-enterprise
     tier: primary
     url: https://github.com/openclaw/openclaw-enterprise.git
+    github: openclaw/openclaw-enterprise
     local_mirror: ~/go/src/github.com/zanetworker/openclaw-enterprise
     language: TypeScript
     commit: 20133c2b8bc14ebed5e774ffd20e3d58420d0ffc
@@ -33,32 +37,38 @@ repos:
   - name: caddy
     tier: general
     url: https://github.com/caddyserver/caddy.git
+    github: caddyserver/caddy
     language: Go
     commit: eb04ed52be5e66c467e9e614bd917b8bb4150d1b
   - name: tokio
     tier: general
     url: https://github.com/tokio-rs/tokio.git
+    github: tokio-rs/tokio
     language: Rust
     commit: 6470b5e4b8e943ad014383a5bf6a93ba415678a3
   - name: hono
     tier: general
     url: https://github.com/honojs/hono.git
+    github: honojs/hono
     language: TypeScript
     commit: 17ad0e21f5a91c939eeafa3df05793a8ea60f016
   - name: scrapy
     tier: general
     url: https://github.com/scrapy/scrapy.git
+    github: scrapy/scrapy
     language: Python
     commit: 51c10b14fca6d272587a5c23cf3ae8effdff16cd
   - name: commons-lang
     tier: general
     url: https://github.com/apache/commons-lang.git
+    github: apache/commons-lang
     language: Java
     commit: 61837eb4472dac790a69f5f34b7b89ddfaf43db0
   - name: openclaw
     tier: later
     enabled: false
     url: https://github.com/openclaw/openclaw.git
+    github: openclaw/openclaw
     local_mirror: ~/go/src/github.com/zanetworker/openclaw
     language: TypeScript
     commit: 90a06b5c4cdd6a8a1f8660e976ad8f8ea6e68ace

@@ -9,11 +9,15 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bench/run.sh [--llm [--model ID]] [--include-disabled] [--bin PATH] [--cache-dir DIR] [--out-dir DIR]
+Usage: bench/run.sh [--llm [--model ID]] [--source commits|prs] [--include-disabled] [--bin PATH] [--cache-dir DIR] [--out-dir DIR]
 
   --llm            Run analyze with the LLM (paid; needs OPENROUTER_API_KEY or
                    HIGHSTAKES_API_KEY). Default is --no-llm.
   --model ID       OpenRouter model for --llm (default: the CLI default).
+  --source SRC     Calibration events: commits (default, commit-message
+                   keywords) or prs (merged GitHub PRs via gh, using each
+                   repo's `github:` field; adds PR and stakes tables and
+                   writes <date>-prs.md/.json).
   --include-disabled
                    Also run repos marked `enabled: false` in repos.yaml.
   --bin PATH       highstakes binary to use (default: build from this tree into
@@ -40,26 +44,35 @@ LLM=0
 INCLUDE_DISABLED=0
 BIN=""
 MODEL=""
+SOURCE="commits"
 CACHE_DIR="$(default_cache)"
 OUT_DIR="$BENCH_DIR/results"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --llm) LLM=1; shift ;;
     --model) MODEL="${2:?--model needs an OpenRouter model ID}"; shift 2 ;;
+    --source) SOURCE="${2:?--source needs commits or prs}"; shift 2 ;;
     --include-disabled) INCLUDE_DISABLED=1; shift ;;
     --bin) BIN="${2:?--bin needs a path}"; shift 2 ;;
     --cache-dir) CACHE_DIR="${2:?--cache-dir needs a path}"; shift 2 ;;
     --out-dir) OUT_DIR="${2:?--out-dir needs a path}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "unknown argument: $1 (valid: --llm, --model, --include-disabled, --bin, --cache-dir, --out-dir, --help)" >&2; exit 2 ;;
+    *) echo "unknown argument: $1 (valid: --llm, --model, --source, --include-disabled, --bin, --cache-dir, --out-dir, --help)" >&2; exit 2 ;;
   esac
 done
+
+case "$SOURCE" in
+  commits|prs) ;;
+  *) echo "invalid --source $SOURCE (valid: commits, prs)" >&2; exit 2 ;;
+esac
 
 if [[ -n "$MODEL" && $LLM -eq 0 ]]; then
   echo "--model only applies with --llm" >&2; exit 2
 fi
 
-for tool in git jq awk; do
+tools=(git jq awk)
+[[ "$SOURCE" == prs ]] && tools+=(gh)
+for tool in "${tools[@]}"; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 3; }
 done
 
@@ -83,15 +96,15 @@ fi
 BIN="$(cd "$(dirname "$BIN")" && pwd -P)/$(basename "$BIN")"
 [[ -x "$BIN" ]] || { echo "not executable: $BIN" >&2; exit 2; }
 
-# repos.yaml -> TSV: name url language commit tier mirror holdout_days.
+# repos.yaml -> TSV: name url language commit tier mirror holdout_days github.
 # Empty optional fields become "-" because read collapses adjacent tabs.
 # Disabled entries are dropped unless --include-disabled.
 REPOS_TSV="$(awk -v all="$INCLUDE_DISABLED" '
   function val() { sub(/^[^:]*:[[:space:]]*/, ""); sub(/[[:space:]]+#.*$/, ""); return $0 }
   function flush() {
     if (name != "" && (enabled != "false" || all == 1))
-      print name "\t" url "\t" lang "\t" sha "\t" (tier == "" ? "general" : tier) "\t" (mirror == "" ? "-" : mirror) "\t" (hd == "" ? 180 : hd)
-    name = url = lang = sha = tier = mirror = hd = enabled = ""
+      print name "\t" url "\t" lang "\t" sha "\t" (tier == "" ? "general" : tier) "\t" (mirror == "" ? "-" : mirror) "\t" (hd == "" ? 180 : hd) "\t" (gh == "" ? "-" : gh)
+    name = url = lang = sha = tier = mirror = hd = enabled = gh = ""
   }
   /^[[:space:]]*- name:/         { flush(); sub(/- /, ""); name = val(); next }
   /^[[:space:]]+url:/            { url = val(); next }
@@ -101,6 +114,7 @@ REPOS_TSV="$(awk -v all="$INCLUDE_DISABLED" '
   /^[[:space:]]+local_mirror:/   { mirror = val(); next }
   /^[[:space:]]+holdout_days:/   { hd = val(); next }
   /^[[:space:]]+enabled:/        { enabled = val(); next }
+  /^[[:space:]]+github:/         { gh = val(); next }
   END { flush() }
 ' "$BENCH_DIR/repos.yaml")"
 [[ -n "$REPOS_TSV" ]] || { echo "no enabled repos in $BENCH_DIR/repos.yaml" >&2; exit 2; }
@@ -125,7 +139,7 @@ estimate_files() {
 # Phase 1: clone (full history), pin, estimate.
 echo "Cache dir: $CACHE_DIR"
 TOTAL=0
-while IFS=$'\t' read -r name url lang sha tier mirror holdout_days; do
+while IFS=$'\t' read -r name url lang sha tier mirror holdout_days _github; do
   dir="$CACHE_DIR/repos/$name"
   mirror="${mirror/#\~/$HOME}"
   [[ "$mirror" != "-" && -d "$mirror/.git" ]] || mirror=""
@@ -172,7 +186,7 @@ mkdir -p "$RAW_DIR"
 SUMMARIES="$RAW_DIR/summaries.jsonl"
 : > "$SUMMARIES"
 NOW="$(date +%s)"
-while IFS=$'\t' read -r name url lang sha tier _mirror holdout_days; do
+while IFS=$'\t' read -r name url lang sha tier _mirror holdout_days github; do
   dir="$CACHE_DIR/repos/$name"
   commit_ts="$(git -C "$dir" log -1 --format=%ct "$sha")"
   since_days=$(( (NOW - (commit_ts - 365*86400) + 86399) / 86400 ))
@@ -190,8 +204,14 @@ while IFS=$'\t' read -r name url lang sha tier _mirror holdout_days; do
     tail -5 "$RAW_DIR/$name-analyze.log" >&2
     exit 1
   fi
-  (cd "$dir" && "$BIN" check calibration --since "${since_days}d" --json) > "$RAW_DIR/$name-insample.json"
-  (cd "$dir" && "$BIN" check calibration --holdout "$holdout" --json) > "$RAW_DIR/$name-holdout.json"
+  calib_flags=(--json)
+  if [[ "$SOURCE" == prs ]]; then
+    calib_flags+=(--source prs)
+    [[ "$github" != "-" ]] && calib_flags+=(--repo "$github")
+  fi
+  # In-sample first: its PR fetch covers the holdout window, which then reads the cache.
+  (cd "$dir" && "$BIN" check calibration --since "${since_days}d" "${calib_flags[@]}") > "$RAW_DIR/$name-insample.json"
+  (cd "$dir" && "$BIN" check calibration --holdout "$holdout" "${calib_flags[@]}") > "$RAW_DIR/$name-holdout.json"
   wall=$(( $(date +%s) - start ))
   echo "   done in ${wall}s"
 
@@ -201,12 +221,18 @@ while IFS=$'\t' read -r name url lang sha tier _mirror holdout_days; do
     --argjson est "$est" --argjson wall "$wall" --argjson llm "$LLM" \
     --slurpfile ins "$RAW_DIR/$name-insample.json" \
     --slurpfile hold "$RAW_DIR/$name-holdout.json" '
+    def sigs: map({key: .name, value: {available, spearman, precision_at_k, recall_at_k, lift, note}}) | from_entries;
     def metrics: {
       mode, from, to, k, files, files_with_events, base_rate,
       events: .events.total,
-      signals: (.signals | map({key: .name, value: {
-        available, spearman, precision_at_k, recall_at_k, lift, note}}) | from_entries)
-    };
+      signals: (.signals | sigs)
+    } + (if .github then {
+      source: .source,
+      prs: (.github | {repo, in_window, mapped, fetched: .fetch.fetched, capped: .fetch.capped, partial: .fetch.partial,
+                       bugfix, revert, backported, fast_revert, severity_label, review_depth, backport_branches, codeowners_file}),
+      commit_keyword: {files_with_events: .commit_keyword.files_with_events, signals: (.commit_keyword.signals | sigs)},
+      stakes: (.stakes | map({key: .name, value: {available, files_with_events, too_few_events, spearman, precision_at_k, lift, note}}) | from_entries)
+    } else {} end);
     {name: $name, tier: $tier, url: $url, language: $lang, commit: $sha, commit_date: $commit_date,
      llm: ($llm == 1), estimated_files: $est, wall_seconds: $wall,
      holdout_cutoff: $holdout, holdout_days: ($holdout_days | tonumber),
@@ -215,6 +241,7 @@ done <<< "$REPOS_TSV"
 
 # Phase 3: combined results.
 STAMP="$(date +%Y-%m-%d)"
+[[ "$SOURCE" == prs ]] && STAMP="$STAMP-prs"
 OUT_JSON="$OUT_DIR/$STAMP.json"
 OUT_MD="$OUT_DIR/$STAMP.md"
 jq -s --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson llm "$LLM" \
@@ -264,6 +291,22 @@ jq -r '
   ($repos[] as $r | ($r.in_sample, $r.holdout) as $m |
     "| \($r.name) | \($r.tier) | \($r.language) | \($m.mode) | \(rho($m; "heat")) | \(rho($m; "churn")) | \(rho($m; "complexity")) | \(rho($m; "centrality")) | \(rho($m; "blast_radius")) |"),
   "",
+  (if [$repos[].holdout.prs] | any(. != null) then
+    "## Pull-request evidence",
+    "",
+    "Fragility: likelihood vs bug-fix and revert PRs (holdout), next to the commit-keyword source on the same window. Stakes: blast radius vs signals of how seriously maintainers treated a break (in-sample). See bench/README.md.",
+    "",
+    "| Repo | PRs in window | Mapped | Capped | Likelihood Spearman (PRs) | P@10 (PRs) | Lift (PRs) | Likelihood Spearman (commits) | Lift (commits) |",
+    "|---|---:|---:|---|---:|---:|---:|---:|---:|",
+    ($repos[] | .holdout as $m | select($m.prs != null) |
+      "| \(.name) | \($m.prs.in_window) | \($m.prs.mapped) | \($m.prs.capped) | \(rho($m; "likelihood")) | \(val($m; "likelihood"; "precision_at_k") | n2) | \(val($m; "likelihood"; "lift") | n2) | \($m.commit_keyword.signals.likelihood.spearman | n2) | \($m.commit_keyword.signals.likelihood.lift | n2) |"),
+    "",
+    "| Repo | Blast radius vs | Files with events | Spearman | P@10 | Lift |",
+    "|---|---|---:|---:|---:|---:|",
+    ($repos[] | .name as $n | .in_sample.stakes // {} | to_entries[] |
+      "| \($n) | \(.key) | \(if .value.available then (.value.files_with_events | tostring) + (if .value.too_few_events then " (too few)" else "" end) else "n/a" end) | \(if .value.available then (.value.spearman | n2) else "n/a" end) | \(if .value.available then (.value.precision_at_k | n2) else "n/a" end) | \(if .value.available then (.value.lift | n2) else "n/a" end) |"),
+    ""
+  else empty end),
   "## Repos",
   "",
   "| Repo | Commit | Commit date | Holdout cutoff |",

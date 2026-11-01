@@ -269,9 +269,19 @@ Owners are derived from one `git log --numstat` pass. Each author's score for a 
 
 Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve HIGH (protect) with no fixes at all, because CRITICAL needs both high impact and high likelihood, so expect blast radius and impact to correlate weakly with fix counts. Judge likelihood by fix prediction and impact by whether its ranking matches what your team would protect. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
 
+### Evidence from pull requests
+
+Commit-message keywords are noisy ("fix typo" counts as a fix). `highstakes check calibration --source prs` uses merged GitHub pull requests instead, with file lists from local git:
+
+- **Will it break?** Files touched by bug-fix PRs (labelled bug, fix, defect or regression on the PR or a closed issue, or titled `fix:`) and revert PRs. With `--holdout`, likelihood is scored with history before the cutoff and these PRs are counted after it. The commit-keyword result for the same window is shown next to it.
+- **How bad if it breaks?** Signs that maintainers treated a change to a file as serious, none of which come from the LLM: the PR was backported to a release branch, reverted within 7 days, carried a severity label (security, critical, p0, p1, sev, incident, CVE), had 2+ approvers or 3+ reviews, or the file is covered by CODEOWNERS. Blast radius is compared with each signal and with their count per file.
+
+Review depth and CODEOWNERS track maintainer judgment, which is what impact should match, but also code volume and activity; read a positive correlation with that in mind, next to the `pr_activity` reference row (blast radius against the count of all PRs touching each file). See the [CLI reference](cli-reference.md#pull-request-source) for the exact rules.
+
 ### Validating impact
 
-Fix history validates likelihood (how often a file breaks). Blast radius is the impact axis (how bad a break would be), and needs a different check. There are two:
+Fix history validates likelihood (how often a file breaks). Blast radius is the impact axis (how bad a break would be), and needs a different check. There are three:
 
 - **Security fixes only.** `highstakes check calibration --events security --since 1095d` counts only security fixes, which tend to land where a bug hurts most. A positive blast-radius Spearman and precision@K above the base rate here is evidence for the impact axis. Security fixes are rare: the report warns when fewer than 10 files have one, and most repos need a window of years.
+- **Pull-request stakes.** `highstakes check calibration --source prs --since 365d` compares blast radius with backports, fast reverts, severity labels, review depth and CODEOWNERS coverage (see [Evidence from pull requests](#evidence-from-pull-requests)). It needs no maintainer time, but the signals are indirect.
 - **Maintainer labels.** `highstakes create labels --out labels.csv` writes a blind sheet: the 20 files HighStakes rates highest on blast radius mixed with 20 random other files, shuffled, with no scores shown. Maintainers rate each from 1 to 5 (5 = "a bug here would be a serious incident"). `highstakes check calibration --labels labels.csv` then reports Spearman and precision@K (positive = rating 4 or 5) for blast radius and heat. This is the direct test of impact, and the one to trust when security fixes are too few.

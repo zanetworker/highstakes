@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"github.com/zanetworker/highstakes/internal/calibration"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/incidents"
+	"github.com/zanetworker/highstakes/internal/prdata"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // --- check ---
@@ -40,6 +43,14 @@ events. Use --holdout to score with history up to a cutoff and count events afte
 Fix history measures how likely a file is to break; security fixes are a rough
 proxy for impact, the axis blast radius scores.
 
+--source prs takes events from merged GitHub pull requests instead of commit
+messages (needs the gh CLI, logged in). Bug-fix and revert PRs test likelihood
+("Will it break?"); backports, fast reverts, severity labels, review depth and
+CODEOWNERS coverage test blast radius ("How bad if it breaks?"). File lists come
+from local git; PR metadata is cached in .heatmap/cache/github/. The
+commit-keyword source is reported side by side. --repo owner/name overrides the
+repository read from the origin remote.
+
 --labels FILE skips git history and compares blast radius and heat with
 maintainer ratings from a sheet made by "highstakes create labels".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,6 +61,8 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 		holdoutStr, _ := cmd.Flags().GetString("holdout")
 		eventsStr, _ := cmd.Flags().GetString("events")
 		labelsFile, _ := cmd.Flags().GetString("labels")
+		sourceStr, _ := cmd.Flags().GetString("source")
+		repoStr, _ := cmd.Flags().GetString("repo")
 
 		if top < 1 {
 			return cliError(2, "invalid --top %d: must be 1 or more", top)
@@ -64,9 +77,26 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 		if err != nil {
 			return cliError(2, "invalid --events: %v", err)
 		}
+		source, err := parseSource(sourceStr)
+		if err != nil {
+			return cliError(2, "invalid --source: %v", err)
+		}
+		if source != calibration.SourcePRs {
+			if repoStr != "" {
+				return cliError(2, "--repo only applies with --source prs")
+			}
+		} else if cmd.Flags().Changed("events") {
+			return cliError(2, "--events picks commit-message event kinds; with --source prs the events are bug-fix and revert PRs, so drop --events")
+		}
+		var repo prdata.Repo
+		if repoStr != "" {
+			if repo, err = prdata.ParseRepo(repoStr); err != nil {
+				return cliError(2, "invalid --repo: %v", err)
+			}
+		}
 		if labelsFile != "" {
-			if holdoutStr != "" || cmd.Flags().Changed("since") || cmd.Flags().Changed("events") {
-				return cliError(2, "--labels compares with maintainer ratings, not git history; drop --since, --holdout and --events")
+			if holdoutStr != "" || cmd.Flags().Changed("since") || cmd.Flags().Changed("events") || cmd.Flags().Changed("source") {
+				return cliError(2, "--labels compares with maintainer ratings, not git history; drop --since, --holdout, --events and --source")
 			}
 			return checkLabels(labelsFile, top, jsonOut)
 		}
@@ -116,6 +146,23 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 			}
 		}
 
+		if source == calibration.SourcePRs {
+			if repo.Owner == "" {
+				if repo, err = prdata.OriginRepo("."); err != nil {
+					return cliError(2, "cannot infer the GitHub repository (%v); pass --repo owner/name", err)
+				}
+			}
+			pr, err := runPRCalibration(cmd.Context(), prdata.GHClient{}, repo, hm, commits, store.All(), opts)
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return printJSON(pr)
+			}
+			printPRCalibration(os.Stdout, pr)
+			return nil
+		}
+
 		report := calibration.Run(hm, commits, store.All(), opts)
 		if jsonOut {
 			return printJSON(report)
@@ -123,6 +170,83 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 		printCalibration(os.Stdout, report)
 		return nil
 	},
+}
+
+// parseSource parses a --source value (case-insensitive).
+func parseSource(s string) (string, error) {
+	switch v := strings.ToLower(s); v {
+	case calibration.SourceCommits, calibration.SourcePRs:
+		return v, nil
+	}
+	return "", fmt.Errorf("unknown source %q (valid: commits, prs)", s)
+}
+
+// PR fetch limits: at most maxPRs PRs per run, and stop while this many
+// GraphQL points are left so other tools keep some quota.
+const (
+	maxPRs          = 1500
+	minGraphQLQuota = 200
+	fastRevertDays  = 7
+)
+
+// runPRCalibration fetches merged PRs for the window, maps them to local
+// commits on HEAD, labels them, and compares the scores with the PR events.
+func runPRCalibration(ctx context.Context, client prdata.Client, repo prdata.Repo, hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incs []types.Incident, opts calibration.Options) (*calibration.PRReport, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fetch, err := prdata.Fetch(ctx, client, repo, prdata.FetchOptions{
+		Since: opts.From, Now: opts.To, Max: maxPRs, MinRemaining: minGraphQLQuota,
+		CacheDir: filepath.Join(".heatmap", "cache", "github"),
+	})
+	if err != nil {
+		return nil, cliError(3, "fetch merged PRs for %s: %v", repo, err)
+	}
+	// A day of slack: the landed commit's date can trail the merge time.
+	head, err := prdata.ReadCommits(".", opts.From.AddDate(0, 0, -1), true, "HEAD")
+	if err != nil {
+		return nil, cliError(3, "read git history: %v", err)
+	}
+	prCommit := prdata.MapPRs(fetch.PRs, head)
+
+	branches, err := prdata.BackportBranches(".")
+	if err != nil {
+		return nil, cliError(3, "%v", err)
+	}
+	var onBranches []prdata.Commit
+	for _, b := range branches {
+		bc, err := prdata.ReadCommits(".", opts.From, true, b)
+		if err != nil {
+			return nil, cliError(3, "read release branch %s: %v", b, err)
+		}
+		onBranches = append(onBranches, prdata.BranchOnly(bc, head)...)
+	}
+	backported := prdata.BackportedPRs(onBranches, prCommit)
+	fastReverted := prdata.FastReverts(fetch.PRs, prCommit, head, fastRevertDays*24*time.Hour)
+	labeled := prdata.Label(fetch.PRs, prCommit, backported, fastReverted)
+
+	co, coFile, err := prdata.LoadCodeOwners(".")
+	if err != nil {
+		return nil, cliError(3, "%v", err)
+	}
+
+	prOpts := opts
+	prOpts.Source = calibration.SourcePRs
+	report := calibration.RunWithEvents(hm, commits, incs, calibration.FragilityEvents(labeled, opts.From, opts.To), prOpts)
+	out := &calibration.PRReport{
+		Report:        report,
+		GitHub:        calibration.Summarize(repo.String(), fetch, labeled, branches, coFile),
+		CommitKeyword: calibration.Run(hm, commits, incs, opts),
+		Stakes:        calibration.RunStakes(hm, calibration.StakesInputs(hm, labeled, branches, co, coFile), opts.K),
+	}
+	report.Caveats = append(report.Caveats, calibration.CaveatStakes)
+	if fetch.Capped {
+		report.Caveats = append(report.Caveats, fmt.Sprintf("PR fetch stopped at the cap of %d PRs read; older PRs in the window are missing.", fetch.Cap))
+	}
+	if fetch.Partial {
+		report.Caveats = append(report.Caveats, "PR fetch stopped early ("+fetch.PartialReason+"); results are partial. Rerun later: cached PRs are not fetched again.")
+	}
+	return out, nil
 }
 
 var daysPattern = regexp.MustCompile(`^(\d+)d$`)
@@ -219,6 +343,69 @@ func printCalibration(out io.Writer, r *calibration.Report) {
 	}
 }
 
+func printPRCalibration(out io.Writer, r *calibration.PRReport) {
+	g := r.GitHub
+	fmt.Fprintf(out, "Pull requests (%s): %d merged in the window, %d mapped to local commits", g.Repo, g.InWindow, g.Mapped)
+	fmt.Fprintf(out, " (%d read from GitHub, %d from cache, %d API calls)\n", g.Fetch.Fetched, g.Fetch.FromCache, g.Fetch.APICalls)
+	if g.Fetch.Capped {
+		fmt.Fprintf(out, "WARNING: stopped at the cap of %d PRs.\n", g.Fetch.Cap)
+	}
+	if g.Fetch.Partial {
+		fmt.Fprintf(out, "WARNING: partial results: %s\n", g.Fetch.PartialReason)
+	}
+	fmt.Fprintf(out, "Labels: bug fix %d, revert %d, backported %d, fast revert %d, severity %d, deep review %d\n\n",
+		g.BugFix, g.Revert, g.Backported, g.FastRevert, g.Severity, g.DeepReview)
+
+	fmt.Fprintln(out, "Will it break? Fragility events from PRs (bug fixes and reverts)")
+	printCalibration(out, r.Report)
+
+	fmt.Fprintf(out, "\nSame window, commit-keyword events (%d files with events, PR source %d)\n", r.CommitKeyword.FilesWithEvents, r.FilesWithEvents)
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', tabwriter.AlignRight)
+	fmt.Fprintln(tw, "signal\tspearman prs\tspearman commits\tlift prs\tlift commits\t")
+	for i, s := range r.Signals {
+		c := r.CommitKeyword.Signals[i]
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t\n", s.Name, rhoText(s.Available, s.Spearman), rhoText(c.Available, c.Spearman), liftText(s.Available, s.Lift), liftText(c.Available, c.Lift))
+	}
+	tw.Flush()
+
+	fmt.Fprintf(out, "\nHow bad if it breaks? Blast radius vs stakes evidence (K=%d)\n", r.K)
+	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', tabwriter.AlignRight)
+	fmt.Fprintln(tw, "signal\tfiles\twith events\tprecision@K\tlift\tspearman\t")
+	var notes []string
+	for _, s := range r.Stakes {
+		if !s.Available {
+			fmt.Fprintf(tw, "%s\tn/a\tn/a\tn/a\tn/a\tn/a\t\n", s.Name)
+		} else {
+			flag := ""
+			if s.TooFewEvents {
+				flag = " (too few)"
+			}
+			fmt.Fprintf(tw, "%s\t%d\t%d%s\t%.2f\t%.2f\t%s\t\n", s.Name, s.Files, s.FilesWithEvents, flag, s.PrecisionAtK, s.Lift, rhoText(true, s.Spearman))
+		}
+		if s.Note != "" {
+			notes = append(notes, fmt.Sprintf("  %s: %s", s.Name, s.Note))
+		}
+	}
+	tw.Flush()
+	for _, n := range notes {
+		fmt.Fprintln(out, n)
+	}
+}
+
+func rhoText(available bool, rho *float64) string {
+	if !available || rho == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f", *rho)
+}
+
+func liftText(available bool, lift float64) string {
+	if !available {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f", lift)
+}
+
 func printFileResults(out io.Writer, files []calibration.FileResult) {
 	if len(files) == 0 {
 		fmt.Fprintln(out, "  (none)")
@@ -241,6 +428,8 @@ func init() {
 	checkCalibrationCmd.Flags().Int("limit", 10, "Max files per surprise list")
 	checkCalibrationCmd.Flags().String("events", "all", "Event kinds to count: all, fixes, reverts, security")
 	checkCalibrationCmd.Flags().String("labels", "", "Compare with maintainer ratings in this CSV (from create labels) instead of git history")
+	checkCalibrationCmd.Flags().String("source", "commits", "Where events come from: commits (commit-message keywords) or prs (merged GitHub pull requests, via gh)")
+	checkCalibrationCmd.Flags().String("repo", "", "GitHub repository owner/name for --source prs (default: from the origin remote)")
 	checkCalibrationCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return cliError(2, "%v", err)
 	})
