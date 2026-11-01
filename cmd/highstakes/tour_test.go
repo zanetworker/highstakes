@@ -52,7 +52,7 @@ func runCLI(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { os.Stdout = orig }()
 
 	// Reset flags that persist across Execute calls in one process.
-	for _, c := range []string{"json", "limit", "focus", "per-component", "min-impact", "components"} {
+	for _, c := range []string{"json", "limit", "focus", "per-component", "min-impact", "components", "include-supporting"} {
 		if f := tourCmd.Flags().Lookup(c); f != nil {
 			if sv, ok := f.Value.(pflag.SliceValue); ok {
 				_ = sv.Replace(nil)
@@ -253,5 +253,131 @@ func TestPrintTour_ShowsExplanation(t *testing.T) {
 	}
 	if strings.Count(out, "do:") != 1 {
 		t.Errorf("files without an explanation should print no actions:\n%s", out)
+	}
+}
+
+func TestGetTour_Supporting(t *testing.T) {
+	dir := writeHeatmap(t)
+	hm, err := heatmap.Load(filepath.Join(dir, ".heatmap", "heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"examples/demo.py", "tools/gen.py"} {
+		hm.Files[p] = &types.FileHeat{Path: p, HeatScore: 95, Impact: 95, Tier: types.TierCritical}
+	}
+	if err := heatmap.Save(hm, filepath.Join(dir, ".heatmap", "heatmap.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".heatmap", "config.yaml"), []byte("tour:\n  supporting: [tools]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		args      []string
+		wantComps []string
+		wantKinds []string
+	}{
+		{"hidden by default, config glob honoured", []string{"get", "tour", "--per-component", "1", "--json"},
+			[]string{"core", "cmd"}, []string{"product", "product"}},
+		{"include-supporting appends them", []string{"get", "tour", "--per-component", "1", "--include-supporting", "--json"},
+			[]string{"core", "cmd", "examples", "tools"}, []string{"product", "product", "supporting", "supporting"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := runCLI(t, dir, tt.args...)
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			var tr tour.Tour
+			if err := json.Unmarshal([]byte(out), &tr); err != nil {
+				t.Fatalf("invalid JSON %q: %v", out, err)
+			}
+			var comps, kinds []string
+			for _, s := range tr.Sections {
+				comps, kinds = append(comps, s.Component), append(kinds, s.Kind)
+			}
+			if strings.Join(comps, ",") != strings.Join(tt.wantComps, ",") || strings.Join(kinds, ",") != strings.Join(tt.wantKinds, ",") {
+				t.Errorf("sections = %v %v, want %v %v", comps, kinds, tt.wantComps, tt.wantKinds)
+			}
+		})
+	}
+
+	t.Run("naming a supporting component shows it", func(t *testing.T) {
+		_, err := runCLI(t, dir, "get", "tour", "--min-impact", "90", "--components", "core,examples")
+		if err != nil {
+			t.Fatalf("named supporting component should show: %v", err)
+		}
+	})
+	t.Run("bad config glob is exit 2", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(dir, ".heatmap", "config.yaml"), []byte("tour:\n  supporting: [\"[\"]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := runCLI(t, dir, "get", "tour")
+		if ee, ok := err.(*exitError); !ok || ee.code != 2 || !strings.Contains(ee.msg, "tour.supporting") {
+			t.Errorf("err = %v, want exit 2 naming tour.supporting", err)
+		}
+	})
+}
+
+func TestGetTour_OnlySupportingHint(t *testing.T) {
+	dir := writeHeatmap(t)
+	hm, err := heatmap.Load(filepath.Join(dir, ".heatmap", "heatmap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hm.Files["examples/demo.py"] = &types.FileHeat{Path: "examples/demo.py", Impact: 95, Tier: types.TierCritical}
+	if err := heatmap.Save(hm, filepath.Join(dir, ".heatmap", "heatmap.json")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = runCLI(t, dir, "get", "tour", "--min-impact", "90")
+	if ee, ok := err.(*exitError); !ok || ee.code != 4 || !strings.Contains(ee.msg, "--include-supporting") {
+		t.Errorf("err = %v, want exit 4 suggesting --include-supporting", err)
+	}
+}
+
+func TestPrintTour_Parts(t *testing.T) {
+	files := map[string]*types.FileHeat{
+		"core/a.go":       {Path: "core/a.go", Impact: 80, Tier: types.TierHigh},
+		"cmd/main.go":     {Path: "cmd/main.go", Impact: 30, Tier: types.TierLow},
+		"examples/x.py":   {Path: "examples/x.py", Impact: 90, Tier: types.TierHigh},
+		"scripts/a.sh":    {Path: "scripts/a.sh", Impact: 20, Tier: types.TierLow},
+		".github/ci.yaml": {Path: ".github/ci.yaml", Impact: 20, Tier: types.TierLow},
+	}
+	tests := []struct {
+		name    string
+		opts    tour.Options
+		want    []string
+		notWant []string
+	}{
+		{"hidden", tour.Options{PerComponent: 1},
+			[]string{"Tour: 2 stops across 2 product components, dependencies first", "3 supporting components hidden (--include-supporting shows them)"},
+			[]string{"Supporting: CI, deployment, scripts and examples"}},
+		{"included", tour.Options{PerComponent: 1, IncludeSupporting: true},
+			[]string{"Tour: 5 stops across 2 product and 3 supporting components, dependencies first", "Supporting: CI, deployment, scripts and examples"},
+			[]string{"hidden"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := tour.Build(&types.Heatmap{Files: files}, tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			printTour(&buf, tr)
+			out := buf.String()
+			for _, w := range tt.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output missing %q:\n%s", w, out)
+				}
+			}
+			for _, w := range tt.notWant {
+				if strings.Contains(out, w) {
+					t.Errorf("output has %q:\n%s", w, out)
+				}
+			}
+			if i := strings.Index(out, "Supporting:"); i >= 0 && strings.Index(out, "examples/x.py") < i {
+				t.Errorf("supporting stops must follow the part title:\n%s", out)
+			}
+		})
 	}
 }

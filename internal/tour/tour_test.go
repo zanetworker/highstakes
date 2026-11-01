@@ -141,22 +141,22 @@ func stopPaths(tr *Tour) []string {
 }
 
 func TestBuild_Order(t *testing.T) {
-	all := []string{"util/str.go", "types/types.go", "api/handler.go", "api/routes.go", "cmd/main.go"}
+	all := []string{"types/types.go", "api/handler.go", "api/routes.go", "util/str.go", "cmd/main.go"}
 	tests := []struct {
 		name string
 		opts Options
 		want []string
 	}{
 		{
-			name: "dependencies first, heat order within a level",
+			name: "most important first, each after its dependencies",
 			opts: Options{},
-			// level 0: util (70) before types (20); level 1: api hottest first; level 2: cmd
+			// api (90) needs types (20) first; then util (70); cmd (40) last
 			want: all,
 		},
 		{
-			name: "limit keeps the hottest files, still dependency ordered",
+			name: "limit keeps the hottest files, by importance",
 			opts: Options{Limit: 2},
-			want: []string{"util/str.go", "api/handler.go"},
+			want: []string{"api/handler.go", "util/str.go"},
 		},
 		{name: "limit one", opts: Options{Limit: 1}, want: []string{"api/handler.go"}},
 		{name: "limit equal to file count keeps all", opts: Options{Limit: 5}, want: all},
@@ -270,7 +270,7 @@ func TestBuild_StopFields(t *testing.T) {
 	if st.Notes != "Read the auth RFC first" {
 		t.Errorf("notes = %q", st.Notes)
 	}
-	if st.Order != 3 || st.Title != "handler.go" {
+	if st.Order != 2 || st.Title != "handler.go" {
 		t.Errorf("order = %d title = %q", st.Order, st.Title)
 	}
 	if sec.Dir != "api" || sec.MaxHeat != 90 || sec.Tier != types.TierCritical || sec.Level != 1 {
@@ -542,7 +542,8 @@ func TestBuild_OrdersByImpact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"core/auth.go", "core/tie_b.go", "core/tie_a.go", "core/churny.go", "app/app.go", "svc/svc.go"}
+	// svc (99) depends on core (90), so core comes first; app (30) last.
+	want := []string{"core/auth.go", "core/tie_b.go", "core/tie_a.go", "core/churny.go", "svc/svc.go", "app/app.go"}
 	if got := stopPaths(tr); !reflect.DeepEqual(got, want) {
 		t.Errorf("stops = %v, want %v", got, want)
 	}
@@ -664,14 +665,14 @@ func TestBuild_PerComponent(t *testing.T) {
 		{
 			name:         "two per component, fragile-critical first, dependencies first",
 			opts:         Options{PerComponent: 2, Markers: markers},
-			wantStops:    []string{"crates/core/src/jwt.rs", "crates/core/src/lib.rs", "crates/ui/src/main.rs", "crates/net/src/tls.rs", "crates/net/src/policy.rs"},
-			wantSections: []string{"crates/core", "crates/ui", "crates/net"},
+			wantStops:    []string{"crates/core/src/jwt.rs", "crates/core/src/lib.rs", "crates/net/src/tls.rs", "crates/net/src/policy.rs", "crates/ui/src/main.rs"},
+			wantSections: []string{"crates/core", "crates/net", "crates/ui"},
 		},
 		{
 			name:         "per-component wins over limit",
 			opts:         Options{PerComponent: 1, Limit: 1, Markers: markers},
-			wantStops:    []string{"crates/core/src/jwt.rs", "crates/ui/src/main.rs", "crates/net/src/tls.rs"},
-			wantSections: []string{"crates/core", "crates/ui", "crates/net"},
+			wantStops:    []string{"crates/core/src/jwt.rs", "crates/net/src/tls.rs", "crates/ui/src/main.rs"},
+			wantSections: []string{"crates/core", "crates/net", "crates/ui"},
 		},
 		{
 			name:         "min impact drops low components",
@@ -680,9 +681,9 @@ func TestBuild_PerComponent(t *testing.T) {
 			wantSections: []string{"crates/core", "crates/net"},
 		},
 		{
-			name:         "min impact equal to max impact keeps the component",
+			name:         "min impact equal to max impact keeps the component, not stops below it",
 			opts:         Options{PerComponent: 1, MinImpact: 95, Markers: markers},
-			wantStops:    []string{"crates/net/src/tls.rs"},
+			wantStops:    []string{"crates/net/src/policy.rs"},
 			wantSections: []string{"crates/net"},
 		},
 		{
@@ -719,7 +720,7 @@ func TestBuild_PerComponent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		net := tr.Sections[2]
+		net := tr.Sections[1]
 		if net.Level != 1 || !reflect.DeepEqual(net.DependsOn, []string{"crates/core"}) {
 			t.Errorf("net level %d depends_on %v, want 1 [crates/core]", net.Level, net.DependsOn)
 		}

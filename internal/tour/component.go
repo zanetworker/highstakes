@@ -56,3 +56,34 @@ func Markers(paths []string, exists func(string) bool) map[string]bool {
 	}
 	return out
 }
+
+// supportingDirs are directory names that hold code around the product
+// rather than the product itself: CI, deployment, scripts, examples, docs,
+// tests, benchmarks, fixtures and vendored code.
+var supportingDirs = map[string]bool{
+	"examples": true, "scripts": true, ".github": true, "docs": true, "deploy": true,
+	"tests": true, "e2e": true, "benchmarks": true, "fixtures": true, "vendor": true, "third_party": true,
+}
+
+// IsSupporting reports whether a component is supporting code rather than
+// product: any of its path segments is a supporting directory name, or globs
+// (path.Match syntax, from tour.supporting in .heatmap/config.yaml) match the
+// component or one of its parent directories. Globs extend the defaults.
+// Invalid globs never match; Build validates them.
+func IsSupporting(component string, globs []string) bool {
+	segs := strings.Split(component, "/")
+	for _, s := range segs {
+		if supportingDirs[s] {
+			return true
+		}
+	}
+	for i := 1; i <= len(segs); i++ {
+		prefix := strings.Join(segs[:i], "/")
+		for _, g := range globs {
+			if ok, _ := path.Match(g, prefix); ok {
+				return true
+			}
+		}
+	}
+	return false
+}

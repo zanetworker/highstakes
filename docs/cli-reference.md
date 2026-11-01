@@ -54,17 +54,18 @@ If the file is not found, suggests similar paths from the heatmap.
 
 ## highstakes get tour
 
-Get a reading path for learning the repository: dependencies first, the most impactful files first. Makes no LLM calls; reads only `.heatmap/heatmap.json` and the source files (for line anchors).
+Get a reading path for learning the repository: the most important product code first, each section after the sections it depends on. Makes no LLM calls; reads `.heatmap/heatmap.json`, `.heatmap/config.yaml` (for `tour.supporting`) and the source files (for line anchors).
 
 ```sh
-highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--limit N] [--focus <dir|file>] [--json]
+highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--include-supporting] [--limit N] [--focus <dir|file>] [--json]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--per-component` | `0` | Keep the N most important files of every component, one section per component (0 = off). Takes precedence over `--limit` |
-| `--min-impact` | `0` | Skip components whose highest file impact is below this (0-100) |
-| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/openshell-core,internal/tour`) |
+| `--min-impact` | `0` | Skip files whose impact is below this (0-100); components left without files drop out. Applies before `--per-component` picks, so every stop shown reaches it |
+| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/openshell-core,internal/tour`). A supporting component named here is shown without `--include-supporting` |
+| `--include-supporting` | `false` | Add supporting components (see below) in a final part titled "Supporting: CI, deployment, scripts and examples" |
 | `--limit` | `0` | Keep the N most impactful files across the repo (0 = all). Selection happens before ordering. Ignored with `--per-component` |
 | `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
 | `--json` | `false` | Output as JSON |
@@ -72,10 +73,16 @@ highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--l
 Ordering:
 
 1. Files are grouped into sections by directory (one Go package per section).
-2. Sections are ordered by dependency level: level 0 imports no other directory, level N imports something at level N-1. Levels come from the whole repo's import graph, so the order holds even when `--limit` drops the directories in between. Directories in an import cycle share a level.
-3. Within a level, sections go by max impact; within a section, files go by impact, then dependency centrality. Heat breaks remaining ties, so heatmaps from before the two axes still order sensibly.
+2. Sections are ranked by importance: max impact, then the number of fragile-critical stops, then max heat, then name.
+3. Sections are emitted in that rank, except that a section's dependencies come first: before emitting a section, every selected section it imports (directly, or through sections that were not selected) is emitted, most important first. So a high-impact package that imports a low-impact one is read right after it. Sections in one import cycle have no order constraint between them and keep importance order. The import graph is the whole repo's, so the order holds even when `--limit` drops the sections in between.
+4. Product sections come first, then supporting sections (with `--include-supporting`), each part ordered by the same rule. A product section that imports a supporting one still comes first.
+5. Within a section, files go by impact, then dependency centrality. Heat breaks remaining ties, so heatmaps from before the two axes still order sensibly.
 
-With `--per-component`, sections are components instead of directories, levels come from the component import graph, and files within a component go fragile-critical first, then by impact, likelihood and centrality. A repo-wide `--limit` can fill every stop from two or three hot components; `--per-component` covers every part of the repo, which suits onboarding.
+With `--per-component`, sections are components instead of directories, the graph is the component import graph, and files within a component go fragile-critical first, then by impact, likelihood and centrality, among the files that pass `--min-impact`. A repo-wide `--limit` can fill every stop from two or three hot components; `--per-component` covers every part of the repo, which suits onboarding.
+
+`level` is still reported (dependency depth: 0 imports no other section, cycles share a level), but it no longer decides the order.
+
+Supporting components hold code around the product: any component with a path segment named `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `fixtures`, `vendor` or `third_party`, plus `tour.supporting` globs in `.heatmap/config.yaml` (see [configuration](configuration.md#tour-supporting-components)). They are hidden by default, in both modes, unless `--include-supporting` is given, they are named in `--components`, or `--focus` points inside one. The text header counts the product components shown and the supporting components hidden.
 
 A component is the top-level unit a file belongs to, decided in this order:
 
@@ -93,7 +100,7 @@ Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)
 
 Line anchors point at the first top-level declaration (`func`, `type`, `class`, `def`, `export`, `fn`, `pub`, `struct`, `enum`, `trait`, `impl`, `mod` and similar).
 
-**Exit code 2** for a negative `--limit` or `--per-component`, a `--min-impact` outside 0-100, or an unknown component in `--components` (the error lists the valid names). **Exit code 4** if `--focus` matches no file or no component reaches `--min-impact`.
+**Exit code 2** for a negative `--limit` or `--per-component`, a `--min-impact` outside 0-100, an unknown component in `--components` (the error lists the valid names), or a malformed `tour.supporting` glob. **Exit code 4** if `--focus` matches no file, no file reaches `--min-impact`, or only hidden supporting components are left (the error suggests `--include-supporting`).
 
 JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: sections are the grouped narrative, stops carry `file:line` anchors.
 
@@ -105,13 +112,18 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
   "branch": "main",
   "analyzed_at": "2026-10-30T12:37:55+01:00",
   "focus": "internal",
-  "ordering": "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality",
+  "ordering": "sections by importance (max impact, then fragile-critical count), each after the sections it depends on; product before supporting; stops by impact, then centrality",
   "total_stops": 8,
+  "product_components": 6,
+  "supporting_components": 0,
+  "supporting_hidden": 2,
   "sections": [
     {
       "order": 1,
       "title": "internal/types",
       "dir": "internal/types",
+      "component": "internal/types",
+      "kind": "product",
       "level": 0,
       "max_heat": 31,
       "max_impact": 45,
@@ -150,7 +162,10 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 
 | Field | Meaning |
 |-------|---------|
-| `sections[].level` | Dependency depth of the directory; 0 = imports no other directory |
+| `product_components`, `supporting_components` | Components shown, by kind |
+| `supporting_hidden` | Supporting components left out (pass `--include-supporting`) |
+| `sections[].kind` | `product` or `supporting` |
+| `sections[].level` | Dependency depth of the section; 0 = imports no other section. Informational; ordering is by importance with dependencies first |
 | `sections[].depends_on` / `used_by` | Directories this one imports / that import it |
 | `stops[].order` | Global 1-based reading position |
 | `stops[].line`, `anchor` | First top-level declaration (`func`, `type`, `class`, `def`, `export`, `pub`, ...), else 1 |

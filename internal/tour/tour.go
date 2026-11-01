@@ -1,7 +1,7 @@
 // Package tour builds a reading path through a heatmap for learning a
-// codebase: directories in dependency order (dependencies first), the most
-// impactful files first within each level. It makes no LLM calls and reads
-// only the heatmap.
+// codebase: the most important sections first, each preceded by the
+// sections it depends on, and the most impactful files first within each
+// section. It makes no LLM calls and reads only the heatmap.
 package tour
 
 import (
@@ -38,6 +38,17 @@ var (
 	ErrBelowMinImpact = fmt.Errorf("%w: no component reaches min impact", ErrNoFiles)
 	// ErrUnknownComponent means a requested component has no files in focus.
 	ErrUnknownComponent = errors.New("unknown component")
+	// ErrOnlySupporting means every file left belongs to a hidden supporting
+	// component. It wraps ErrNoFiles.
+	ErrOnlySupporting = fmt.Errorf("%w: only supporting components match", ErrNoFiles)
+	// ErrInvalidSupporting means a supporting glob is malformed.
+	ErrInvalidSupporting = errors.New("invalid supporting glob")
+)
+
+// Section kinds.
+const (
+	KindProduct    = "product"
+	KindSupporting = "supporting"
 )
 
 // Options controls tour selection.
@@ -47,8 +58,14 @@ type Options struct {
 	// PerComponent keeps the N most important files of every component and
 	// makes one section per component. It takes precedence over Limit.
 	PerComponent int
-	MinImpact    int      // drop components whose max impact is lower
+	MinImpact    int      // drop files (and so components) whose impact is lower
 	Components   []string // keep only these components; empty = all
+	// Supporting adds globs (path.Match) for supporting components on top of
+	// the default directory names (see IsSupporting).
+	Supporting []string
+	// IncludeSupporting adds supporting components in a final part. Without
+	// it they are hidden, unless named in Components or holding the Focus.
+	IncludeSupporting bool
 	// Markers lists marker files that exist (see Markers), for Component.
 	Markers map[string]bool
 	// Source optionally returns a file's content so stops get a line hint
@@ -59,15 +76,20 @@ type Options struct {
 // Tour is the reading path. Sections are read in order; stops within a
 // section are read in order. Stop.Order is the global 1-based position.
 type Tour struct {
-	Version    string    `json:"version"`
-	Repo       string    `json:"repo"`
-	Commit     string    `json:"commit"`
-	Branch     string    `json:"branch,omitempty"`
-	AnalyzedAt string    `json:"analyzed_at,omitempty"`
-	Focus      string    `json:"focus,omitempty"`
-	Ordering   string    `json:"ordering"`
-	TotalStops int       `json:"total_stops"`
-	Sections   []Section `json:"sections"`
+	Version    string `json:"version"`
+	Repo       string `json:"repo"`
+	Commit     string `json:"commit"`
+	Branch     string `json:"branch,omitempty"`
+	AnalyzedAt string `json:"analyzed_at,omitempty"`
+	Focus      string `json:"focus,omitempty"`
+	Ordering   string `json:"ordering"`
+	TotalStops int    `json:"total_stops"`
+	// ProductComponents and SupportingComponents count the components shown;
+	// SupportingHidden counts supporting components left out.
+	ProductComponents    int       `json:"product_components"`
+	SupportingComponents int       `json:"supporting_components"`
+	SupportingHidden     int       `json:"supporting_hidden"`
+	Sections             []Section `json:"sections"`
 }
 
 // Section groups the stops of one directory (Go package), or of one
@@ -77,6 +99,7 @@ type Section struct {
 	Title     string     `json:"title"`
 	Dir       string     `json:"dir"`
 	Component string     `json:"component"` // top-level unit (see Component)
+	Kind      string     `json:"kind"`      // KindProduct or KindSupporting
 	Level     int        `json:"level"`     // 0 = depends on no other directory
 	MaxHeat   int        `json:"max_heat"`
 	MaxImpact int        `json:"max_impact"`
@@ -333,7 +356,9 @@ var tierRank = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.T
 
 // Build creates the tour. It returns ErrInvalidLimit, ErrInvalidPerComponent
 // or ErrInvalidMinImpact for out-of-range options, ErrUnknownComponent for a
-// requested component without files, and ErrNoFiles when nothing is left.
+// requested component without files, ErrInvalidSupporting for a malformed
+// glob, and ErrNoFiles (or ErrBelowMinImpact, ErrOnlySupporting, which wrap
+// it) when nothing is left.
 func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	switch {
 	case opts.Limit < 0:
@@ -343,7 +368,18 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	case opts.MinImpact < 0 || opts.MinImpact > 100:
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidMinImpact, opts.MinImpact)
 	}
+	for _, g := range opts.Supporting {
+		if _, err := path.Match(g, ""); err != nil {
+			return nil, fmt.Errorf("%w %q: %v", ErrInvalidSupporting, g, err)
+		}
+	}
 	component := func(p string) string { return Component(p, opts.Markers) }
+	kindOf := func(c string) string {
+		if IsSupporting(c, opts.Supporting) {
+			return KindSupporting
+		}
+		return KindProduct
+	}
 
 	byComp := map[string][]*types.FileHeat{}
 	for _, f := range hm.Files {
@@ -366,14 +402,27 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		byComp = kept
 	}
 
+	requested := map[string]bool{}
+	for _, c := range opts.Components {
+		requested[c] = true
+	}
+	showSupporting := opts.IncludeSupporting || (!inFocus("", opts.Focus) && IsSupporting(strings.TrimPrefix(opts.Focus, "./"), opts.Supporting))
+
 	var picked []*types.FileHeat
+	hidden, passed := 0, false
 	for _, c := range sortedKeysOf(byComp) {
-		fs := byComp[c]
-		maxImpact := 0
-		for _, f := range fs {
-			maxImpact = max(maxImpact, f.Impact)
+		var fs []*types.FileHeat
+		for _, f := range byComp[c] {
+			if f.Impact >= opts.MinImpact {
+				fs = append(fs, f)
+			}
 		}
-		if maxImpact < opts.MinImpact {
+		if len(fs) == 0 {
+			continue
+		}
+		passed = true
+		if kindOf(c) == KindSupporting && !showSupporting && !requested[c] {
+			hidden++
 			continue
 		}
 		if opts.PerComponent > 0 {
@@ -382,12 +431,16 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		}
 		picked = append(picked, fs...)
 	}
-	if len(picked) == 0 {
+	switch {
+	case !passed:
 		return nil, fmt.Errorf("%w %d", ErrBelowMinImpact, opts.MinImpact)
+	case len(picked) == 0:
+		return nil, fmt.Errorf("%w (%d hidden)", ErrOnlySupporting, hidden)
 	}
-	group, ordering := Dir, "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality"
+	const sectionOrder = "sections by importance (max impact, then fragile-critical count), each after the sections it depends on; product before supporting"
+	group, ordering := Dir, sectionOrder+"; stops by impact, then centrality"
 	if opts.PerComponent > 0 {
-		group, ordering = component, "sections by component dependency level (dependencies first), then max impact; stops fragile-critical first, then impact, likelihood, centrality"
+		group, ordering = component, sectionOrder+"; stops fragile-critical first, then impact, likelihood, centrality"
 	} else {
 		sort.Slice(picked, func(i, j int) bool { return moreImpactful(picked[i], picked[j]) })
 		if opts.Limit > 0 && len(picked) > opts.Limit {
@@ -420,7 +473,8 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		d := group(f.Path)
 		s := byDir[d]
 		if s == nil {
-			s = &Section{Title: d, Dir: d, Component: component(f.Path), MaxImpact: f.Impact, Tier: f.Tier}
+			c := component(f.Path)
+			s = &Section{Title: d, Dir: d, Component: c, Kind: kindOf(c), MaxImpact: f.Impact, Tier: f.Tier}
 			byDir[d] = s
 			dirs = append(dirs, d)
 		}
@@ -433,27 +487,21 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	}
 	levels := Levels(dirs, graph)
 
-	sections := make([]Section, 0, len(dirs))
+	var product, supporting []Section
+	comps := map[string]map[string]bool{KindProduct: {}, KindSupporting: {}}
 	for _, d := range dirs {
 		s := byDir[d]
 		s.Level = levels[d]
 		s.DependsOn = sortedKeys(graph[d])
 		s.UsedBy = sortedCopy(usedByDir[d])
-		sections = append(sections, *s)
+		comps[s.Kind][s.Component] = true
+		if s.Kind == KindSupporting {
+			supporting = append(supporting, *s)
+		} else {
+			product = append(product, *s)
+		}
 	}
-	sort.Slice(sections, func(i, j int) bool {
-		a, b := sections[i], sections[j]
-		if a.Level != b.Level {
-			return a.Level < b.Level
-		}
-		if a.MaxImpact != b.MaxImpact {
-			return a.MaxImpact > b.MaxImpact
-		}
-		if a.MaxHeat != b.MaxHeat {
-			return a.MaxHeat > b.MaxHeat
-		}
-		return a.Dir < b.Dir
-	})
+	sections := append(orderSections(product, graph), orderSections(supporting, graph)...)
 
 	order := 0
 	for i := range sections {
@@ -473,8 +521,107 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		Focus:      opts.Focus,
 		Ordering:   ordering,
 		TotalStops: order,
-		Sections:   sections,
+
+		ProductComponents:    len(comps[KindProduct]),
+		SupportingComponents: len(comps[KindSupporting]),
+		SupportingHidden:     hidden,
+		Sections:             sections,
 	}, nil
+}
+
+// orderSections puts the most important section first (max impact, then
+// fragile-critical stops, max heat, dir), but emits every section a
+// selected one depends on, directly or through unselected groups, before it.
+// Sections in one import cycle carry no constraint between them and keep
+// importance order.
+func orderSections(secs []Section, graph map[string]map[string]int) []Section {
+	fragile := make([]int, len(secs))
+	for i, s := range secs {
+		for _, st := range s.Stops {
+			if st.Quadrant == types.QuadrantFragileCritical {
+				fragile[i]++
+			}
+		}
+	}
+	byImp := make([]int, len(secs))
+	for i := range byImp {
+		byImp[i] = i
+	}
+	sort.Slice(byImp, func(x, y int) bool {
+		a, b := secs[byImp[x]], secs[byImp[y]]
+		switch {
+		case a.MaxImpact != b.MaxImpact:
+			return a.MaxImpact > b.MaxImpact
+		case fragile[byImp[x]] != fragile[byImp[y]]:
+			return fragile[byImp[x]] > fragile[byImp[y]]
+		case a.MaxHeat != b.MaxHeat:
+			return a.MaxHeat > b.MaxHeat
+		}
+		return a.Dir < b.Dir
+	})
+
+	names := map[string]bool{}
+	for a, tos := range graph {
+		names[a] = true
+		for b := range tos {
+			names[b] = true
+		}
+	}
+	for _, s := range secs {
+		names[s.Dir] = true
+	}
+	sorted := make([]string, 0, len(names))
+	for n := range names {
+		sorted = append(sorted, n)
+	}
+	sort.Strings(sorted)
+	comp := sccs(sorted, graph)
+
+	index := map[string]int{}
+	for i, s := range secs {
+		index[s.Dir] = i
+	}
+	// deps[i][j]: section i depends on section j outside its own cycle.
+	deps := make([]map[int]bool, len(secs))
+	for i, s := range secs {
+		deps[i] = map[int]bool{}
+		seen := map[string]bool{s.Dir: true}
+		stack := []string{s.Dir}
+		for len(stack) > 0 {
+			n := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			for to := range graph[n] {
+				if seen[to] {
+					continue
+				}
+				seen[to] = true
+				stack = append(stack, to)
+				if j, ok := index[to]; ok && comp[to] != comp[s.Dir] {
+					deps[i][j] = true
+				}
+			}
+		}
+	}
+
+	out := make([]Section, 0, len(secs))
+	done := make([]bool, len(secs))
+	var visit func(i int)
+	visit = func(i int) {
+		if done[i] {
+			return
+		}
+		done[i] = true // dependencies across cycles form a DAG, so no loop
+		for _, j := range byImp {
+			if deps[i][j] {
+				visit(j)
+			}
+		}
+		out = append(out, secs[i])
+	}
+	for _, i := range byImp {
+		visit(i)
+	}
+	return out
 }
 
 func formatTime(hm *types.Heatmap) string {

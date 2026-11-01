@@ -221,57 +221,41 @@ Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the
 
 ### Tour
 
-A reading path for newcomers, auditors and agents learning the codebase. Packages come in dependency order (what everything else imports first), and within each level the most impactful code comes first (then the most central). Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
+A reading path for newcomers, auditors and agents learning the codebase. The most important product code comes first (highest impact, then the most fragile-critical files), and whatever it depends on is read just before it. Examples, scripts, CI, deployment manifests, docs, tests, benchmarks and vendored code are supporting components: hidden by default, shown in a final part with `--include-supporting`. Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
 
 ```sh
-highstakes get tour --per-component 2                   # 2 most important files of every crate/package/module
-highstakes get tour --per-component 2 --min-impact 80   # Only components that reach impact 80
-highstakes get tour --limit 10                          # 10 most impactful files repo-wide, dependencies first
+highstakes get tour --per-component 1 --min-impact 85   # 1 file per crate/package/module, only files with impact 85+
+highstakes get tour --per-component 2 --include-supporting  # Add examples, scripts, CI and deploy in a final part
+highstakes get tour --limit 10                          # 10 most impactful files repo-wide
 highstakes get tour --focus internal/llm                # One directory
 highstakes get tour --json > tour.json                  # Feed /show-me walkthrough or an agent
 ```
 
-<details><summary><b>Example: highstakes get tour --limit 3</b></summary>
+<details><summary><b>Example: highstakes get tour --per-component 1 --min-impact 85 (first three sections, neighbour and owner lines trimmed)</b></summary>
 
 ```
-$ highstakes get tour --limit 3        # hono
-Tour: 3 stops, dependencies first
+$ highstakes get tour --per-component 1 --min-impact 85   # NVIDIA/OpenShell
+Tour: 27 stops across 27 product components, dependencies first
+7 supporting components hidden (--include-supporting shows them)
 
-1. src/middleware/basic-auth  [level 2, max impact 90, CRITICAL]
-   1. src/middleware/basic-auth/index.ts:12  🔥🔥🔥 critical  impact 90, likelihood 35, fragile-critical
-      why: Authentication security boundary
-      depends on: src/context.ts, src/utils/basic-auth.ts, src/http-exception.ts, src/types.ts, src/utils/buffer.ts
+1. crates/openshell-crypto  [level 0, max impact 90, HIGH]
+   1. crates/openshell-crypto/src/aws_lc.rs:12  🔥🔥 high  impact 90, likelihood 23, protect
+      why: Core cryptographic security boundary
+      likely because: no notable churn, complexity, importers or fixes
+      do: Owner review on every PR (varshaprasad96@gmail.com); Add to CODEOWNERS; never auto-merge
 
-2. src/middleware/bearer-auth  [level 2, max impact 90, CRITICAL]
-   2. src/middleware/bearer-auth/index.ts:16  🔥🔥🔥 critical  impact 90, likelihood 38, fragile-critical
-      why: Security boundary for bearer-protected endpoints
+2. crates/openshell-extension-core  [level 0, max impact 85, HIGH]
+   2. crates/openshell-extension-core/src/auth.rs:12  🔥🔥 high  impact 85, likelihood 21, protect
+      why: Bearer-token authentication boundary
+      likely because: recent fix: "fix(security): authenticate extension services (#2638)" (2026-08-14)
 
-3. src/utils/jwt  [level 3, max impact 92, CRITICAL]
-   3. src/utils/jwt/jws.ts:13  🔥🔥🔥 critical  impact 92, likelihood 30, fragile-critical
-      why: JWT cryptographic security boundary
-      used by: src/middleware/jwk/jwk.ts, src/utils/jwt/jwt.ts, src/middleware/jwt/jwt.ts, src/utils/jwt/types.ts
+3. crates/openshell-core  [level 1, max impact 90, CRITICAL]
+   3. crates/openshell-core/src/secrets.rs:5  🔥🔥🔥 critical  impact 90, likelihood 39, fragile-critical
+      why: Secret resolution and credential-leak prevention boundary
+      likely because: 7 commits in the last 90 days, 9 authors overall (top 18% of this repo)
 ```
 
-</details>
-
-<details><summary><b>Example: highstakes get tour --per-component 1 (two components shown)</b></summary>
-
-```
-$ highstakes get tour --per-component 1 --components crates/openshell-sandbox,crates/openshell-supervisor-network   # NVIDIA/OpenShell
-Tour: 2 stops, dependencies first
-
-1. crates/openshell-sandbox  [level 4, max impact 95, CRITICAL]
-   1. crates/openshell-sandbox/src/boundary_server.rs:15  🔥🔥🔥 critical  impact 95, likelihood 42, fragile-critical
-      why: Enforces sandbox isolation and authorized control
-      depends on: crates/openshell-sandbox-backend/src/boundary_protocol.rs, crates/openshell-sandbox/src/lib.rs, crates/openshell-sandbox-backend/src/sandbox_auth.rs, crates/openshell-sandbox/src/boundary_io.rs, crates/openshell-sandbox/src/network_broker.rs (+12 more)
-      used by: crates/openshell-sandbox/src/lib.rs
-
-2. crates/openshell-supervisor-network  [level 5, max impact 92, CRITICAL]
-   2. crates/openshell-supervisor-network/src/proxy.rs:6  🔥🔥🔥 critical  impact 92, likelihood 50, fragile-critical
-      why: Enforces sandbox network access and identity-bound policy
-      depends on: crates/openshell-core/src/secrets.rs, crates/openshell-supervisor-network/src/l7/tls.rs, crates/openshell-supervisor-network/src/proxy/destination.rs, crates/openshell-supervisor-network/src/lib.rs, crates/openshell-supervisor-network/src/opa.rs (+18 more)
-      used by: crates/openshell-supervisor-network/src/proxy/destination.rs, crates/openshell-supervisor-network/src/run.rs, crates/openshell-supervisor-network/src/lib.rs, crates/openshell-supervisor-network/src/proxy/relay.rs, crates/openshell-supervisor-network/src/host.rs (+4 more)
-```
+The first sections are the foundations that `crates/openshell-sandbox-backend` (impact 95, section 5) builds on. `deploy`, `scripts`, `.github`, `e2e` and `examples` appear only with `--include-supporting`, after section 27.
 
 A component is a Rust crate, JS/TS package, Python package or Go module (the shallowest directory with its marker file), else the top two segments under `cmd/`, `internal/` and `pkg/`, else the top-level directory. See [the CLI reference](docs/cli-reference.md#highstakes-get-tour).
 

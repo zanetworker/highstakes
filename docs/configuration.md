@@ -58,6 +58,19 @@ owners:
 
 Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+alice@users.noreply.github.com`) become `@alice` and other authors appear by email, which CODEOWNERS also accepts. Use a `.mailmap` file to merge an author's multiple emails first; it is applied automatically. Authors whose name or email contains `[bot]` are ignored.
 
+## Tour Supporting Components
+
+`get tour` hides supporting components (CI, deployment, scripts, examples) unless `--include-supporting` is given. A component is supporting when any of its path segments is `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `fixtures`, `vendor` or `third_party`. Add more with globs (Go `path.Match` syntax, matched against the component and each of its parent directories); they extend the defaults:
+
+```yaml
+tour:
+  supporting:
+    - tools            # tools/ and every component under it
+    - crates/*-demo    # demo crates
+```
+
+A malformed glob makes `get tour` exit with code 2.
+
 ## LLM Provider
 
 HighStakes works with any OpenAI-compatible API. Three ways to configure it:

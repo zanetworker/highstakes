@@ -16,7 +16,7 @@ import (
 // positional args, so `get tour` and `get <file>` both work.
 var tourCmd = &cobra.Command{
 	Use:   "tour",
-	Short: "Get a reading path for learning the code (dependencies first, most impactful first)",
+	Short: "Get a reading path for learning the code (most important first, dependencies before them)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
@@ -25,6 +25,12 @@ var tourCmd = &cobra.Command{
 		perComponent, _ := cmd.Flags().GetInt("per-component")
 		minImpact, _ := cmd.Flags().GetInt("min-impact")
 		components, _ := cmd.Flags().GetStringSlice("components")
+		includeSupporting, _ := cmd.Flags().GetBool("include-supporting")
+
+		cfg, err := loadConfigOrDefault()
+		if err != nil {
+			return err
+		}
 
 		hm, err := loadHeatmap()
 		if err != nil {
@@ -43,6 +49,7 @@ var tourCmd = &cobra.Command{
 		tr, err := tour.Build(hm, tour.Options{
 			Limit: limit, Focus: focus, Source: os.ReadFile,
 			PerComponent: perComponent, MinImpact: minImpact, Components: components, Markers: markers,
+			Supporting: cfg.Tour.Supporting, IncludeSupporting: includeSupporting,
 		})
 		switch {
 		case errors.Is(err, tour.ErrInvalidLimit):
@@ -53,6 +60,10 @@ var tourCmd = &cobra.Command{
 			return cliError(2, "--min-impact must be 0-100 (got: %d)", minImpact)
 		case errors.Is(err, tour.ErrUnknownComponent):
 			return cliError(2, "--components: %v", err)
+		case errors.Is(err, tour.ErrInvalidSupporting):
+			return cliError(2, "tour.supporting in .heatmap/config.yaml: %v", err)
+		case errors.Is(err, tour.ErrOnlySupporting):
+			return cliError(4, "only supporting components (CI, deployment, scripts, examples) match --focus %q and --min-impact %d. Add --include-supporting", focus, minImpact)
 		case errors.Is(err, tour.ErrBelowMinImpact):
 			return cliError(4, "no component under --focus %q reaches --min-impact %d. Lower --min-impact", focus, minImpact)
 		case errors.Is(err, tour.ErrNoFiles):
@@ -70,13 +81,25 @@ var tourCmd = &cobra.Command{
 }
 
 func printTour(w io.Writer, tr *tour.Tour) {
-	header := fmt.Sprintf("Tour: %d stops, dependencies first", tr.TotalStops)
+	comps := fmt.Sprintf("%d product %s", tr.ProductComponents, plural(tr.ProductComponents, "component"))
+	if tr.SupportingComponents > 0 {
+		comps = fmt.Sprintf("%d product and %d supporting components", tr.ProductComponents, tr.SupportingComponents)
+	}
+	header := fmt.Sprintf("Tour: %d stops across %s, dependencies first", tr.TotalStops, comps)
 	if tr.Focus != "" {
 		header += " (focus: " + tr.Focus + ")"
 	}
 	fmt.Fprintln(w, header)
+	if tr.SupportingHidden > 0 {
+		fmt.Fprintf(w, "%d supporting %s hidden (--include-supporting shows them)\n", tr.SupportingHidden, plural(tr.SupportingHidden, "component"))
+	}
 
+	inSupporting := false
 	for _, s := range tr.Sections {
+		if s.Kind == tour.KindSupporting && !inSupporting {
+			inSupporting = true
+			fmt.Fprintln(w, "\nSupporting: CI, deployment, scripts and examples")
+		}
 		fmt.Fprintf(w, "\n%d. %s  [level %d, max impact %d, %s]\n", s.Order, s.Title, s.Level, s.MaxImpact, strings.ToUpper(string(s.Tier)))
 		for _, st := range s.Stops {
 			fmt.Fprintf(w, "   %d. %s  %s %s  %s\n", st.Order, st.Anchor, tierEmoji(st.Tier), st.Tier, axesLabel(st.Impact, st.Likelihood, st.ImpactAssessed, st.Quadrant))
@@ -128,8 +151,16 @@ func init() {
 	tourCmd.Flags().Bool("json", false, "Output as JSON")
 	tourCmd.Flags().Int("limit", 0, "Keep the N most impactful files (0 = all); ignored with --per-component")
 	tourCmd.Flags().Int("per-component", 0, "Keep the N most important files of each component, one section per component (0 = off)")
-	tourCmd.Flags().Int("min-impact", 0, "Skip components whose highest file impact is below this (0-100)")
+	tourCmd.Flags().Int("min-impact", 0, "Skip files whose impact is below this, and components left without files (0-100)")
+	tourCmd.Flags().Bool("include-supporting", false, "Add supporting components (examples, scripts, .github, docs, deploy, tests, benchmarks, vendor; tour.supporting in config) in a final part")
 	tourCmd.Flags().StringSlice("components", nil, "Only these components, comma-separated (e.g. crates/openshell-core,internal/tour)")
 	tourCmd.Flags().String("focus", "", "Only files under this repo-relative directory or file")
 	scoreCmd.AddCommand(tourCmd)
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }

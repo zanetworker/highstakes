@@ -283,6 +283,14 @@ type Config struct {
 	GitHub          GitHubConfig                  `yaml:"github"`
 	Exclude         ExcludeConfig                 `yaml:"exclude"`
 	Owners          map[string]string             `yaml:"owners,omitempty"` // git email -> @github-handle for reviewers and CODEOWNERS
+	Tour            TourConfig                    `yaml:"tour,omitempty"`
+}
+
+// TourConfig tunes `get tour`.
+type TourConfig struct {
+	// Supporting adds path.Match globs for supporting components (CI,
+	// deployment, examples) on top of the built-in directory names.
+	Supporting []string `yaml:"supporting,omitempty"`
 }
 
 // ExcludeConfig defines directories and patterns to skip during analysis
