@@ -3,6 +3,7 @@ package heatmap
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,42 @@ func TestLoadConfig_AutonomyMaxLevel(t *testing.T) {
 			}
 			if got, _ := cfg.Autonomy.Max(); got != tt.want {
 				t.Errorf("max = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNew_Config(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string // "" leaves the config file absent
+		wantErr string
+	}{
+		{"absent config uses defaults", "", ""},
+		{"valid config", "autonomy:\n  max_level: 2\n", ""},
+		{"invalid max_level is rejected", "autonomy:\n  max_level: 7\n", "Valid values: 0, 1, 2, 3"},
+		{"unparseable config is rejected", "autonomy: [\n", ".heatmap/config.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tt.yaml != "" {
+				if err := os.MkdirAll(filepath.Join(dir, ".heatmap"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, ".heatmap", "config.yaml"), []byte(tt.yaml), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := New(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("New err = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("New err = %v, want it to mention %q", err, tt.wantErr)
 			}
 		})
 	}

@@ -105,6 +105,9 @@ var analyzeCmd = &cobra.Command{
 		model, _ := cmd.Flags().GetString("model")
 		concurrency, _ := cmd.Flags().GetInt("concurrency")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		if _, err := loadConfigOrDefault(); err != nil {
+			return err // invalid config exits 2, as in every other command
+		}
 
 		gen, err := heatmap.New(cwd, heatmap.GenerateOptions{
 			NoLLM:         noLLM,

@@ -179,33 +179,47 @@ func isDocFile(path string) bool {
 	return false
 }
 
-// binaryExts are images, fonts, archives and compiled artifacts.
-var binaryExts = map[string]bool{
+// inertExts are images, fonts and media. Executables, libraries, archives
+// and other compiled artifacts are not inert: they run, so they inherit
+// directory risk like any unscored file.
+var inertExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".ico": true, ".webp": true,
 	".pdf": true, ".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".mp4": true, ".mov": true,
-	".zip": true, ".gz": true, ".tgz": true, ".tar": true, ".jar": true, ".wasm": true,
-	".exe": true, ".so": true, ".dylib": true, ".dll": true, ".bin": true,
 }
 
 // ciDirs are top-level dot directories that hold CI, which stays scored.
 var ciDirs = map[string]bool{".github": true, ".gitlab": true, ".circleci": true}
 
+// configExts are data formats tools read as configuration; scripts never are.
+var configExts = map[string]bool{
+	".json": true, ".yaml": true, ".yml": true, ".toml": true, ".ini": true, ".cfg": true, ".conf": true,
+}
+
+// configDotfiles are extensionless tool dotfiles that hold data, not code.
+var configDotfiles = map[string]bool{
+	".gitignore": true, ".gitattributes": true, ".dockerignore": true, ".editorconfig": true, ".mailmap": true,
+	".prettierrc": true, ".prettierignore": true, ".eslintignore": true, ".npmrc": true, ".nvmrc": true,
+	".python-version": true, ".tool-versions": true,
+}
+
 // isNonCode reports files a PR may add without them being "unscored new
 // files": inert files and config files (see isInert, isConfigFile).
 func isNonCode(p string) bool { return isInert(p) || isConfigFile(p) }
 
-// isInert reports files with no runtime effect: docs, images and binaries,
+// isInert reports files with no runtime effect: docs, images, fonts, media,
 // golden files and testdata.
 func isInert(p string) bool {
 	p = filepath.ToSlash(p)
 	base := filepath.Base(p)
-	return isDocFile(p) || binaryExts[strings.ToLower(filepath.Ext(base))] || strings.HasSuffix(base, ".golden") ||
+	return isDocFile(p) || inertExts[strings.ToLower(filepath.Ext(base))] || strings.HasSuffix(base, ".golden") ||
 		strings.HasPrefix(p, "testdata/") || strings.Contains(p, "/testdata/")
 }
 
 // isConfigFile reports dependency manifests (still config changes in
-// ChangeRisk), lock files (go.sum too) and tool config dotfiles such as
-// .golangci.yml or .impeccable/; CI directories are not included.
+// ChangeRisk), lock files (go.sum too) and tool config under a leading-dot
+// path such as .golangci.yml or .impeccable/config.json: data formats
+// (configExts) or known dotfiles only, so hooks and scripts stay scored.
+// CI directories are not included.
 func isConfigFile(p string) bool {
 	p = filepath.ToSlash(p)
 	base := filepath.Base(p)
@@ -213,7 +227,10 @@ func isConfigFile(p string) bool {
 		return true
 	}
 	first := strings.SplitN(p, "/", 2)[0]
-	return strings.HasPrefix(first, ".") && !ciDirs[first] && first != ".gitlab-ci.yml"
+	if !strings.HasPrefix(first, ".") || ciDirs[first] || first == ".gitlab-ci.yml" {
+		return false
+	}
+	return configDotfiles[base] || configExts[strings.ToLower(filepath.Ext(base))]
 }
 
 func isTestFile(path string) bool {

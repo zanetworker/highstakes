@@ -2,7 +2,9 @@ package heatmap
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,11 +39,17 @@ type Generator struct {
 	opts     GenerateOptions
 }
 
-// New creates a new heatmap generator
+// New creates a new heatmap generator. A missing .heatmap/config.yaml means
+// the defaults; an unreadable or invalid one is an error, never a silent
+// fallback (the default autonomy cap is the most permissive).
 func New(repoPath string, opts ...GenerateOptions) (*Generator, error) {
-	config, err := LoadConfig(filepath.Join(repoPath, ".heatmap", "config.yaml"))
+	path := filepath.Join(repoPath, ".heatmap", "config.yaml")
+	config, err := LoadConfig(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		config, err = DefaultConfig(), nil
+	}
 	if err != nil {
-		config = DefaultConfig()
+		return nil, fmt.Errorf("invalid config %s: %w", path, err)
 	}
 
 	var o GenerateOptions
@@ -170,7 +178,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 		heatmap.Files[path] = heat
 	}
 	applyAxes(heatmap, g.config.Tiers)
-	maxLevel, _ := g.config.Autonomy.Max() // validated by LoadConfig; New falls back to defaults
+	maxLevel, _ := g.config.Autonomy.Max() // validated by LoadConfig in New
 	scorer.ApplyAutonomy(heatmap.Files, maxLevel)
 
 	// Owners name reviewers in the actions; without them actions stay generic.

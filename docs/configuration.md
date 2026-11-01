@@ -82,7 +82,7 @@ autonomy:
   max_level: 2    # 0-3, default 3
 ```
 
-The cap applies on top of the per-file level, which is already conservative (files without an LLM-assessed impact stay at 1 or below). `analyze` records the capped level per file; `create policy --agents`, `list tasks` and `pr check` read the cap on every run. A value outside 0-3 makes those commands exit 2; `pr check` warns and caps at 1 instead, so CI never grants more than intended.
+The cap applies on top of the per-file level, which is already conservative (files without an LLM-assessed impact stay at 1 or below). `analyze` records the capped level per file; `create policy --agents`, `list tasks` and `pr check` read the cap on every run. A value outside 0-3 (or a config file that does not parse) makes `analyze`, `create policy`, `list tasks` and the other commands that read the config exit 2 with the valid values (0, 1, 2, 3); none falls back to the default cap of 3. `pr check` alone keeps running: it warns on stderr and caps every file at 1, so CI never grants more than intended.
 
 ## Architecture Declarations
 

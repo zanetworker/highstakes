@@ -238,7 +238,7 @@ Files with an LLM-assessed impact take the tier of their quadrant (see above). F
 | CRITICAL | 86-100 | 2 senior reviewers, security scan, no auto-merge |
 | HIGH | 61-85 | 2 reviewers, integration tests, no auto-merge |
 | MEDIUM | 31-60 | 1 reviewer |
-| LOW | 0-30 | Auto-merge safe |
+| LOW | 0-30 | Normal review; without an LLM-assessed impact, agents may only propose (autonomy capped at L1) |
 
 ## Caching
 

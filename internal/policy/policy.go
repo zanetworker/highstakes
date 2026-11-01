@@ -285,14 +285,18 @@ type AgentLevel struct {
 }
 
 // Agents builds the autonomy policy: every scored file at its level
-// (scorer.FileAutonomy with maxLevel), directories collapsed to "dir/**"
-// when all their scored files share a level, so globs never overlap.
+// (scorer.FileAutonomy with maxLevel). At L0 and L1 directories collapse to
+// "dir/**" when all their scored files share the level (globs never
+// overlap); L2 and L3 list exact files, so an unassessed file added later
+// falls to default_level instead of matching an elevated glob.
 func Agents(hm *types.Heatmap, maxLevel int) AgentPolicy {
 	p := AgentPolicy{
 		Version:     1,
 		GeneratedBy: "highstakes",
-		HowToRead: "Match each file a change touches against the globs (dir/** covers everything under dir; globs do not overlap). " +
-			"The change may go as far as the lowest level among its files; a file no glob matches counts as default_level. " +
+		HowToRead: "Match each file a change touches against the paths (dir/** covers everything under dir; paths do not overlap). " +
+			"Levels 2 and 3 list exact files only, so a new file never inherits them; only levels 0 and 1 use dir/**. " +
+			"The change may go as far as the lowest level among its files; a path not listed counts as default_level, " +
+			"1 (propose only) unless max_level is 0. " +
 			"Regenerate after analyze: levels follow the heatmap.",
 		CapRule: "Levels follow the file's posture: Routine 3, Stabilize 2, Protect 1, Harden now 0. " +
 			"How bad? is AI-assessed and not human-validated, so levels are conservative: a file whose impact is not LLM-assessed is capped at 1, " +
@@ -304,11 +308,15 @@ func Agents(hm *types.Heatmap, maxLevel int) AgentPolicy {
 		level := l.Level
 		groups := collapse(hm, func(f *types.FileHeat) bool { return scorer.FileAutonomy(f, maxLevel).Level == level })
 		paths := make([]string, 0, len(groups))
-		for key := range groups {
-			if strings.HasSuffix(key, "/") {
-				key += "**"
+		for key, files := range groups {
+			switch {
+			case level >= 2:
+				paths = append(paths, files...)
+			case strings.HasSuffix(key, "/"):
+				paths = append(paths, key+"**")
+			default:
+				paths = append(paths, key)
 			}
-			paths = append(paths, key)
 		}
 		sort.Strings(paths)
 		p.Levels = append(p.Levels, AgentLevel{AutonomyLevel: l, Paths: paths})

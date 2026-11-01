@@ -325,7 +325,7 @@ func TestAgents(t *testing.T) {
 	t.Run("levels with collapsed directories", func(t *testing.T) {
 		p := Agents(hm, 3)
 		want := map[int]string{
-			3: "core/y.go,solo/one.go,ui/**",
+			3: "core/y.go,solo/one.go,ui/a.go,ui/b.go,ui/w/c.go",
 			2: "core/s.go",
 			1: "core/x.go,est/**",
 			0: "main.go",
@@ -341,6 +341,27 @@ func TestAgents(t *testing.T) {
 		}
 		if p.MaxLevel != 3 || p.DefaultLevel != 1 || p.HowToRead == "" || p.CapRule == "" {
 			t.Errorf("header = %+v", p)
+		}
+	})
+	t.Run("elevated levels list exact files, never directory globs", func(t *testing.T) {
+		two := &types.Heatmap{Files: map[string]*types.FileHeat{
+			"app/a.go": assessed(types.QuadrantLow),
+			"app/b.go": assessed(types.QuadrantLow),
+			"svc/a.go": assessed(types.QuadrantWatch),
+			"svc/b.go": assessed(types.QuadrantWatch),
+		}}
+		got := paths(Agents(two, 3))
+		if got[3] != "app/a.go,app/b.go" {
+			t.Errorf("L3 paths = %q, want exact files", got[3])
+		}
+		if got[2] != "svc/a.go,svc/b.go" {
+			t.Errorf("L2 paths = %q, want exact files", got[2])
+		}
+	})
+	t.Run("header says unlisted paths are propose only", func(t *testing.T) {
+		p := Agents(hm, 3)
+		if !strings.Contains(p.HowToRead, "not listed") || !strings.Contains(p.HowToRead, "propose only") {
+			t.Errorf("how_to_read = %q, want the unlisted default spelled out", p.HowToRead)
 		}
 	})
 	t.Run("max level caps everything", func(t *testing.T) {

@@ -101,7 +101,7 @@ It opens on the **Action inbox**; four investigation views sit behind tabs. One 
   <img src="docs/images/explorer-view.png" width="820" alt="Explorer view with file tree, heat scores, and blast radius reasoning">
 </p>
 
-All views respond to the posture filter (Harden now / Protect / Stabilize / Routine, one per tier) and search; the treemap also has the size toggle (Lines vs Break cost).
+All views respond to the posture filter (Harden now / Protect / Stabilize / Routine, one per tier), the **Agents** filter (L3 to L0, the [agent autonomy](docs/cli-reference.md#agent-autonomy) level `analyze` recorded; it filters the inbox too) and search; the treemap also has the size toggle (Lines vs Break cost). The detail panel shows each file's autonomy level, label and reason.
 
 **Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `api/src/routes.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
 

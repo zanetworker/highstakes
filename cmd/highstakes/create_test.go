@@ -93,3 +93,25 @@ func TestCreatePolicy_Agents(t *testing.T) {
 		}
 	})
 }
+
+func TestInvalidMaxLevel_ExitsTwo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"analyze", []string{"analyze", "--no-llm"}},
+		{"create policy --agents", []string{"create", "policy", "--agents"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeAxesHeatmap(t)
+			if err := os.WriteFile(filepath.Join(dir, ".heatmap", "config.yaml"), []byte("autonomy:\n  max_level: 5\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := runCLI(t, dir, tt.args...)
+			if exitCode(err) != 2 || !strings.Contains(err.Error(), "Valid values: 0, 1, 2, 3") {
+				t.Errorf("err = %v (exit %d), want exit 2 listing 0, 1, 2, 3", err, exitCode(err))
+			}
+		})
+	}
+}
