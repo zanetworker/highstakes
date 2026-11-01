@@ -87,3 +87,55 @@ func TestExplanation_Top(t *testing.T) {
 		})
 	}
 }
+
+func TestQuadrant_Autonomy(t *testing.T) {
+	tests := []struct {
+		q     Quadrant
+		level int
+		label string
+	}{
+		{QuadrantLow, 3, "auto-merge"},
+		{QuadrantWatch, 2, "auto-fix, human merges"},
+		{QuadrantProtect, 1, "propose only"},
+		{QuadrantFragileCritical, 0, "assist only"},
+		{"", 1, "propose only"}, // no quadrant: impact unknown, propose only
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.q), func(t *testing.T) {
+			got := tt.q.Autonomy()
+			if got.Level != tt.level || got.Label != tt.label || got.Reason == "" {
+				t.Errorf("Autonomy() = %+v, want level %d %q with a reason", got, tt.level, tt.label)
+			}
+		})
+	}
+}
+
+func TestAutonomyLabel(t *testing.T) {
+	for level, want := range map[int]string{0: "assist only", 3: "auto-merge", -1: "", 4: ""} {
+		if got := AutonomyLabel(level); got != want {
+			t.Errorf("AutonomyLabel(%d) = %q, want %q", level, got, want)
+		}
+	}
+}
+
+func TestAutonomyConfig_Max(t *testing.T) {
+	two, bad := 2, 7
+	tests := []struct {
+		name    string
+		c       AutonomyConfig
+		want    int
+		wantErr bool
+	}{
+		{"unset defaults to 3", AutonomyConfig{}, 3, false},
+		{"set", AutonomyConfig{MaxLevel: &two}, 2, false},
+		{"out of range", AutonomyConfig{MaxLevel: &bad}, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.c.Max()
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("Max() = %d, %v; want %d, err %v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

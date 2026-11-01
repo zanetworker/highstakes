@@ -56,6 +56,20 @@ func TierPosture(t Tier) string {
 	return QuadrantLow.Label()
 }
 
+// Posture is a changed file's posture: its quadrant label, else the
+// posture of its tier (unassessed or unscored files).
+func (fc FileChange) Posture() string {
+	if l := fc.Quadrant.Label(); l != "" {
+		return l
+	}
+	return TierPosture(fc.Tier)
+}
+
+// Blocking reports a posture whose before-merge items gate the merge.
+func Blocking(posture string) bool {
+	return posture == QuadrantFragileCritical.Label() || posture == QuadrantProtect.Label()
+}
+
 // Top returns a copy of the first action in scope (the most important), or
 // nil when there is none or e is nil.
 func (e *Explanation) Top(scope string) *Action {

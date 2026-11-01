@@ -39,7 +39,7 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 			fc.Tier = heat.Tier
 			fc.Likelihood, fc.Impact, fc.ImpactAssessed = heat.Likelihood, heat.Impact, heat.ImpactAssessed
 			fc.Quadrant, fc.QuadrantLabel = heat.Quadrant, heat.Quadrant.Label()
-		case isDocFile(change.Path):
+		case isNonCode(change.Path):
 			fc.HeatScore = 0
 			fc.Tier = types.TierLow
 		default:
@@ -177,6 +177,43 @@ func isDocFile(path string) bool {
 		return true
 	}
 	return false
+}
+
+// binaryExts are images, fonts, archives and compiled artifacts.
+var binaryExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".ico": true, ".webp": true,
+	".pdf": true, ".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".mp4": true, ".mov": true,
+	".zip": true, ".gz": true, ".tgz": true, ".tar": true, ".jar": true, ".wasm": true,
+	".exe": true, ".so": true, ".dylib": true, ".dll": true, ".bin": true,
+}
+
+// ciDirs are top-level dot directories that hold CI, which stays scored.
+var ciDirs = map[string]bool{".github": true, ".gitlab": true, ".circleci": true}
+
+// isNonCode reports files a PR may add without them being "unscored new
+// files": inert files and config files (see isInert, isConfigFile).
+func isNonCode(p string) bool { return isInert(p) || isConfigFile(p) }
+
+// isInert reports files with no runtime effect: docs, images and binaries,
+// golden files and testdata.
+func isInert(p string) bool {
+	p = filepath.ToSlash(p)
+	base := filepath.Base(p)
+	return isDocFile(p) || binaryExts[strings.ToLower(filepath.Ext(base))] || strings.HasSuffix(base, ".golden") ||
+		strings.HasPrefix(p, "testdata/") || strings.Contains(p, "/testdata/")
+}
+
+// isConfigFile reports dependency manifests (still config changes in
+// ChangeRisk), lock files (go.sum too) and tool config dotfiles such as
+// .golangci.yml or .impeccable/; CI directories are not included.
+func isConfigFile(p string) bool {
+	p = filepath.ToSlash(p)
+	base := filepath.Base(p)
+	if isDependencyManifest(base) || base == "go.sum" || strings.HasSuffix(base, ".lock") {
+		return true
+	}
+	first := strings.SplitN(p, "/", 2)[0]
+	return strings.HasPrefix(first, ".") && !ciDirs[first] && first != ".gitlab-ci.yml"
 }
 
 func isTestFile(path string) bool {
@@ -374,4 +411,58 @@ func SuggestReviewers(risk types.PRRisk, owners map[string][]ownership.Owner, au
 		reviewers = reviewers[:n]
 	}
 	return reviewers
+}
+
+// ApplyAutonomy sets each changed file's agent autonomy and the PR's:
+// the lowest level over its files, auto-merge only at L3, and why. Files
+// in the heatmap (or unscored, with an inherited tier) follow
+// scorer.Autonomy; inert files (docs, images, testdata) are L3 and config
+// files (manifests, lock files, tool dotfiles) L1. maxLevel caps all.
+func ApplyAutonomy(risk *types.PRRisk, hm *types.Heatmap, maxLevel int) {
+	risk.AutonomyLevel, risk.AutonomyReason = maxLevel, ""
+	for i := range risk.FilesChanged {
+		fc := &risk.FilesChanged[i]
+		_, inHeatmap := hm.Files[fc.Path]
+		a, cause := fileAutonomy(*fc, inHeatmap || fc.Unscored)
+		if a.Level > maxLevel {
+			a.Level, a.Reason, cause = maxLevel, a.Reason+fmt.Sprintf("; capped at L%d by autonomy.max_level", maxLevel),
+				fmt.Sprintf("autonomy.max_level is %d", maxLevel)
+		}
+		a.Label = types.AutonomyLabel(a.Level)
+		fc.Autonomy = &a
+		if a.Level < risk.AutonomyLevel || (a.Level == risk.AutonomyLevel && risk.AutonomyReason == "") {
+			risk.AutonomyLevel, risk.AutonomyReason = a.Level, cause
+		}
+	}
+	risk.AutoMergeAllowed = risk.AutonomyLevel == types.MaxAutonomy
+	if risk.AutoMergeAllowed {
+		risk.AutonomyReason = "every touched file is L3"
+	} else if risk.AutonomyReason == "" {
+		risk.AutonomyReason = fmt.Sprintf("autonomy.max_level is %d", maxLevel)
+	}
+}
+
+// fileAutonomy is one changed file's autonomy before the config cap, and
+// the cause to quote when it sets the PR's level ("" for L3 files). scored
+// is false for the non-code files CalculatePRRisk leaves unscored.
+func fileAutonomy(fc types.FileChange, scored bool) (types.Autonomy, string) {
+	switch {
+	case !scored && isConfigFile(fc.Path):
+		return types.Autonomy{Level: 1, Reason: "dependency or tool config: propose only"}, "touches dependency or tool config files"
+	case !scored:
+		return types.Autonomy{Level: types.MaxAutonomy, Reason: "not code: no runtime impact"}, ""
+	}
+	q := fc.Quadrant
+	if q == "" {
+		q = scorer.TierQuadrant(fc.Tier)
+	}
+	assessed := fc.ImpactAssessed && !fc.Unscored
+	a := scorer.Autonomy(q, assessed, types.MaxAutonomy)
+	switch {
+	case a.Level == types.MaxAutonomy:
+		return a, ""
+	case !assessed && q.Autonomy().Level > 1: // the L1 cap set the level
+		return a, "touches files whose impact is not AI-assessed"
+	}
+	return a, "touches " + q.Label() + " files"
 }

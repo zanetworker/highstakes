@@ -81,12 +81,15 @@ func TestAttachPRActions(t *testing.T) {
 			Explanation: &types.Explanation{Actions: hard}},
 		"ui/view.go": {Path: "ui/view.go", Quadrant: types.QuadrantLow, ImpactAssessed: true,
 			Explanation: &types.Explanation{Actions: []types.Action{{ID: "light-review", Text: "Normal review", Scope: types.ScopeBeforeMerge}}}},
+		"core/busy.go": {Path: "core/busy.go", Quadrant: types.QuadrantWatch, ImpactAssessed: true,
+			Explanation: &types.Explanation{Actions: []types.Action{{ID: "refactor", Text: "Refactor the function you touch", Scope: types.ScopeBeforeMerge}}}},
 	}}
 	risk := &types.PRRisk{FilesChanged: []types.FileChange{
 		{Path: "ui/view.go", Tier: types.TierLow},
 		{Path: "net/proxy.rs", Tier: types.TierCritical},
 		{Path: "net/proxy_tests.rs", Tier: types.TierLow},
 		{Path: "net/new.rs", Tier: types.TierHigh, Unscored: true},
+		{Path: "core/busy.go", Tier: types.TierMedium, Quadrant: types.QuadrantWatch},
 	}}
 	c := buildChange([]prscore.FileChange{
 		{Path: "ui/view.go", LinesAdded: 3}, {Path: "net/proxy.rs", LinesAdded: 10, LinesDeleted: 2},
@@ -104,6 +107,9 @@ func TestAttachPRActions(t *testing.T) {
 	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open" {
 		t.Errorf("checklist = %v", got)
 	}
+	if len(risk.WorthDoing) != 1 || risk.WorthDoing[0].ID != "refactor" {
+		t.Errorf("worth doing = %+v, want the Stabilize file's refactor only", risk.WorthDoing)
+	}
 	if len(risk.Backlog) != 1 || risk.Backlog[0].ID != "codeowners" {
 		t.Errorf("backlog = %+v", risk.Backlog)
 	}
@@ -112,6 +118,10 @@ func TestAttachPRActions(t *testing.T) {
 		case "net/proxy.rs":
 			if len(fc.Actions) != 3 {
 				t.Errorf("proxy.rs carries %d before-merge actions, want 3", len(fc.Actions))
+			}
+		case "core/busy.go":
+			if len(fc.Actions) != 1 {
+				t.Errorf("busy.go carries %d before-merge actions, want 1", len(fc.Actions))
 			}
 		default:
 			if len(fc.Actions) != 0 {

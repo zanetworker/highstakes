@@ -52,6 +52,18 @@ func prAuthor(flag string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// applyAutonomy sets the PR's agent autonomy with autonomy.max_level from
+// the config; an unreadable config caps at L1 rather than allow more.
+func applyAutonomy(risk *types.PRRisk, hm *types.Heatmap) {
+	maxLevel := 1
+	if cfg, err := loadConfigOrDefault(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v; agent autonomy capped at L1\n", err)
+	} else {
+		maxLevel, _ = cfg.Autonomy.Max() // validated when the config was loaded
+	}
+	prscore.ApplyAutonomy(risk, hm, maxLevel)
+}
+
 // addReviewers fills SuggestedReviewers; ownership is best effort, so git
 // failures are reported on stderr and leave the list empty.
 func addReviewers(risk *types.PRRisk, author string, n int) {
@@ -133,6 +145,9 @@ func appendShadowLog(path, base string, risk *types.PRRisk) error {
 // checklist, files with both axes and their repo cutoffs, backlog, gate.
 func printPRText(risk *types.PRRisk) {
 	fmt.Printf("%s\n", strings.ToUpper(risk.Verdict))
+	if risk.AutonomyReason != "" {
+		fmt.Printf("AI may auto-merge: %s (%s)\n", map[bool]string{true: "yes", false: "no"}[risk.AutoMergeAllowed], risk.AutonomyReason)
+	}
 	fmt.Printf("Change risk: %d (%s)\n", risk.ChangeRisk, risk.ChangeRiskLevel)
 	for _, f := range risk.ChangeRiskFactors {
 		fmt.Printf("  - %s\n", f)
@@ -148,6 +163,12 @@ func printPRText(risk *types.PRRisk) {
 		fmt.Println("\nDo before merge")
 		for _, a := range risk.Checklist {
 			fmt.Printf("  %s %s (%s)\n", checkbox(a.Done), a.Text, strings.Join(a.Files, ", "))
+		}
+	}
+	if len(risk.WorthDoing) > 0 {
+		fmt.Println("\nWorth doing (does not block)")
+		for _, a := range risk.WorthDoing {
+			fmt.Printf("  - %s (%s)\n", a.Text, strings.Join(a.Files, ", "))
 		}
 	}
 

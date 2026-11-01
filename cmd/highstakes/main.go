@@ -437,6 +437,7 @@ var prCheckCmd = &cobra.Command{
 
 		// An empty diff scores LOW and still goes through the gate and shadow log.
 		risk := prscore.CalculatePRRisk(0, changes, hm, configuredTiers())
+		applyAutonomy(&risk, hm)
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
 		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
 		attachPRActions(&risk, hm, buildChange(changes, hm, approvals, codeowners.Covers))
@@ -753,6 +754,13 @@ func agentContext() map[string]interface{} {
 					"--sort":  flagDef("enum", "heat", "Values: heat, likelihood, impact"),
 				},
 				"subcommands": map[string]interface{}{
+					"tasks": map[string]interface{}{
+						"description": "Backlog items on files at or above an agent autonomy level, as self-contained tasks (JSON: tasks[] with title, file, action_id, signal, command, acceptance, level, level_label; count, min_level, max_level). Levels: 3 auto-merge, 2 auto-fix with a human merging, 1 propose only, 0 assist only; files without an LLM-assessed impact are capped at 1, and autonomy.max_level caps all",
+						"flags": map[string]interface{}{
+							"--json":  flagDef("bool", false, "Output as JSON"),
+							"--level": flagDef("int", 2, "Lowest autonomy level to include. Values: 0, 1, 2, 3"),
+						},
+					},
 					"units": map[string]interface{}{
 						"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
 						"flags": map[string]interface{}{
@@ -766,7 +774,7 @@ func agentContext() map[string]interface{} {
 				"description": "Assess pull request risk",
 				"subcommands": map[string]interface{}{
 					"check": map[string]interface{}{
-						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist with done items, backlog",
+						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist of Harden now and Protect files with done items, worth-doing items that do not block (JSON worth_doing), backlog, and agent autonomy (JSON autonomy_level: lowest level over touched files; auto_merge_allowed: true only at level 3; autonomy_reason; files_changed[].autonomy)",
 						"flags": map[string]interface{}{
 							"--json":      flagDef("bool", false, "Output as JSON (same as --format json)"),
 							"--format":    flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
@@ -804,10 +812,13 @@ func agentContext() map[string]interface{} {
 						},
 					},
 					"policy": map[string]interface{}{
-						"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json)",
+						"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json). With --agents: the agent autonomy policy, path globs per level (3 auto-merge, 2 auto-fix with a human merging, 1 propose only, 0 assist only) with how_to_read, cap_rule, max_level and default_level; a change may go as far as the lowest level among its files",
 						"flags": map[string]interface{}{
-							"--json":     flagDef("bool", false, "Output as JSON"),
-							"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low"),
+							"--json":     flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low (ignored with --agents)"),
+							"--agents":   flagDef("bool", false, "Emit the agent autonomy policy instead of the review policy"),
+							"--format":   flagDef("enum", "yaml", "Values: yaml, json"),
+							"--out":      flagDef("string", "", "Write to this file instead of stdout (e.g. .highstakes/autonomy.yaml)"),
 						},
 					},
 				},

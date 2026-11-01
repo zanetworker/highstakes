@@ -14,7 +14,8 @@ go install ./cmd/highstakes
 
 ```
 cmd/highstakes/main.go         CLI entry point (Cobra)
-cmd/highstakes/create.go       `create codeowners` / `create policy`
+cmd/highstakes/create.go       `create codeowners` / `create policy` (`--agents`: autonomy policy)
+cmd/highstakes/tasks.go        `list tasks` (backlog as an agent work queue)
 internal/
   analyzer/                  Static analysis (AST, imports, complexity)
   gitanalyzer/               Git history (commits, churn, contributors)
@@ -37,6 +38,7 @@ docs/                        User-facing documentation
 
 - Human-facing names: likelihood = "Will it break?", impact = "How bad if it breaks?"; quadrants = postures Harden now / Protect / Stabilize / Routine (types.Quadrant.Label). JSON keeps `quadrant` values and adds `quadrant_label`; tiers stay as metadata and filters. Never print a score without its repo cutoff
 - Actions have a scope (before_merge | backlog), a signal, and backlog items a copyable command; rules live in internal/explain/actions.go, PR-time marking in internal/explain/pr.go
+- Agent autonomy: types.Quadrant.Autonomy() gives the level (Routine 3 ... Harden now 0); scorer.Autonomy/FileAutonomy apply the caps (L1 when impact is not LLM-assessed, autonomy.max_level); prscore.ApplyAutonomy does the PR's level
 - Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score (kept for compatibility) = max of the two when impact is assessed, else the likelihood
 - LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
 - Assessments cached in .heatmap/cache/ by SHA-256 of model ID, prompt version (llm.PromptVersion) and file content

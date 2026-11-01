@@ -42,7 +42,7 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 	}}
 	risk := &types.PRRisk{
 		Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78,
-		FailOn: types.TierCritical, Decision: "block",
+		FailOn: types.TierCritical, Decision: "block", AutonomyReason: "touches Harden now files",
 		FilesChanged: []types.FileChange{
 			{Path: "docs/readme.md", Tier: types.TierLow},
 			{Path: "net/proxy.rs", Tier: types.TierCritical, Likelihood: 50, Impact: 92, ImpactAssessed: true,
@@ -60,6 +60,10 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 				Signal: `recent fix: "fix: align checks" (2026-10-28)`, Done: true, Files: []string{"net/proxy.rs"}},
 			{ID: "no-auto-merge", Text: "Keep auto-merge off", Scope: types.ScopeBeforeMerge,
 				Signal: "Harden now files never auto-merge", Files: []string{"net/proxy.rs", "net/policy.rs"}},
+		},
+		WorthDoing: []types.Action{
+			{ID: "refactor", Text: "Refactor the function you touch: cyclomatic 40 across 12 functions", Scope: types.ScopeBeforeMerge,
+				Signal: "complexity in the top 5% of this repo", Files: []string{"ui/busy.go"}},
 		},
 		Backlog: []types.Action{
 			{ID: "split", Text: "Split it into smaller files", Scope: types.ScopeBacklog, Signal: "479 functions in one file (top 1%)",
@@ -205,6 +209,35 @@ func TestRender_Rules(t *testing.T) {
 		}
 		if strings.Count(out, "How bad? is AI-assessed, not yet checked against maintainer ratings") != 1 {
 			t.Error("the evidence note for the two questions should appear exactly once")
+		}
+	})
+	t.Run("stabilize items are worth doing, not before merge", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78,
+			FilesChanged: []types.FileChange{{Path: "s.go", Tier: types.TierMedium, Likelihood: 50, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch}},
+			WorthDoing: []types.Action{{ID: "refactor", Text: "Refactor the function you touch", Signal: "complexity in the top 5%", Files: []string{"s.go"}}}}
+		out := Render(risk, &types.Heatmap{})
+		if strings.Contains(out, "Do before merge") {
+			t.Errorf("no blocking items, so no before-merge checklist:\n%s", out)
+		}
+		_, details, _ := strings.Cut(out, "<details>")
+		if !strings.Contains(details, "**Worth doing (does not block)**\n- Refactor the function you touch (`s.go`): complexity in the top 5%\n") {
+			t.Errorf("worth-doing items missing from the folded details:\n%s", out)
+		}
+		if strings.Contains(out, "- [ ] Refactor") {
+			t.Errorf("worth-doing items must not be checkboxes:\n%s", out)
+		}
+	})
+	t.Run("auto-merge line under the verdict", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", AutonomyLevel: 3, AutoMergeAllowed: true,
+			AutonomyReason: "every touched file is L3"}
+		out := Render(risk, &types.Heatmap{})
+		want := "Normal review; auto-merge allowed by policy.\n\nAI may auto-merge: yes (every touched file is L3)\n\n"
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q right after the summary:\n%s", want, out)
+		}
+		risk.AutonomyReason = ""
+		if strings.Contains(Render(risk, &types.Heatmap{}), "AI may auto-merge") {
+			t.Error("no autonomy computed, so no line")
 		}
 	})
 	t.Run("marker lets the workflow update its own comment", func(t *testing.T) {

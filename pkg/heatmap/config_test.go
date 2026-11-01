@@ -53,3 +53,35 @@ func TestLoadConfig_Owners(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfig_AutonomyMaxLevel(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		want    int
+		wantErr bool
+	}{
+		{"unset is 3", "version: 1.0.0\n", 3, false},
+		{"set", "autonomy:\n  max_level: 1\n", 1, false},
+		{"zero is a valid cap", "autonomy:\n  max_level: 0\n", 0, false},
+		{"out of range is rejected", "autonomy:\n  max_level: 4\n", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadConfig(path)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if got, _ := cfg.Autonomy.Max(); got != tt.want {
+				t.Errorf("max = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

@@ -255,6 +255,31 @@ func TestExplain_LikelihoodReasons(t *testing.T) {
 		f.Factors.TestCoverage.HasTestFile = &no
 		lacks(t, Explain(f, repo(f), nil).LikelihoodReasons, "no tests found")
 	})
+	t.Run("counts of one are singular", func(t *testing.T) {
+		hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+		for i := 0; i < 99; i++ {
+			hm.Files[fmt.Sprintf("z%d.go", i)] = &types.FileHeat{Path: fmt.Sprintf("z%d.go", i)}
+		}
+		f := &types.FileHeat{Path: "one.go", ImpactAssessed: true, Quadrant: types.QuadrantWatch}
+		f.Factors.ChangeFrequency = types.ChangeFrequency{CommitsLast90d: 1, UniqueAuthors: 1}
+		f.Factors.Complexity = types.Complexity{Cyclomatic: 1, FunctionCount: 1}
+		f.Factors.IncidentHistory.IncidentCount = 1
+		f.Dependencies.ImportedBy = []types.Dependency{{Path: "x"}}
+		hm.Files[f.Path] = f
+		e := Explain(f, BuildRepoStats(hm, nil), nil)
+		contains(t, e.LikelihoodReasons,
+			"1 commit in the last 90 days, 1 author overall (top 1% of this repo)",
+			"1 function, cyclomatic 1 in one file (top 1%)",
+			"1 file imports it (top 1%)",
+			"1 incident recorded",
+		)
+		var texts []string
+		for _, a := range e.Actions {
+			texts = append(texts, a.Text, a.Signal)
+		}
+		contains(t, texts, "cyclomatic 1 across 1 function")
+		lacks(t, append(texts, e.LikelihoodReasons...), "1 authors", "1 commits", "1 functions", "1 files", "1 incidents")
+	})
 	t.Run("authors notable without churn; size without complexity", func(t *testing.T) {
 		f := &types.FileHeat{Path: "a.go", Size: types.FileSize{Lines: 5000}}
 		f.Factors.ChangeFrequency.UniqueAuthors = 9

@@ -150,7 +150,7 @@ A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.
 | `no-tests` | before merge | Harden now, Protect, not assessed | no test next to the file and no regression-tests item already asks for tests |
 | `stable-interface` | before merge | Harden now, Protect | importers in the top 10% ("Add contract tests") |
 | `refactor` | before merge | Stabilize | complexity in the top 20% ("Refactor the function you touch") |
-| `single-owner` | before merge | Stabilize, not assessed | top owner holds 80% or more of the file and it has 5 or more commits ("Add a second reviewer") |
+| `single-owner` | before merge | Stabilize, not assessed | top owner holds 80% or more of the file, it has 5 or more commits, and the repo has more than one author ("Add a second reviewer") |
 | `no-auto-merge` | before merge | Harden now, Protect | always |
 | `smaller-pr` | before merge | Harden now | `pr check` only: the diff is over 500 lines or touches 3+ components |
 | `light-review` | before merge | Routine, and every test file | always (the only action; `pr check` leaves it out of the checklist) |
@@ -162,7 +162,11 @@ A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.
 | `complexity-issue` | backlog | Stabilize | complexity in the top 20% |
 | `ownership-issue` | backlog | Stabilize | a single owner (as above) |
 
-Whether a PR changes exported symbols is not detected, so no action depends on it. `pr check` marks before-merge items done when the PR already satisfies them; see the [CLI reference](cli-reference.md#verdict-and-checklist).
+A single owner never counts in a repo with one author overall (counted across every file's owners), so one-person repos get no `single-owner`, `ownership-issue` or owner-based `document-invariants` items: there is no one to name.
+
+Whether a PR changes exported symbols is not detected, so no action depends on it. `pr check` marks before-merge items done when the PR already satisfies them, and only Harden now and Protect files' items go in its checklist; the rest are listed as worth doing, not blocking. See the [CLI reference](cli-reference.md#verdict-and-checklist).
+
+**Agent autonomy.** After quadrants are set, `analyze` gives every file an autonomy level from its posture (Routine 3, Stabilize 2, Protect 1, Harden now 0; unassessed files use the posture of their tier), capped at 1 when impact is not LLM-assessed and at `autonomy.max_level`. See the [CLI reference](cli-reference.md#agent-autonomy).
 
 Owners come from the same history pass as [Ownership](#ownership), run once during `analyze`. If git fails, actions stay generic and `analyze` prints a warning.
 

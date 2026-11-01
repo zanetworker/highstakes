@@ -100,25 +100,31 @@ func approvedByOwner(owners, approvals []string) bool {
 	return false
 }
 
-// FileActions are one changed file's PR actions.
+// FileActions are one changed file's PR actions. Blocking marks a Harden
+// now or Protect file, whose before-merge items gate the merge.
 type FileActions struct {
-	Path    string
-	Actions []types.Action
+	Path     string
+	Blocking bool
+	Actions  []types.Action
 }
 
-// Checklist merges per-file actions into the PR's before-merge checklist and
-// backlog: identical items (same text and command) collapse into one that
-// lists every file and is done only when done for all of them. Routine
-// files' "normal review" item is left out: routine stays quiet.
-func Checklist(files []FileActions) (before, backlog []types.Action) {
+// Checklist merges per-file actions into the PR's before-merge checklist
+// (items of blocking files), the items worth doing that do not block
+// (before-merge items of other files, such as Stabilize) and the backlog.
+// Identical items (same text and command) collapse into one that lists
+// every file and is done only when done for all of them. Routine files'
+// "normal review" item is left out: routine stays quiet.
+func Checklist(files []FileActions) (before, worth, backlog []types.Action) {
 	index := map[string]int{}
 	var all []types.Action
+	var nonBlocking []bool
 	for _, fa := range files {
 		for _, a := range fa.Actions {
 			if a.ID == "light-review" {
 				continue
 			}
-			key := a.Scope + "\x00" + a.Text + "\x00" + a.Command
+			worthOnly := a.Scope != types.ScopeBacklog && !fa.Blocking
+			key := fmt.Sprint(a.Scope, "\x00", a.Text, "\x00", a.Command, "\x00", worthOnly)
 			if i, ok := index[key]; ok {
 				all[i].Files = append(all[i].Files, fa.Path)
 				all[i].Done = all[i].Done && a.Done
@@ -127,14 +133,18 @@ func Checklist(files []FileActions) (before, backlog []types.Action) {
 			index[key] = len(all)
 			a.Files = []string{fa.Path}
 			all = append(all, a)
+			nonBlocking = append(nonBlocking, worthOnly)
 		}
 	}
-	for _, a := range all {
-		if a.Scope == types.ScopeBacklog {
+	for i, a := range all {
+		switch {
+		case a.Scope == types.ScopeBacklog:
 			backlog = append(backlog, a)
-		} else {
+		case nonBlocking[i]:
+			worth = append(worth, a)
+		default:
 			before = append(before, a)
 		}
 	}
-	return before, backlog
+	return before, worth, backlog
 }

@@ -178,6 +178,7 @@ highstakes get <file>                                   # Verdict, both question
 highstakes list --tier high --limit 10                  # Filter files
 highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
 highstakes list units                                   # Binaries and scripts, what each links, where it is packaged
+highstakes list tasks                                   # Backlog items agents may take on (autonomy level 2+), with "done when"
 highstakes get architecture --out arch.json             # Generated architecture diagram (SeeCode spec)
 highstakes report                                       # Distribution report
 ```
@@ -365,7 +366,7 @@ highstakes pr check --fail-on critical                  # Exit 5 when the PR cha
 highstakes pr check --shadow                            # Log the decision, never fail
 ```
 
-`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine), then one checklist of before-merge items across the touched files. It ticks the items the PR already satisfies: a test next to a risky file was added or changed, not deleted ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine) and whether AI may auto-merge it, then one checklist of the before-merge items of the Harden now and Protect files it touches; Stabilize work (refactor the touched function, regression tests) is listed as worth doing, not blocking. It ticks the items the PR already satisfies: a test next to a risky file was added or changed, not deleted ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
 
 ### Review Policy
 
@@ -374,9 +375,10 @@ highstakes create codeowners                            # Print a CODEOWNERS blo
 highstakes create codeowners --write                    # Update the marked block in .github/CODEOWNERS
 highstakes create policy > .github/highstakes-policy.yaml   # No-auto-approve paths for AI reviewers
 highstakes create policy --json --min-tier critical
+highstakes create policy --agents --out .highstakes/autonomy.yaml   # Agent autonomy: path globs per level
 ```
 
-Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code (by tier, and by LLM impact so stable but impactful code is covered too), and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
+Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code (by tier, and by LLM impact so stable but impactful code is covered too), and `create codeowners` routes the same paths to the people who know them. `create policy --agents` goes further for coding agents: every path gets a level, 3 auto-merge (Routine), 2 auto-fix with a human merging (Stabilize), 1 propose only (Protect), 0 assist only (Harden now). Levels are conservative because "How bad?" is AI-assessed: files without an LLM assessment are capped at 1, and `autonomy.max_level` in the config caps everything. `pr check` reports the PR's level (`auto_merge_allowed` in JSON) and `list tasks` turns the backlog into an agent work queue. See [Agent autonomy](docs/cli-reference.md#agent-autonomy). Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
 
 ### Incidents
 

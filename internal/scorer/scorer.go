@@ -1,6 +1,7 @@
 package scorer
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -373,4 +374,46 @@ func CalculateComplexityScore(cyclomatic, cognitive int) int {
 	score := int((normCyclomatic * 50) + (normCognitive * 50))
 
 	return score
+}
+
+// TierQuadrant is the quadrant whose posture a tier carries, for files
+// without an assessed quadrant ("" for an unknown tier).
+func TierQuadrant(t types.Tier) types.Quadrant { return tierQuadrant[t] }
+
+var tierQuadrant = map[types.Tier]types.Quadrant{
+	types.TierCritical: types.QuadrantFragileCritical, types.TierHigh: types.QuadrantProtect,
+	types.TierMedium: types.QuadrantWatch, types.TierLow: types.QuadrantLow,
+}
+
+// Autonomy is the agent autonomy for a posture: the quadrant's level,
+// capped at L1 when the impact is not LLM-assessed (unknown impact allows
+// no more than proposing), then at maxLevel (autonomy.max_level).
+func Autonomy(q types.Quadrant, assessed bool, maxLevel int) types.Autonomy {
+	a := q.Autonomy()
+	if !assessed && a.Level > 1 {
+		a.Level, a.Reason = 1, a.Reason+"; capped at L1: impact not assessed by an LLM"
+	}
+	if a.Level > maxLevel {
+		a.Level, a.Reason = maxLevel, a.Reason+fmt.Sprintf("; capped at L%d by autonomy.max_level", maxLevel)
+	}
+	a.Label = types.AutonomyLabel(a.Level)
+	return a
+}
+
+// FileAutonomy is a file's autonomy: its quadrant when impact is
+// assessed, else the quadrant its tier carries, capped as in Autonomy.
+func FileAutonomy(f *types.FileHeat, maxLevel int) types.Autonomy {
+	q := f.Quadrant
+	if !f.ImpactAssessed || q == "" {
+		q = TierQuadrant(f.Tier)
+	}
+	return Autonomy(q, f.ImpactAssessed, maxLevel)
+}
+
+// ApplyAutonomy sets every file's Autonomy. Run it after ApplyQuadrants.
+func ApplyAutonomy(files map[string]*types.FileHeat, maxLevel int) {
+	for _, f := range files {
+		a := FileAutonomy(f, maxLevel)
+		f.Autonomy = &a
+	}
 }

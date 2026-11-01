@@ -66,6 +66,9 @@ func LoadConfig(path string) (types.Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return types.Config{}, err
 	}
+	if _, err := config.Autonomy.Max(); err != nil {
+		return types.Config{}, err
+	}
 
 	return config, nil
 }

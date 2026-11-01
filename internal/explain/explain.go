@@ -26,10 +26,11 @@ const (
 
 // signals are the repo-relative facts reasons and actions are derived from.
 type signals struct {
-	f         *types.FileHeat
-	owners    []ownership.Owner
-	isTest    bool
-	codeowned bool // an existing CODEOWNERS rule covers the file
+	f          *types.FileHeat
+	owners     []ownership.Owner
+	isTest     bool
+	codeowned  bool // an existing CODEOWNERS rule covers the file
+	soleAuthor bool // the repo has one author overall
 
 	churnTop, authorsTop, cycTop, fnTop, importersTop, linesTop int
 	fixes                                                       []types.Change // newest first
@@ -61,6 +62,7 @@ func Explain(f *types.FileHeat, rs RepoStats, owners []ownership.Owner) types.Ex
 	s := signals{
 		f: f, owners: owners, isTest: isTest,
 		codeowned:    rs.Codeowned != nil && rs.Codeowned(f.Path),
+		soleAuthor:   rs.SoleAuthor,
 		churnTop:     topPercent(rs.churn, f.Factors.ChangeFrequency.CommitsLast90d),
 		authorsTop:   topPercent(rs.authors, f.Factors.ChangeFrequency.UniqueAuthors),
 		cycTop:       topPercent(rs.cyclomatic, f.Factors.Complexity.Cyclomatic),
@@ -158,19 +160,19 @@ func likelihoodReasons(s signals) []string {
 	cf := f.Factors.ChangeFrequency
 	switch {
 	case notable(s.churnTop):
-		out = append(out, fmt.Sprintf("%d commits in the last 90 days, %d authors overall %s", cf.CommitsLast90d, cf.UniqueAuthors, pct(s.churnTop)))
+		out = append(out, fmt.Sprintf("%s in the last 90 days, %s overall %s", count(cf.CommitsLast90d, "commit"), count(cf.UniqueAuthors, "author"), pct(s.churnTop)))
 	case notable(s.authorsTop):
-		out = append(out, fmt.Sprintf("%d authors overall %s", cf.UniqueAuthors, pct(s.authorsTop)))
+		out = append(out, fmt.Sprintf("%s overall %s", count(cf.UniqueAuthors, "author"), pct(s.authorsTop)))
 	}
 	cx := f.Factors.Complexity
 	switch {
 	case notable(s.complexTop()):
-		out = append(out, fmt.Sprintf("%d functions, cyclomatic %d in one file %s", cx.FunctionCount, cx.Cyclomatic, pct(s.complexTop())))
+		out = append(out, fmt.Sprintf("%s, cyclomatic %d in one file %s", count(cx.FunctionCount, "function"), cx.Cyclomatic, pct(s.complexTop())))
 	case notable(s.linesTop):
-		out = append(out, fmt.Sprintf("%d lines in one file %s", f.Size.Lines, pct(s.linesTop)))
+		out = append(out, fmt.Sprintf("%s in one file %s", count(f.Size.Lines, "line"), pct(s.linesTop)))
 	}
 	if notable(s.importersTop) {
-		out = append(out, fmt.Sprintf("%d files import it %s", len(f.Dependencies.ImportedBy), pct(s.importersTop)))
+		out = append(out, fmt.Sprintf("%s %s", importedBy(len(f.Dependencies.ImportedBy)), pct(s.importersTop)))
 	}
 	switch n := len(s.fixes); {
 	case n == 1:
@@ -179,7 +181,7 @@ func likelihoodReasons(s signals) []string {
 		out = append(out, fmt.Sprintf("%d recent fixes; latest: %s", n, describeChange(s.fixes[0])))
 	}
 	if ih := f.Factors.IncidentHistory; ih.IncidentCount > 0 {
-		r := fmt.Sprintf("%d incidents recorded", ih.IncidentCount)
+		r := count(ih.IncidentCount, "incident") + " recorded"
 		if ih.LastIncident != nil {
 			r += ", last on " + ih.LastIncident.Format("2006-01-02")
 		}
@@ -192,6 +194,22 @@ func likelihoodReasons(s signals) []string {
 		out = append(out, "no notable churn, complexity, importers or fixes")
 	}
 	return out
+}
+
+// count is "1 author" or "N authors".
+func count(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// importedBy is "1 file imports it" or "N files import it".
+func importedBy(n int) string {
+	if n == 1 {
+		return "1 file imports it"
+	}
+	return fmt.Sprintf("%d files import it", n)
 }
 
 // describeChange quotes a commit subject (truncated) with its date.

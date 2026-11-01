@@ -77,6 +77,7 @@ func TestActions_Rules(t *testing.T) {
 		edit      func(*types.FileHeat)
 		owners    []ownership.Owner
 		codeowned bool
+		sole      bool // the repo has one author overall
 		has       []string
 		hasnt     []string
 		texts     map[string]string
@@ -147,6 +148,19 @@ func TestActions_Rules(t *testing.T) {
 		{name: "stabilize with one fix does not ask for tests",
 			edit:  func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch },
 			hasnt: []string{"regression-tests"}},
+		{name: "one-author repo: no second reviewer or ownership issue",
+			edit: func(f *types.FileHeat) {
+				f.Quadrant = types.QuadrantWatch
+				f.RecentChanges = append(f.RecentChanges, types.Change{Message: "fix: again"})
+			},
+			owners: []ownership.Owner{{Handle: "@solo", Share: 1}}, sole: true,
+			has:   []string{"refactor", "complexity-issue"},
+			hasnt: []string{"single-owner", "ownership-issue"}},
+		{name: "one-author repo: no invariants doc from a dominant owner",
+			edit:   func(f *types.FileHeat) { f.Factors.ChangeFrequency.UniqueAuthors = 1 },
+			owners: []ownership.Owner{{Handle: "@solo", Share: 1}}, sole: true,
+			has:    []string{"senior-review"},
+			hasnt:  []string{"document-invariants"}},
 		{name: "79% is not a single owner",
 			edit:   func(f *types.FileHeat) { f.Quadrant = types.QuadrantWatch },
 			owners: []ownership.Owner{{Handle: "@solo", Share: 0.79}},
@@ -177,6 +191,7 @@ func TestActions_Rules(t *testing.T) {
 			if tt.codeowned {
 				rs.Codeowned = func(string) bool { return true }
 			}
+			rs.SoleAuthor = tt.sole
 			got := Explain(f, rs, tt.owners).Actions
 			idset := map[string]bool{}
 			for _, a := range got {
@@ -271,6 +286,29 @@ func TestScopeOf(t *testing.T) {
 		t.Run(tt.id, func(t *testing.T) {
 			if got := ScopeOf(tt.id); got != tt.want {
 				t.Errorf("ScopeOf(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSoleAuthor(t *testing.T) {
+	tests := []struct {
+		name   string
+		owners map[string][]ownership.Owner
+		want   bool
+	}{
+		{"no history is not a sole author", nil, false},
+		{"one author across files", map[string][]ownership.Owner{
+			"a.go": {{Handle: "@ana", Email: "ana@x"}}, "b.go": {{Handle: "@ana", Email: "ana@x"}}}, true},
+		{"two authors on different files", map[string][]ownership.Owner{
+			"a.go": {{Handle: "@ana"}}, "b.go": {{Handle: "@bo"}}}, false},
+		{"handle falls back to email", map[string][]ownership.Owner{
+			"a.go": {{Email: "ana@x"}, {Email: "bo@x"}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SoleAuthor(tt.owners); got != tt.want {
+				t.Errorf("SoleAuthor = %v, want %v", got, tt.want)
 			}
 		})
 	}

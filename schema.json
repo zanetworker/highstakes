@@ -143,6 +143,15 @@
           "items": {"type": "string"},
           "description": "Names of the runtime units that link the file"
         },
+        "autonomy": {
+          "type": "object",
+          "description": "How far AI agents may act on the file: 3 auto-merge (Routine), 2 auto-fix, human merges (Stabilize), 1 propose only (Protect), 0 assist only (Harden now). Capped at 1 when impact is not LLM-assessed and at autonomy.max_level from .heatmap/config.yaml. Conservative: How bad? is AI-assessed, not human-validated",
+          "properties": {
+            "level": {"type": "integer", "minimum": 0, "maximum": 3},
+            "label": {"type": "string", "enum": ["auto-merge", "auto-fix, human merges", "propose only", "assist only"]},
+            "reason": {"type": "string", "description": "The posture behind the level and any cap applied"}
+          }
+        },
         "language": {
           "type": "string",
           "description": "Programming language"

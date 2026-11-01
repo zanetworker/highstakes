@@ -7,6 +7,8 @@ package explain
 import (
 	"sort"
 
+	"github.com/zanetworker/highstakes/internal/ownership"
+
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -18,6 +20,10 @@ type RepoStats struct {
 	// Codeowned reports whether an existing CODEOWNERS rule covers a path;
 	// nil means nothing is covered. Callers set it after BuildRepoStats.
 	Codeowned func(string) bool
+	// SoleAuthor is set when the repo has one author overall (see
+	// SoleAuthor): second-reviewer and spread-ownership actions then
+	// have no one to name, so they do not fire.
+	SoleAuthor bool
 
 	churn, authors, cyclomatic, functions, importers, lines []int // sorted ascending
 	isTest                                                  func(string) bool
@@ -63,4 +69,21 @@ func topPercent(sorted []int, v int) int {
 		atOrAbove = 1 // above every file in the repo: the file itself
 	}
 	return (atOrAbove*100 + len(sorted) - 1) / len(sorted)
+}
+
+// SoleAuthor reports whether owners (from internal/ownership, per file)
+// name exactly one author across the repo, by handle or else email. No
+// history at all is not a sole author.
+func SoleAuthor(owners map[string][]ownership.Owner) bool {
+	seen := map[string]bool{}
+	for _, os := range owners {
+		for _, o := range os {
+			id := o.Handle
+			if id == "" {
+				id = o.Email
+			}
+			seen[id] = true
+		}
+	}
+	return len(seen) == 1
 }

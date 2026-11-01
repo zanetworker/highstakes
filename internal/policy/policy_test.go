@@ -298,3 +298,66 @@ func TestBuild_PathsStayUnescaped(t *testing.T) {
 		t.Errorf("policy paths = %v files = %+v, want raw %q", p.Paths, p.Files, path)
 	}
 }
+
+func TestAgents(t *testing.T) {
+	assessed := func(q types.Quadrant) *types.FileHeat {
+		return &types.FileHeat{ImpactAssessed: true, Quadrant: q}
+	}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"ui/a.go":     assessed(types.QuadrantLow),
+		"ui/b.go":     assessed(types.QuadrantLow),
+		"ui/w/c.go":   assessed(types.QuadrantLow),
+		"core/x.go":   assessed(types.QuadrantProtect),
+		"core/y.go":   assessed(types.QuadrantLow),
+		"core/s.go":   assessed(types.QuadrantWatch),
+		"main.go":     assessed(types.QuadrantFragileCritical),
+		"est/u.go":    {Tier: types.TierLow}, // not assessed: capped at L1
+		"est/v.go":    {Tier: types.TierMedium},
+		"solo/one.go": assessed(types.QuadrantLow), // one file never collapses
+	}}
+	paths := func(p AgentPolicy) map[int]string {
+		out := map[int]string{}
+		for _, l := range p.Levels {
+			out[l.Level] = strings.Join(l.Paths, ",")
+		}
+		return out
+	}
+	t.Run("levels with collapsed directories", func(t *testing.T) {
+		p := Agents(hm, 3)
+		want := map[int]string{
+			3: "core/y.go,solo/one.go,ui/**",
+			2: "core/s.go",
+			1: "core/x.go,est/**",
+			0: "main.go",
+		}
+		got := paths(p)
+		for lvl, w := range want {
+			if got[lvl] != w {
+				t.Errorf("L%d paths = %q, want %q", lvl, got[lvl], w)
+			}
+		}
+		if len(p.Levels) != 4 || p.Levels[0].Level != 3 || p.Levels[0].Label != "auto-merge" || p.Levels[0].Meaning == "" {
+			t.Errorf("levels = %+v, want 4 described levels, highest first", p.Levels)
+		}
+		if p.MaxLevel != 3 || p.DefaultLevel != 1 || p.HowToRead == "" || p.CapRule == "" {
+			t.Errorf("header = %+v", p)
+		}
+	})
+	t.Run("max level caps everything", func(t *testing.T) {
+		got := paths(Agents(hm, 1))
+		if got[3] != "" || got[2] != "" {
+			t.Errorf("nothing may sit above the cap: %v", got)
+		}
+		if got[1] != "core/**,est/**,solo/one.go,ui/**" {
+			t.Errorf("capped files should land at L1: %q", got[1])
+		}
+	})
+	t.Run("empty heatmap has empty path lists", func(t *testing.T) {
+		p := Agents(&types.Heatmap{Files: map[string]*types.FileHeat{}}, 3)
+		for _, l := range p.Levels {
+			if l.Paths == nil || len(l.Paths) != 0 {
+				t.Errorf("L%d paths = %#v, want empty list", l.Level, l.Paths)
+			}
+		}
+	})
+}

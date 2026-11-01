@@ -125,8 +125,9 @@ func buildChange(changes []prscore.FileChange, hm *types.Heatmap, approvals []st
 }
 
 // attachPRActions sets each scored file's before-merge actions (routine
-// files stay quiet) and the PR's deduplicated checklist and backlog, most
-// severe file first.
+// files stay quiet) and the PR's deduplicated checklist (Harden now and
+// Protect files), worth-doing items (the rest) and backlog, most severe
+// file first.
 func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 	order := make([]int, len(risk.FilesChanged))
 	for i := range order {
@@ -153,9 +154,9 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 				fc.Actions = append(fc.Actions, a)
 			}
 		}
-		all = append(all, explain.FileActions{Path: fc.Path, Actions: acts})
+		all = append(all, explain.FileActions{Path: fc.Path, Blocking: types.Blocking(fc.Posture()), Actions: acts})
 	}
-	risk.Checklist, risk.Backlog = explain.Checklist(all)
+	risk.Checklist, risk.WorthDoing, risk.Backlog = explain.Checklist(all)
 }
 
 var tierOrder = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}

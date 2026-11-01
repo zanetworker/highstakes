@@ -36,6 +36,7 @@ type fileEntry struct {
 	Quadrant     string `json:"quadrant"`
 	Test         bool   `json:"test"`
 	UnitNode     string `json:"unit_node,omitempty"` // node id in the Architecture view grouped by unit
+	Autonomy     *types.Autonomy `json:"autonomy,omitempty"` // agent autonomy recorded by analyze
 
 	Explanation *types.Explanation `json:"explanation,omitempty"`
 	ImpactTitle string             `json:"impact_title,omitempty"`
@@ -90,7 +91,7 @@ func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath str
 			Likelihood: f.Likelihood, Impact: f.Impact, Assessed: f.ImpactAssessed,
 			Quadrant: string(f.Quadrant), Test: tour.IsTestFile(f.Path),
 			Explanation: f.Explanation, ImpactTitle: impactTitle, LikelyTitle: likelyTitle,
-			UnitNode: fileNode[f.Path],
+			UnitNode: fileNode[f.Path], Autonomy: f.Autonomy,
 		})
 	}
 
@@ -357,6 +358,13 @@ input::placeholder{color:var(--dim)}
 <button class="fbtn" aria-pressed="false" data-tier="high" onclick="setView('high',this)">Protect</button>
 <button class="fbtn" aria-pressed="false" data-tier="medium" onclick="setView('medium',this)">Stabilize</button>
 <button class="fbtn" aria-pressed="false" data-tier="low" onclick="setView('low',this)">Routine</button>
+<span style="width:8px"></span>
+<label>Agents</label>
+<button class="fbtn on" aria-pressed="true" data-auto="all" onclick="setAutonomy('all',this)">All</button>
+<button class="fbtn" aria-pressed="false" data-auto="3" onclick="setAutonomy('3',this)" title="L3 auto-merge">L3</button>
+<button class="fbtn" aria-pressed="false" data-auto="2" onclick="setAutonomy('2',this)" title="L2 auto-fix, human merges">L2</button>
+<button class="fbtn" aria-pressed="false" data-auto="1" onclick="setAutonomy('1',this)" title="L1 propose only">L1</button>
+<button class="fbtn" aria-pressed="false" data-auto="0" onclick="setAutonomy('0',this)" title="L0 assist only">L0</button>
 <span style="flex:1"></span>
 <label for="search">Search</label>
 <input type=text id=search placeholder="Path or reason" oninput="onSearch()">
@@ -409,6 +417,8 @@ document.getElementById('meta').textContent=(STATS.branch||'')+' @ '+(STATS.comm
 
 // Treemap
 let currentFilter='all';
+let currentAuto='all';
+const AUTO=Object.fromEntries(FILES.map(f=>[f.path,f.autonomy?String(f.autonomy.level):'']));
 let currentSizing='lines';
 let currentPath=null;
 let searchQ='';
@@ -422,6 +432,12 @@ function pressOnly(sel,btn){
 function setView(tier,btn){
   currentFilter=tier;
   pressOnly('.fbtn[data-tier]',btn||document.querySelector('.fbtn[data-tier="'+tier+'"]'));
+  rerender();
+}
+
+function setAutonomy(level,btn){
+  currentAuto=level;
+  pressOnly('.fbtn[data-auto]',btn);
   rerender();
 }
 
@@ -439,6 +455,7 @@ function onSearch(){
 function getFiltered(){
   return FILES.filter(f=>{
     if(currentFilter!=='all'&&f.tier!==currentFilter)return false;
+    if(currentAuto!=='all'&&AUTO[f.path]!==currentAuto)return false;
     if(searchQ&&!f.path.toLowerCase().includes(searchQ)&&!(f.reason||'').toLowerCase().includes(searchQ))return false;
     if(currentPath&&!f.dir.startsWith(currentPath)&&f.path!==currentPath)return false;
     return true;
@@ -648,6 +665,9 @@ function selectFile(path){
     h+='<div class="q"><div class="ql"><span>How bad if it breaks?</span><span><span class="qv">~'+f.impact+'</span> <span class="qc">estimate, run analyze with an LLM</span></span></div>'+meter(f.impact,0,'#8c8c92')+'</div>';
   }
   h+='<div class="note">'+NOTE+' '+htmlEsc(EVIDENCE)+'</div>';
+  if(f.autonomy){
+    h+='<div class="q"><div class="ql"><span>Agent autonomy</span><span><span class="qv">L'+f.autonomy.level+'</span> <span class="qc">'+htmlEsc(f.autonomy.label)+'</span></span></div><div class="note">'+htmlEsc(f.autonomy.reason)+'</div></div>';
+  }
 
   const x=f.explanation;
   if(x&&x.actions){
@@ -692,7 +712,7 @@ function selectFile(path){
 const inboxOpen={before_merge:false,groups:new Set()};
 function inboxMatch(path,verdict,text){
   const want=currentFilter==='all'?null:POSTURE[currentFilter];
-  return (!want||verdict===want)&&(!searchQ||path.toLowerCase().includes(searchQ)||(text||'').toLowerCase().includes(searchQ));
+  return (!want||verdict===want)&&(currentAuto==='all'||AUTO[path]===currentAuto)&&(!searchQ||path.toLowerCase().includes(searchQ)||(text||'').toLowerCase().includes(searchQ));
 }
 function fileCardHTML(c){
   const vc=VC[c.verdict]||VC['Not assessed'];

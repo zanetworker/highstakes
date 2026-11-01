@@ -128,12 +128,12 @@ func TestForPR(t *testing.T) {
 
 func TestChecklist(t *testing.T) {
 	files := []FileActions{
-		{Path: "a.rs", Actions: []types.Action{
+		{Path: "a.rs", Blocking: true, Actions: []types.Action{
 			{ID: "no-auto-merge", Text: "Keep auto-merge off", Scope: types.ScopeBeforeMerge, Done: false},
 			{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge, Done: true},
 			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/a.rs @ana"},
 		}},
-		{Path: "b.rs", Actions: []types.Action{
+		{Path: "b.rs", Blocking: true, Actions: []types.Action{
 			{ID: "no-auto-merge", Text: "Keep auto-merge off", Scope: types.ScopeBeforeMerge},
 			{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge, Done: false},
 			{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/b.rs @bo"},
@@ -141,10 +141,15 @@ func TestChecklist(t *testing.T) {
 		{Path: "c.rs", Actions: []types.Action{
 			{ID: "light-review", Text: "Normal review; auto-merge allowed by policy", Scope: types.ScopeBeforeMerge},
 		}},
+		{Path: "s.go", Actions: []types.Action{
+			{ID: "refactor", Text: "Refactor the function you touch", Scope: types.ScopeBeforeMerge},
+			{ID: "regression-tests", Text: "Add regression tests around the recent fix", Scope: types.ScopeBeforeMerge},
+			{ID: "complexity-issue", Text: "Open an issue to cut its complexity", Scope: types.ScopeBacklog, Command: "gh issue create"},
+		}},
 	}
-	before, backlog := Checklist(files)
+	before, worth, backlog := Checklist(files)
 	if len(before) != 2 {
-		t.Fatalf("before = %+v, want 2 deduplicated items (routine left out)", before)
+		t.Fatalf("before = %+v, want 2 deduplicated items from blocking files only", before)
 	}
 	if before[0].ID != "no-auto-merge" || strings.Join(before[0].Files, ",") != "a.rs,b.rs" {
 		t.Errorf("first item = %+v", before[0])
@@ -152,13 +157,16 @@ func TestChecklist(t *testing.T) {
 	if before[1].Done {
 		t.Error("an item is done only when it is done for every file")
 	}
-	if len(backlog) != 2 {
+	if len(worth) != 2 || worth[0].ID != "refactor" || strings.Join(worth[1].Files, ",") != "s.go" {
+		t.Errorf("worth = %+v, want refactor and regression-tests for s.go only", worth)
+	}
+	if len(backlog) != 3 {
 		t.Errorf("backlog = %+v, want one per file (commands differ)", backlog)
 	}
 	t.Run("empty input", func(t *testing.T) {
-		b, l := Checklist(nil)
-		if b != nil || l != nil {
-			t.Errorf("got %v %v", b, l)
+		b, w, l := Checklist(nil)
+		if b != nil || w != nil || l != nil {
+			t.Errorf("got %v %v %v", b, w, l)
 		}
 	})
 }

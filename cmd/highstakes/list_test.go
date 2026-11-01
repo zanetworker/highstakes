@@ -114,3 +114,52 @@ func TestGetFile_ShowsAxes(t *testing.T) {
 		}
 	}
 }
+
+func TestListTasks(t *testing.T) {
+	dir := t.TempDir()
+	busy := &types.FileHeat{Path: "ui/busy.go", ImpactAssessed: true, Quadrant: types.QuadrantWatch, Tier: types.TierMedium,
+		Explanation: &types.Explanation{Actions: []types.Action{{ID: "complexity-issue", Text: "Open an issue to cut its complexity",
+			Scope: types.ScopeBacklog, Signal: "cyclomatic 40", Command: "gh issue create --title x"}}}}
+	busy.Factors.Complexity.Cyclomatic = 40
+	prot := &types.FileHeat{Path: "core/p.go", ImpactAssessed: true, Quadrant: types.QuadrantProtect, Tier: types.TierHigh,
+		Explanation: &types.Explanation{Actions: []types.Action{{ID: "codeowners", Text: "Add a CODEOWNERS line",
+			Scope: types.ScopeBacklog, Signal: "not covered", Command: "/core/p.go @ana"}}}}
+	hm := &types.Heatmap{Version: "1", Files: map[string]*types.FileHeat{busy.Path: busy, prot.Path: prot}}
+	if err := os.MkdirAll(filepath.Join(dir, ".heatmap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := heatmap.Save(hm, filepath.Join(dir, ".heatmap", "heatmap.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCLI(t, dir, "list", "tasks", "--json")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	var res struct {
+		Tasks    []map[string]interface{} `json:"tasks"`
+		Count    int                      `json:"count"`
+		MinLevel int                      `json:"min_level"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("invalid JSON %q: %v", out, err)
+	}
+	if res.Count != 1 || res.MinLevel != 2 || res.Tasks[0]["file"] != "ui/busy.go" || res.Tasks[0]["acceptance"] != "tests pass and cyclomatic complexity drops below 40" {
+		t.Errorf("tasks = %+v", res)
+	}
+
+	out, err = runCLI(t, dir, "list", "tasks", "--level", "1")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	for _, want := range []string{"L2 auto-fix, human merges  Open an issue to cut its complexity (ui/busy.go)", "done when: CODEOWNERS covers core/p.go", "$ /core/p.go @ana"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("text output missing %q:\n%s", want, out)
+		}
+	}
+
+	_, err = runCLI(t, dir, "list", "tasks", "--level", "4")
+	if ee, ok := err.(*exitError); !ok || ee.code != 2 || !strings.Contains(ee.msg, "0, 1, 2, 3") {
+		t.Errorf("--level 4: err = %v, want exit 2 listing valid values", err)
+	}
+}

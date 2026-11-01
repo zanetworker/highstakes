@@ -73,6 +73,17 @@ tour:
 
 A malformed glob makes `get tour` exit with code 2.
 
+## Agent Autonomy
+
+Cap how far AI agents may act on any file (levels in the [CLI reference](cli-reference.md#agent-autonomy): 3 auto-merge, 2 auto-fix with a human merging, 1 propose only, 0 assist only):
+
+```yaml
+autonomy:
+  max_level: 2    # 0-3, default 3
+```
+
+The cap applies on top of the per-file level, which is already conservative (files without an LLM-assessed impact stay at 1 or below). `analyze` records the capped level per file; `create policy --agents`, `list tasks` and `pr check` read the cap on every run. A value outside 0-3 makes those commands exit 2; `pr check` warns and caps at 1 instead, so CI never grants more than intended.
+
 ## Architecture Declarations
 
 `.heatmap/architecture.yaml` is optional. It declares runtime links and placements that imports and manifests cannot show, so generated pictures (`get architecture`, the dashboard unit view, `list units`) draw the real topology. Unit names are the ones `list units --include-supporting` prints.

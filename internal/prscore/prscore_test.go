@@ -81,8 +81,18 @@ func TestCalculatePRRisk_UnscoredFiles(t *testing.T) {
 		{"new file with no scored ancestor stays low but is flagged", "new_file.go", 0, types.TierLow, true, true},
 		{"documentation file is not scored", "src/auth/README.md", 0, types.TierLow, false, false},
 		{"plain text file is documentation", "src/auth/NOTES.txt", 0, types.TierLow, false, false},
-		{"requirements.txt inherits directory heat", "src/auth/requirements.txt", 95, types.TierCritical, true, true},
-		{"Cargo.lock inherits directory heat", "src/auth/Cargo.lock", 95, types.TierCritical, true, true},
+		{"dependency manifest is not an unscored new file", "src/auth/requirements.txt", 0, types.TierLow, false, false},
+		{"go.mod is not an unscored new file", "src/auth/go.mod", 0, types.TierLow, false, false},
+		{"lock file is not scored", "src/auth/Cargo.lock", 0, types.TierLow, false, false},
+		{"go.sum is not scored", "go.sum", 0, types.TierLow, false, false},
+		{"image is not scored", "src/auth/logo.png", 0, types.TierLow, false, false},
+		{"binary is not scored", "src/auth/tool.wasm", 0, types.TierLow, false, false},
+		{"golden file is not scored", "src/auth/want.golden", 0, types.TierLow, false, false},
+		{"testdata is not scored", "src/auth/testdata/input.go", 0, types.TierLow, false, false},
+		{"tool config dot directory is not scored", ".impeccable/config.json", 0, types.TierLow, false, false},
+		{"tool config dotfile is not scored", ".golangci.yml", 0, types.TierLow, false, false},
+		{"CI workflow is still flagged", ".github/workflows/ci.yml", 0, types.TierLow, true, true},
+		{"new code file next to a dotfile dir still inherits", "src/auth/.hidden/x.go", 95, types.TierCritical, true, true},
 		{"known file is scored normally", "src/utils/format.go", 5, types.TierLow, false, false},
 	}
 
@@ -111,6 +121,16 @@ func TestCalculatePRRisk_UnscoredFiles(t *testing.T) {
 				t.Errorf("unscored signal present = %v, want %v (signals: %v)", gotSignal, tt.wantSignal, risk.CircuitBreakerSignals)
 			}
 		})
+	}
+}
+
+func TestCalculatePRRisk_ManifestStillCountsAsConfig(t *testing.T) {
+	risk := CalculatePRRisk(1, []FileChange{{Path: "go.mod", LinesAdded: 2, IsNew: true}}, makeHeatmap(), scorer.DefaultTierThresholds())
+	if !strings.Contains(strings.Join(risk.ChangeRiskFactors, ";"), "config/infra file(s): go.mod") {
+		t.Errorf("go.mod should still be a config change, factors: %v", risk.ChangeRiskFactors)
+	}
+	if risk.FilesChanged[0].Unscored {
+		t.Error("go.mod should not be an unscored new file")
 	}
 }
 
@@ -251,6 +271,51 @@ func TestCalculatePRRisk_UnscoredInheritsQuadrantTier(t *testing.T) {
 			}
 			if risk.Tier != tt.wantTier {
 				t.Errorf("PR tier = %s, want %s", risk.Tier, tt.wantTier)
+			}
+		})
+	}
+}
+
+func TestApplyAutonomy(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"ui/a.go":   {Path: "ui/a.go", Tier: types.TierLow, ImpactAssessed: true, Quadrant: types.QuadrantLow},
+		"core/p.go": {Path: "core/p.go", Tier: types.TierHigh, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
+		"est/e.go":  {Path: "est/e.go", Tier: types.TierLow},
+	}}
+	th := scorer.DefaultTierThresholds()
+	tests := []struct {
+		name    string
+		paths   []string
+		max     int
+		level   int
+		allowed bool
+		reason  string
+	}{
+		{"every file routine", []string{"ui/a.go"}, 3, 3, true, "every touched file is L3"},
+		{"docs and images ride along", []string{"ui/a.go", "README.md", "ui/logo.png"}, 3, 3, true, "every touched file is L3"},
+		{"protect file", []string{"ui/a.go", "core/p.go"}, 3, 1, false, "touches Protect files"},
+		{"unassessed file", []string{"ui/a.go", "est/e.go"}, 3, 1, false, "touches files whose impact is not AI-assessed"},
+		{"new unscored file", []string{"ui/a.go", "ui/new.go"}, 3, 1, false, "touches files whose impact is not AI-assessed"},
+		{"dependency manifest", []string{"ui/a.go", "go.mod"}, 3, 1, false, "touches dependency or tool config files"},
+		{"config cap", []string{"ui/a.go"}, 2, 2, false, "autonomy.max_level is 2"},
+		{"empty PR", nil, 3, 3, true, "every touched file is L3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var changes []FileChange
+			for _, p := range tt.paths {
+				changes = append(changes, FileChange{Path: p, LinesAdded: 1, IsNew: hm.Files[p] == nil})
+			}
+			risk := CalculatePRRisk(0, changes, hm, th)
+			ApplyAutonomy(&risk, hm, tt.max)
+			if risk.AutonomyLevel != tt.level || risk.AutoMergeAllowed != tt.allowed || risk.AutonomyReason != tt.reason {
+				t.Errorf("got L%d allowed=%v %q, want L%d allowed=%v %q",
+					risk.AutonomyLevel, risk.AutoMergeAllowed, risk.AutonomyReason, tt.level, tt.allowed, tt.reason)
+			}
+			for _, fc := range risk.FilesChanged {
+				if fc.Autonomy == nil || fc.Autonomy.Level < tt.level || fc.Autonomy.Label == "" {
+					t.Errorf("%s autonomy = %+v, want a labelled level >= L%d", fc.Path, fc.Autonomy, tt.level)
+				}
 			}
 		})
 	}

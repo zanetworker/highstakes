@@ -170,6 +170,8 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 		heatmap.Files[path] = heat
 	}
 	applyAxes(heatmap, g.config.Tiers)
+	maxLevel, _ := g.config.Autonomy.Max() // validated by LoadConfig; New falls back to defaults
+	scorer.ApplyAutonomy(heatmap.Files, maxLevel)
 
 	// Owners name reviewers in the actions; without them actions stay generic.
 	owners, err := ownership.FileOwners(g.repoPath, nil, ownership.Options{Aliases: g.config.Owners})
@@ -330,6 +332,7 @@ func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
 func applyExplanations(hm *types.Heatmap, owners map[string][]ownership.Owner, codeowned func(string) bool) {
 	stats := explain.BuildRepoStats(hm, tour.IsTestFile)
 	stats.Codeowned = codeowned
+	stats.SoleAuthor = explain.SoleAuthor(owners)
 	for path, f := range hm.Files {
 		e := explain.Explain(f, stats, owners[path])
 		f.Explanation = &e

@@ -120,6 +120,8 @@ type FileHeat struct {
 	// package, module); Units names the runtime units that link the file.
 	Component string   `json:"component,omitempty"`
 	Units     []string `json:"units,omitempty"`
+	// Autonomy is how far AI agents may act on the file (see Autonomy).
+	Autonomy *Autonomy `json:"autonomy,omitempty"`
 }
 
 // Explanation says why a file is impactful and likely to break, and what to
@@ -333,10 +335,17 @@ type PRRisk struct {
 	// Protect, Stabilize, Routine); Checklist and Backlog are its actions,
 	// deduplicated across files; the cutoffs make file scores readable.
 	Verdict         string   `json:"verdict,omitempty"`
-	Checklist       []Action `json:"checklist,omitempty"`
+	Checklist       []Action `json:"checklist,omitempty"`   // before-merge items of Harden now and Protect files
+	WorthDoing      []Action `json:"worth_doing,omitempty"` // before-merge items of other files: worth doing, do not block
 	Backlog         []Action `json:"backlog,omitempty"`
 	LikelyCutoff    int      `json:"likely_cutoff,omitempty"`
 	ImpactThreshold int      `json:"impact_threshold,omitempty"`
+	// AutonomyLevel is the lowest agent autonomy level (0-3) over the
+	// touched files; AutoMergeAllowed is AutonomyLevel 3; AutonomyReason
+	// says why, e.g. "touches Protect files".
+	AutonomyLevel    int    `json:"autonomy_level"`
+	AutoMergeAllowed bool   `json:"auto_merge_allowed"`
+	AutonomyReason   string `json:"autonomy_reason,omitempty"`
 	FailOn             Tier       `json:"fail_on,omitempty"`  // gate tier from --fail-on (or critical in shadow mode)
 	Decision           string     `json:"decision,omitempty"` // "pass" or "block" when a gate is set
 	Shadow             bool       `json:"shadow,omitempty"`   // decision logged, not enforced
@@ -366,6 +375,7 @@ type FileChange struct {
 	ImpactAssessed bool     `json:"impact_assessed,omitempty"`
 	Quadrant       Quadrant `json:"quadrant,omitempty"`
 	QuadrantLabel  string   `json:"quadrant_label,omitempty"`
+	Autonomy       *Autonomy `json:"autonomy,omitempty"` // pr check: agent autonomy for this file
 }
 
 // Config represents heatmap configuration
@@ -379,6 +389,7 @@ type Config struct {
 	Exclude         ExcludeConfig                 `yaml:"exclude"`
 	Owners          map[string]string             `yaml:"owners,omitempty"` // git email -> @github-handle for reviewers and CODEOWNERS
 	Tour            TourConfig                    `yaml:"tour,omitempty"`
+	Autonomy        AutonomyConfig                `yaml:"autonomy,omitempty"`
 }
 
 // TourConfig tunes `get tour`.

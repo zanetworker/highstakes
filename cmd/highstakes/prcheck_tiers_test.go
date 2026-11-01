@@ -167,7 +167,8 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pr check: %v\n%s", err, out)
 	}
-	for _, want := range []string{"## ⛔ Harden before merge", "- [ ] Get sign-off from a senior owner (@ana)", "- [ ] Add regression tests", "/core/a.go @ana"} {
+	for _, want := range []string{"## ⛔ Harden before merge", "AI may auto-merge: no (touches Harden now files)",
+		"- [ ] Get sign-off from a senior owner (@ana)", "- [ ] Add regression tests", "/core/a.go @ana"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -184,6 +185,14 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+
+	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--json", "--shadow=false", "--fail-on=", "--reviewers=0")
+	if err != nil {
+		t.Fatalf("pr check --json: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"autonomy_level": 0`) || !strings.Contains(out, `"auto_merge_allowed": false`) {
+		t.Errorf("JSON lacks autonomy_level 0 and auto_merge_allowed false:\n%s", out)
 	}
 
 	_, err = runCLI(t, dir, "pr", "check", "--base", "main", "--format", "yaml")

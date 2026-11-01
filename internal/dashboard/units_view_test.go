@@ -191,3 +191,29 @@ func TestGenerate_DeclaredAndSupporting(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerate_Autonomy(t *testing.T) {
+	hm := unitsHeatmap()
+	for _, f := range hm.Files {
+		f.Autonomy = &types.Autonomy{Level: 2, Label: "auto-fix, human merges", Reason: "Stabilize: likely to break, with limited damage"}
+		break
+	}
+	out := filepath.Join(t.TempDir(), "d.html")
+	if err := Generate(hm, types.DeclaredArchitecture{}, out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{
+		`"autonomy":{"level":2,"label":"auto-fix, human merges"`, // per-file data for the detail panel
+		`data-auto="2" onclick="setAutonomy('2',this)"`,          // filter chip
+		`Agent autonomy`,                                         // detail panel row
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+}

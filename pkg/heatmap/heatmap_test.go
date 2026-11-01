@@ -366,6 +366,9 @@ func TestGenerate_GitHistoryStatus(t *testing.T) {
 			if f.Explanation == nil || len(f.Explanation.Actions) == 0 {
 				t.Errorf("Explanation = %+v, want headline and actions", f.Explanation)
 			}
+			if f.Autonomy == nil || f.Autonomy.Level > 1 {
+				t.Errorf("Autonomy = %+v, want at most L1 without an LLM", f.Autonomy)
+			}
 		})
 	}
 }
@@ -487,7 +490,8 @@ func TestApplyExplanations(t *testing.T) {
 	}}
 	hm.Files["a.go"].Factors.ChangeFrequency.CommitCount = 9
 	applyAxes(hm, th)
-	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 0.9}}}, func(p string) bool { return p == "b.go" })
+	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 0.9}}, "b.go": {{Handle: "@bo", Share: 1}}},
+		func(p string) bool { return p == "b.go" })
 
 	tests := []struct {
 		path         string
@@ -519,6 +523,19 @@ func TestApplyExplanations(t *testing.T) {
 	}
 }
 
+func TestApplyExplanations_SoleAuthorRepoHasNoOwnershipActions(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"a.go": {Path: "a.go", Likelihood: 80, Impact: 70, ImpactAssessed: true},
+	}}
+	hm.Files["a.go"].Factors.ChangeFrequency.CommitCount = 9
+	applyAxes(hm, DefaultConfig().Tiers)
+	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 1}}}, nil)
+	for _, a := range hm.Files["a.go"].Explanation.Actions {
+		if a.ID == "document-invariants" {
+			t.Fatalf("ownership action in a one-author repo: %+v", a)
+		}
+	}
+}
 func TestApplyExplanations_CodeownedFileHasNoCodeownersAction(t *testing.T) {
 	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
 		"a.go": {Path: "a.go", Likelihood: 80, Impact: 70, ImpactAssessed: true},

@@ -39,12 +39,7 @@ var severity = map[string]int{"Harden now": 3, "Protect": 2, "Stabilize": 1, "Ro
 
 // posture is a changed file's posture: its quadrant label, else the
 // posture of its tier (unassessed or unscored files).
-func posture(fc types.FileChange) string {
-	if l := fc.Quadrant.Label(); l != "" {
-		return l
-	}
-	return types.TierPosture(fc.Tier)
-}
+func posture(fc types.FileChange) string { return fc.Posture() }
 
 // Render returns the comment for a scored PR. hm supplies per-file reasons;
 // files missing from it simply have none.
@@ -58,6 +53,9 @@ func Render(risk *types.PRRisk, hm *types.Heatmap) string {
 	b.WriteString(Marker + "\n")
 	fmt.Fprintf(&b, "## %s\n\n", headings[verdict])
 	b.WriteString(summary(verdict, files, hm) + "\n\n")
+	if risk.AutonomyReason != "" {
+		fmt.Fprintf(&b, "AI may auto-merge: %s (%s)\n\n", map[bool]string{true: "yes", false: "no"}[risk.AutoMergeAllowed], risk.AutonomyReason)
+	}
 
 	if len(risk.Checklist) > 0 {
 		b.WriteString("### Do before merge\n\n")
@@ -245,6 +243,18 @@ func writeReviewersBacklogGate(b *strings.Builder, risk *types.PRRisk) {
 			names = append(names, r.Handle)
 		}
 		fmt.Fprintf(b, "**Suggested reviewers:** %s\n\n", strings.Join(names, ", "))
+	}
+	if len(risk.WorthDoing) > 0 {
+		b.WriteString("**Worth doing (does not block)**\n")
+		for i, a := range risk.WorthDoing {
+			item := fmt.Sprintf("- %s (%s): %s\n", a.Text, codeList(a.Files), a.Signal)
+			if !fits(b, item) {
+				fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit_\n", plural(len(risk.WorthDoing)-i, "item"))
+				break
+			}
+			b.WriteString(item)
+		}
+		b.WriteString("\n")
 	}
 	if len(risk.Backlog) > 0 {
 		b.WriteString("**Backlog** (the file over time, not this PR)\n")

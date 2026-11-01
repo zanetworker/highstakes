@@ -63,7 +63,7 @@ var rules = []rule{
 	}},
 	{"refactor", beforeMerge, []types.Quadrant{stabilize}, func(s signals) (fired, bool) {
 		cx := s.f.Factors.Complexity
-		return fired{text: fmt.Sprintf("Refactor the function you touch: cyclomatic %d across %d functions", cx.Cyclomatic, cx.FunctionCount),
+		return fired{text: fmt.Sprintf("Refactor the function you touch: cyclomatic %d across %s", cx.Cyclomatic, count(cx.FunctionCount, "function")),
 			signal: fmt.Sprintf("complexity in the top %d%% of this repo", s.complexTop())}, notable(s.complexTop())
 	}},
 	{"single-owner", beforeMerge, []types.Quadrant{stabilize, unassessed}, func(s signals) (fired, bool) {
@@ -90,7 +90,7 @@ var rules = []rule{
 		var sig string
 		switch {
 		case s.fnTop > 0 && s.fnTop <= splitTop:
-			sig = fmt.Sprintf("%d functions in one file (top %d%%)", cx.FunctionCount, s.fnTop)
+			sig = fmt.Sprintf("%s in one file (top %d%%)", count(cx.FunctionCount, "function"), s.fnTop)
 		case s.cycTop > 0 && s.cycTop <= splitTop:
 			sig = fmt.Sprintf("cyclomatic %d in one file (top %d%%)", cx.Cyclomatic, s.cycTop)
 		default:
@@ -118,7 +118,7 @@ var rules = []rule{
 	}},
 	{"complexity-issue", backlog, []types.Quadrant{stabilize}, func(s signals) (fired, bool) {
 		cx := s.f.Factors.Complexity
-		sig := fmt.Sprintf("cyclomatic %d across %d functions (top %d%%)", cx.Cyclomatic, cx.FunctionCount, s.complexTop())
+		sig := fmt.Sprintf("cyclomatic %d across %s (top %d%%)", cx.Cyclomatic, count(cx.FunctionCount, "function"), s.complexTop())
 		return fired{text: "Open an issue to cut its complexity", signal: sig,
 			command: issue("Cut the complexity of "+s.f.Path, sig)}, notable(s.complexTop())
 	}},
@@ -197,13 +197,13 @@ func fixSignal(s signals) string {
 }
 
 func importersSignal(s signals) string {
-	return fmt.Sprintf("%d files import it (top %d%%)", len(s.f.Dependencies.ImportedBy), s.importersTop)
+	return fmt.Sprintf("%s (top %d%%)", importedBy(len(s.f.Dependencies.ImportedBy)), s.importersTop)
 }
 
 // singleOwner reports one author owning at least 80% of a file with enough
-// commits for the share to mean something.
+// commits for the share to mean something, in a repo with more than one author.
 func singleOwner(s signals) (string, bool) {
-	if len(s.owners) == 0 || s.owners[0].Share < singleOwnerShare || s.f.Factors.ChangeFrequency.CommitCount < singleOwnerMin {
+	if s.soleAuthor || len(s.owners) == 0 || s.owners[0].Share < singleOwnerShare || s.f.Factors.ChangeFrequency.CommitCount < singleOwnerMin {
 		return "", false
 	}
 	return fmt.Sprintf("%s wrote %.0f%% of it", s.owners[0].Handle, s.owners[0].Share*100), true

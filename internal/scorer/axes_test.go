@@ -242,3 +242,42 @@ func TestApplyQuadrants(t *testing.T) {
 		}
 	})
 }
+
+func TestFileAutonomy(t *testing.T) {
+	tests := []struct {
+		name      string
+		f         types.FileHeat
+		max       int
+		level     int
+		reasonHas string
+	}{
+		{"routine assessed", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantLow, Tier: types.TierLow}, 3, 3, "Routine"},
+		{"stabilize assessed", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantWatch, Tier: types.TierMedium}, 3, 2, "Stabilize"},
+		{"protect assessed", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantProtect, Tier: types.TierHigh}, 3, 1, "Protect"},
+		{"harden assessed", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical, Tier: types.TierCritical}, 3, 0, "Harden now"},
+		{"unassessed low tier capped at L1", types.FileHeat{Tier: types.TierLow}, 3, 1, "impact not assessed by an LLM"},
+		{"unassessed critical tier stays L0", types.FileHeat{Tier: types.TierCritical}, 3, 0, "Harden now"},
+		{"config cap", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantLow, Tier: types.TierLow}, 2, 2, "autonomy.max_level"},
+		{"config cap zero", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantWatch}, 0, 0, "autonomy.max_level"},
+		{"cap above level changes nothing", types.FileHeat{ImpactAssessed: true, Quadrant: types.QuadrantProtect}, 2, 1, "Protect"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FileAutonomy(&tt.f, tt.max)
+			if got.Level != tt.level || got.Label != types.AutonomyLabel(tt.level) || !strings.Contains(got.Reason, tt.reasonHas) {
+				t.Errorf("FileAutonomy = %+v, want L%d with %q in the reason", got, tt.level, tt.reasonHas)
+			}
+		})
+	}
+}
+
+func TestApplyAutonomy(t *testing.T) {
+	files := map[string]*types.FileHeat{
+		"a.go": {ImpactAssessed: true, Quadrant: types.QuadrantLow},
+		"b.go": {Tier: types.TierLow},
+	}
+	ApplyAutonomy(files, 3)
+	if files["a.go"].Autonomy == nil || files["a.go"].Autonomy.Level != 3 || files["b.go"].Autonomy.Level != 1 {
+		t.Errorf("autonomy = %+v, %+v", files["a.go"].Autonomy, files["b.go"].Autonomy)
+	}
+}

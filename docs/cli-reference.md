@@ -273,8 +273,26 @@ Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axe
 | `factors.test_coverage.has_test_file` | `true` or `false` when a test sits next to the file by its language's convention; omitted for languages without one |
 | `component` | The crate, package or module the file belongs to |
 | `units` | Runtime units that link the file (see `list units`); omitted when none does |
+| `autonomy` | How far AI agents may act on the file: `{level, label, reason}`, see [Agent autonomy](#agent-autonomy) |
 
 The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (lowest impact counted as impactful: the top 20% of assessed non-test files, never below `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
+
+## highstakes list tasks
+
+List backlog items agents may take on, each as a self-contained task: backlog items on files at or above an [autonomy level](#agent-autonomy). Sorted by level (highest first), then path.
+
+```sh
+highstakes list tasks [--level 2] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--level` | `2` | Lowest autonomy level to include, `0`-`3`. The default covers what agents may do unattended (L3) or with one approval (L2) |
+| `--json` | `false` | Output as JSON |
+
+Text output per task: `L<level> <label>  <action> (<file>)`, then `why:` (the signal), `done when:` (an acceptance hint such as "tests pass and cyclomatic complexity drops below 40" or "CODEOWNERS covers <file>") and the command, if any. JSON: `{"tasks": [...], "count": N, "min_level": N, "max_level": N}`, each task with `title`, `file`, `action_id`, `signal`, `command`, `acceptance`, `level` and `level_label`. The `assess-impact` item is left out: one `analyze` run with an LLM covers every file. Without an LLM every file is at L1 or below, so the default level lists nothing; the output says to try `--level 1`.
+
+**Exit code 2** for a `--level` outside 0-3 or an invalid config. **Exit code 4** if there is no heatmap.
 
 ## highstakes list units
 
@@ -316,11 +334,11 @@ highstakes pr check [flags]
 
 Uses `git diff --no-renames --numstat` to identify changed files (a rename is its old path deleted plus its new path added), then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
 
-A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a Harden now file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW, except dependency manifests and lock files (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...), which inherit heat and count as config/infra changes in change risk.
+A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a Harden now file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Non-code files are exempt and stay LOW: docs (`.md`, `.mdx`, `.rst`, `.txt`), images and binaries (`.png`, `.svg`, `.pdf`, fonts, archives, `.wasm`, ...), `.golden` files and anything under `testdata/`, lock files (`go.sum`, `*.lock`, `package-lock.json`, ...), dependency manifests (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...) and tool config dotfiles at the repo root (`.golangci.yml`, `.impeccable/`; `.github/`, `.gitlab/` and `.circleci/` stay scored). Dependency manifests and lock files still count as config/infra changes in change risk.
 
 ### Verdict and checklist
 
-The verdict is the posture of the most severe changed file: `Harden now`, `Protect`, `Stabilize` or `Routine` (it follows the PR tier, so `--fail-on critical` blocks exactly the Harden now verdict). Text output leads with it, then **Do before merge**: the before-merge actions of every changed file, deduplicated (identical items list every file they apply to and are done only when done for all), then each file with both scores, the backlog and the gate decision. Routine files add nothing to the checklist.
+The verdict is the posture of the most severe changed file: `Harden now`, `Protect`, `Stabilize` or `Routine` (it follows the PR tier, so `--fail-on critical` blocks exactly the Harden now verdict). Text output leads with it and the auto-merge line (see [Agent autonomy](#agent-autonomy)), then **Do before merge**: the before-merge actions of the Harden now and Protect files, deduplicated (identical items list every file they apply to and are done only when done for all), then **Worth doing (does not block)**: the before-merge actions of the other files (Stabilize, or unassessed files whose estimate is below Protect), such as refactoring the touched function or regression tests, then each file with both scores, the backlog and the gate decision. Routine files add nothing. Second-reviewer and spread-ownership items only fire in repos with more than one author.
 
 `pr check` ticks items the PR already satisfies:
 
@@ -332,9 +350,22 @@ The verdict is the posture of the most severe changed file: `Harden now`, `Prote
 
 Harden now files get one change-dependent item, `smaller-pr` ("Ask for a smaller PR"), when the diff changes more than 500 lines or touches non-test files in 3 or more components. Whether exported symbols changed is not detected.
 
-`--format markdown` renders the PR comment: a `<!-- highstakes-triage -->` marker, the verdict heading (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize`, `✅ Routine`), one sentence naming the riskiest file(s), the checklist (`[x]` done, `[ ]` open), a **Warnings** list of circuit-breaker signals (unscored new files, large diff, low test ratio) when there are any, a table of at most five non-routine files (File, Will it break?, How bad?, Action), then one `N more files need action` row for any further non-routine files and one Routine row for the routine ones, and a folded **Why these actions?** block (covering every non-routine file) with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, backlog items with their commands and the gate decision. The whole comment stays under 60,000 characters (GitHub rejects comments over 65,536): on very large PRs the checklist, warnings, per-file reasons and backlog are cut where needed, each with an "omitted to fit GitHub's comment size limit" notice; run `highstakes pr check` for the full list.
+`--format markdown` renders the PR comment: a `<!-- highstakes-triage -->` marker, the verdict heading (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize`, `✅ Routine`), one sentence naming the riskiest file(s), one `AI may auto-merge: yes|no (<reason>)` line, the checklist of Harden now and Protect items (`[x]` done, `[ ]` open), a **Warnings** list of circuit-breaker signals (unscored new files, large diff, low test ratio) when there are any, a table of at most five non-routine files (File, Will it break?, How bad?, Action), then one `N more files need action` row for any further non-routine files and one Routine row for the routine ones, and a folded **Why these actions?** block (covering every non-routine file) with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items with their files and signals, backlog items with their commands and the gate decision. The whole comment stays under 60,000 characters (GitHub rejects comments over 65,536): on very large PRs the checklist, warnings, per-file reasons and backlog are cut where needed, each with an "omitted to fit GitHub's comment size limit" notice; run `highstakes pr check` for the full list.
 
-JSON adds `verdict`, `checklist` and `backlog` (actions with `id`, `text`, `scope`, `signal`, `done`, `files`, and `command` for backlog items), `likely_cutoff` and `impact_threshold`; each `files_changed[]` entry adds `likelihood`, `impact`, `impact_assessed`, `quadrant`, `quadrant_label`, and `actions` (its before-merge items with `done`).
+JSON adds `verdict`, `checklist` (Harden now and Protect items), `worth_doing` (the other before-merge items) and `backlog` (actions with `id`, `text`, `scope`, `signal`, `done`, `files`, and `command` for backlog items), `likely_cutoff` and `impact_threshold`; each `files_changed[]` entry adds `likelihood`, `impact`, `impact_assessed`, `quadrant`, `quadrant_label`, `actions` (its before-merge items with `done`) and `autonomy`. `autonomy_level` (lowest level over the touched files), `auto_merge_allowed` (true only at level 3) and `autonomy_reason` are always present for a non-empty diff.
+
+### Agent autonomy
+
+Every file gets a level saying how far AI agents may act on it without a human:
+
+| Level | Label | Posture | Agents may |
+|-------|-------|---------|------------|
+| 3 | `auto-merge` | Routine | fix, open a PR and merge once CI and AI review pass |
+| 2 | `auto-fix, human merges` | Stabilize | fix and open a PR; a human merges |
+| 1 | `propose only` | Protect | open draft PRs or suggestions; an owner merges |
+| 0 | `assist only` | Harden now | write tests and explanations; changes need a named senior owner |
+
+"How bad?" is AI-assessed and not yet validated by people, so the levels are conservative. A file whose impact is not LLM-assessed is capped at 1 (unknown impact allows no more than proposing), and `autonomy.max_level` in `.heatmap/config.yaml` (default 3) caps every file (see [configuration](configuration.md#agent-autonomy)). `analyze` stores the level per file (`autonomy` in the heatmap). In `pr check`, files missing from the heatmap follow the same rules: unscored new files use their inherited tier and are capped at 1, inert files (docs, images, testdata) are level 3, and dependency manifests, lock files and tool config dotfiles are level 1. The PR's level is the lowest over its files; the comment says, for example, `AI may auto-merge: no (touches Protect files)`. `--fail-on` is unaffected; a workflow can read `auto_merge_allowed` from the JSON.
 
 An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low", "verdict": "Routine"}`) and still goes through the gate: `--fail-on low` blocks it, and `--shadow` logs its decision. When a gate applies, the JSON adds `decision`, `fail_on` and `shadow`.
 
@@ -387,7 +418,7 @@ JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_sc
 
 ## highstakes create policy
 
-Generate a machine-readable list of paths that AI reviewers must not auto-approve.
+Generate a machine-readable list of paths that AI reviewers must not auto-approve, or with `--agents` the agent autonomy policy.
 
 ```sh
 highstakes create policy [flags]
@@ -396,7 +427,10 @@ highstakes create policy [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--min-tier` | `high` | Lowest tier to include: `critical`, `high`, `medium`, `low` |
-| `--json` | `false` | Output JSON instead of YAML |
+| `--json` | `false` | Output JSON instead of YAML (same as `--format json`) |
+| `--format` | `yaml` | `yaml` or `json` |
+| `--out` | (stdout) | Write to this file instead, creating its directory |
+| `--agents` | `false` | Emit the agent autonomy policy instead (`--min-tier` is then ignored) |
 
 Files are selected the same way as `create codeowners`: tier at or above `--min-tier`, or assessed impact at or above that tier's threshold. Prints YAML by default. Fields: `version`, `generated_by`, `min_tier`, `description`, `paths` (globs: `dir/**` for fully hot directories, exact paths otherwise) and `files` (every hot file with `path`, `tier`, `heat_score` and the LLM `reason` when available). Feed `paths` to the path restrictions of Copilot code review, CodeRabbit path instructions, or your own approval bot.
 
@@ -404,7 +438,13 @@ Files are selected the same way as `create codeowners`: tier at or above `--min-
 highstakes create policy > .github/highstakes-policy.yaml
 ```
 
-**Exit code 2** for an invalid `--min-tier`. **Exit code 4** if there is no heatmap.
+`--agents` lists, for each [autonomy level](#agent-autonomy), the path globs at that level: a directory whose scored files all share a level becomes `dir/**` (the highest such directory, never the repo root), so globs never overlap. The YAML opens with a comment header explaining the levels. Fields: `version`, `generated_by`, `how_to_read` (how a bot applies it: match each touched file, the change may go as far as the lowest level, unmatched files count as `default_level`), `cap_rule`, `max_level` (from the config), `default_level` (1, or `max_level` if lower) and `levels` (each `level`, `label`, `meaning`, `paths`, highest level first). Regenerate after `analyze`.
+
+```sh
+highstakes create policy --agents --out .highstakes/autonomy.yaml
+```
+
+**Exit code 2** for an invalid `--min-tier`, `--format` or config. **Exit code 4** if there is no heatmap.
 
 ## highstakes create labels
 
@@ -480,7 +520,7 @@ highstakes dashboard [--output <path>] [--no-open]
 | `--output` | `.heatmap/dashboard.html` | Output file path |
 | `--no-open` | `false` | Don't open in browser |
 
-The dashboard opens on the action inbox: before-merge cards (one per Harden now or Protect file: verdict, path, every before-merge step with its signal, and owners; the top 10, plus files tied with the tenth, with **Show all** for the rest) and backlog cards (one per kind of fix across files, ordered by how many Harden now files it covers; open one to see its files and a **Copy** button for one snippet with every CODEOWNERS line or `gh issue create` command; when the clipboard is blocked the snippet is selected for copying by hand). Files without an LLM-assessed impact (`analyze --no-llm`, or no API key) take the posture of their estimated impact against the recorded cutoffs (`likely_cutoff`, `impact_threshold`), and their cards and backlog entries are marked "impact estimated (run with an LLM for an assessment)", with the same note in the inbox intro; LLM-assessed files rank before estimated ones. Heatmaps without recorded cutoffs show only assessed files. Behind tabs (arrow keys, Home and End move between them) are four investigation views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support the posture filter (one per tier), search, and a detail panel with the verdict, both questions with their repo cutoffs and the evidence note, the before-merge and backlog checklists, and the reasons and impact dimensions folded under **Why**. The page is static: it copies commands and never calls GitHub.
+The dashboard opens on the action inbox: before-merge cards (one per Harden now or Protect file: verdict, path, every before-merge step with its signal, and owners; the top 10, plus files tied with the tenth, with **Show all** for the rest) and backlog cards (one per kind of fix across files, ordered by how many Harden now files it covers; open one to see its files and a **Copy** button for one snippet with every CODEOWNERS line or `gh issue create` command; when the clipboard is blocked the snippet is selected for copying by hand). Files without an LLM-assessed impact (`analyze --no-llm`, or no API key) take the posture of their estimated impact against the recorded cutoffs (`likely_cutoff`, `impact_threshold`), and their cards and backlog entries are marked "impact estimated (run with an LLM for an assessment)", with the same note in the inbox intro; LLM-assessed files rank before estimated ones. Heatmaps without recorded cutoffs show only assessed files. Behind tabs (arrow keys, Home and End move between them) are four investigation views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support the posture filter (one per tier), the **Agents** filter (L3 to L0, the [autonomy level](#agent-autonomy) recorded by `analyze`; it also filters the inbox), search, and a detail panel with the verdict, both questions with their repo cutoffs and the evidence note, the agent autonomy level with its reason, the before-merge and backlog checklists, and the reasons and impact dimensions folded under **Why**. The page is static: it copies commands and never calls GitHub.
 
 The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. Clicking an arrow lists the file-level imports behind it (importer -> imported, with each file's impact; at most 200 per arrow). The layout is computed in the page (layered, with barycenter ordering to reduce crossings; layers wider than about 1500px wrap into extra rows), so the HTML stays self-contained. The `-`, `+`, **Fit** and **1:1** buttons, the mouse wheel and trackpad or touch pinch zoom; drag to pan. The view fits the screen when first opened.
 

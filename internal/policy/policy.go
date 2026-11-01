@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/zanetworker/highstakes/internal/ownership"
+	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -57,57 +58,20 @@ func IsHot(f *types.FileHeat, minTier types.Tier, th types.TierThresholds) bool 
 // entry when it has at least two scored files and all of them are hot. The
 // highest such directory wins; the repo root is never collapsed.
 func HotPaths(hm *types.Heatmap, minTier types.Tier, th types.TierThresholds) []Entry {
-	// For every ancestor dir: total scored files and hot files beneath it.
-	total, hot := map[string]int{}, map[string]int{}
-	var hotFiles []string
-	for p, f := range hm.Files {
-		isHot := IsHot(f, minTier, th)
-		if isHot {
-			hotFiles = append(hotFiles, p)
-		}
-		for d := path.Dir(p); d != "." && d != "/"; d = path.Dir(d) {
-			total[d]++
-			if isHot {
-				hot[d]++
+	groups := collapse(hm, func(f *types.FileHeat) bool { return IsHot(f, minTier, th) })
+	entries := make([]Entry, 0, len(groups))
+	for key, files := range groups {
+		e := Entry{Path: key, IsDir: strings.HasSuffix(key, "/"), Files: files}
+		for i, p := range files {
+			f := hm.Files[p]
+			if i == 0 || f.HeatScore > e.HeatScore {
+				e.HeatScore = f.HeatScore
+			}
+			if i == 0 || tierRank[f.Tier] > tierRank[e.Tier] {
+				e.Tier = f.Tier
 			}
 		}
-	}
-
-	collapsedDir := func(p string) string {
-		best := ""
-		for d := path.Dir(p); d != "." && d != "/"; d = path.Dir(d) {
-			if total[d] >= 2 && hot[d] == total[d] {
-				best = d // keep walking up: the highest fully hot dir wins
-			}
-		}
-		return best
-	}
-
-	byPath := map[string]*Entry{}
-	for _, p := range hotFiles {
-		f := hm.Files[p]
-		key, isDir := p, false
-		if d := collapsedDir(p); d != "" {
-			key, isDir = d+"/", true
-		}
-		e := byPath[key]
-		if e == nil {
-			e = &Entry{Path: key, IsDir: isDir, Tier: f.Tier, HeatScore: f.HeatScore}
-			byPath[key] = e
-		}
-		e.Files = append(e.Files, p)
-		if f.HeatScore > e.HeatScore {
-			e.HeatScore = f.HeatScore
-		}
-		if tierRank[f.Tier] > tierRank[e.Tier] {
-			e.Tier = f.Tier
-		}
-	}
-
-	entries := make([]Entry, 0, len(byPath))
-	for _, e := range byPath {
-		sort.Strings(e.Files)
-		entries = append(entries, *e)
+		entries = append(entries, e)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].HeatScore != entries[j].HeatScore {
@@ -116,6 +80,41 @@ func HotPaths(hm *types.Heatmap, minTier types.Tier, th types.TierThresholds) []
 		return entries[i].Path < entries[j].Path
 	})
 	return entries
+}
+
+// collapse groups the files for which in is true under one key each: the
+// file's path, or "dir/" for the highest directory (never the repo root)
+// with at least two scored files beneath it, all of them in.
+func collapse(hm *types.Heatmap, in func(*types.FileHeat) bool) map[string][]string {
+	// For every ancestor dir: total scored files and member files beneath it.
+	total, members := map[string]int{}, map[string]int{}
+	var memberFiles []string
+	for p, f := range hm.Files {
+		isMember := in(f)
+		if isMember {
+			memberFiles = append(memberFiles, p)
+		}
+		for d := path.Dir(p); d != "." && d != "/"; d = path.Dir(d) {
+			total[d]++
+			if isMember {
+				members[d]++
+			}
+		}
+	}
+	groups := map[string][]string{}
+	for _, p := range memberFiles {
+		key := p
+		for d := path.Dir(p); d != "." && d != "/"; d = path.Dir(d) {
+			if total[d] >= 2 && members[d] == total[d] {
+				key = d + "/" // keep walking up: the highest fully member dir wins
+			}
+		}
+		groups[key] = append(groups[key], p)
+	}
+	for _, files := range groups {
+		sort.Strings(files)
+	}
+	return groups
 }
 
 // CodeownersRow is one generated CODEOWNERS rule.
@@ -264,5 +263,55 @@ func Build(hm *types.Heatmap, entries []Entry, minTier types.Tier) Policy {
 		}
 		return p.Files[i].Path < p.Files[j].Path
 	})
+	return p
+}
+
+// AgentPolicy tells AI agents how far they may act on each path
+// (`create policy --agents`).
+type AgentPolicy struct {
+	Version      int          `json:"version" yaml:"version"`
+	GeneratedBy  string       `json:"generated_by" yaml:"generated_by"`
+	HowToRead    string       `json:"how_to_read" yaml:"how_to_read"`
+	CapRule      string       `json:"cap_rule" yaml:"cap_rule"`
+	MaxLevel     int          `json:"max_level" yaml:"max_level"`
+	DefaultLevel int          `json:"default_level" yaml:"default_level"` // paths no glob matches
+	Levels       []AgentLevel `json:"levels" yaml:"levels"`
+}
+
+// AgentLevel is one autonomy level and the path globs at it.
+type AgentLevel struct {
+	types.AutonomyLevel `yaml:",inline"`
+	Paths               []string `json:"paths" yaml:"paths"` // "dir/**" or exact files
+}
+
+// Agents builds the autonomy policy: every scored file at its level
+// (scorer.FileAutonomy with maxLevel), directories collapsed to "dir/**"
+// when all their scored files share a level, so globs never overlap.
+func Agents(hm *types.Heatmap, maxLevel int) AgentPolicy {
+	p := AgentPolicy{
+		Version:     1,
+		GeneratedBy: "highstakes",
+		HowToRead: "Match each file a change touches against the globs (dir/** covers everything under dir; globs do not overlap). " +
+			"The change may go as far as the lowest level among its files; a file no glob matches counts as default_level. " +
+			"Regenerate after analyze: levels follow the heatmap.",
+		CapRule: "Levels follow the file's posture: Routine 3, Stabilize 2, Protect 1, Harden now 0. " +
+			"How bad? is AI-assessed and not human-validated, so levels are conservative: a file whose impact is not LLM-assessed is capped at 1, " +
+			"and autonomy.max_level in .heatmap/config.yaml (default 3) caps every file.",
+		MaxLevel:     maxLevel,
+		DefaultLevel: min(1, maxLevel),
+	}
+	for _, l := range types.AutonomyLevels {
+		level := l.Level
+		groups := collapse(hm, func(f *types.FileHeat) bool { return scorer.FileAutonomy(f, maxLevel).Level == level })
+		paths := make([]string, 0, len(groups))
+		for key := range groups {
+			if strings.HasSuffix(key, "/") {
+				key += "**"
+			}
+			paths = append(paths, key)
+		}
+		sort.Strings(paths)
+		p.Levels = append(p.Levels, AgentLevel{AutonomyLevel: l, Paths: paths})
+	}
 	return p
 }

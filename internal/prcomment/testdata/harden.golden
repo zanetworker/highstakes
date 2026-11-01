@@ -3,6 +3,8 @@
 
 `net/proxy.rs` is likely to break and costly if broken: Core egress proxy that enforces network policy.
 
+AI may auto-merge: no (touches Harden now files)
+
 ### Do before merge
 
 - [ ] Get sign-off from a senior owner (@ana, @bo) (`net/proxy.rs`)
@@ -36,6 +38,9 @@ Scores are a relative signal within this repo, not a probability. Will it break?
 - New file: not scored yet, so it takes the tier of its directory
 
 **Suggested reviewers:** @ana, @bo
+
+**Worth doing (does not block)**
+- Refactor the function you touch: cyclomatic 40 across 12 functions (`ui/busy.go`): complexity in the top 5% of this repo
 
 **Backlog** (the file over time, not this PR)
 - Split it into smaller files (`net/proxy.rs`): 479 functions in one file (top 1%)
