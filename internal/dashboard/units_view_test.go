@@ -79,8 +79,8 @@ func TestBuildUnitView(t *testing.T) {
 		})
 	}
 	wantEdges := []archEdge{
-		{From: "u:sbx", To: "c:crates/core", Count: 1, Links: [][2]string{{"crates/sbx/src/main.rs", "crates/core/src/lib.rs"}}, LinksTotal: 1},
-		{From: "u:sup", To: "c:crates/core", Count: 1, Links: [][2]string{{"crates/net/src/proxy.rs", "crates/core/src/policy.rs"}}, LinksTotal: 1},
+		{From: "u:sbx", To: "c:crates/core", Count: 1, Links: [][2]string{{"crates/sbx/src/main.rs", "crates/core/src/lib.rs"}}, LinksTotal: 1, Key: true, KeyAll: true},
+		{From: "u:sup", To: "c:crates/core", Count: 1, Links: [][2]string{{"crates/net/src/proxy.rs", "crates/core/src/policy.rs"}}, LinksTotal: 1, Key: true, KeyAll: true},
 	}
 	if !reflect.DeepEqual(view.Edges, wantEdges) {
 		t.Errorf("edges = %+v\nwant %+v", view.Edges, wantEdges)

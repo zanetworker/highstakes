@@ -25,6 +25,8 @@ func TestIsSupporting(t *testing.T) {
 		{"tests", "tests", nil, true},
 		{"e2e", "e2e", nil, true},
 		{"benchmarks", "benchmarks", nil, true},
+		{"bench", "bench", nil, true},
+		{"nested testdata", "internal/llm/testdata", nil, true},
 		{"nested fixtures", "crates/core/fixtures", nil, true},
 		{"vendor", "vendor", nil, true},
 		{"third_party", "third_party", nil, true},

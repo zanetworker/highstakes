@@ -71,10 +71,10 @@ func TestBuildArchitecture_Nodes(t *testing.T) {
 func TestBuildArchitecture_Edges(t *testing.T) {
 	arch := buildArchitecture(archHeatmap())
 	want := []archEdge{
-		{From: "api", To: "types", Count: 2, Links: [][2]string{{"api/a.go", "types/t.go"}, {"api/b.go", "types/t.go"}}, LinksTotal: 2},
+		{From: "api", To: "types", Count: 2, Links: [][2]string{{"api/a.go", "types/t.go"}, {"api/b.go", "types/t.go"}}, LinksTotal: 2, Key: true, KeyAll: true},
 		// one importing file, two file links: the arrow's panel lists both
-		{From: "cmd", To: "api", Count: 1, Links: [][2]string{{"cmd/main.go", "api/a.go"}, {"cmd/main.go", "api/b.go"}}, LinksTotal: 2},
-		{From: "cmd", To: "types", Count: 1, Links: [][2]string{{"cmd/main.go", "types/t.go"}}, LinksTotal: 1},
+		{From: "cmd", To: "api", Count: 1, Links: [][2]string{{"cmd/main.go", "api/a.go"}, {"cmd/main.go", "api/b.go"}}, LinksTotal: 2, Key: true, KeyAll: true},
+		{From: "cmd", To: "types", Count: 1, Links: [][2]string{{"cmd/main.go", "types/t.go"}}, LinksTotal: 1, Key: true, KeyAll: true},
 	}
 	if !reflect.DeepEqual(arch.Edges, want) {
 		t.Errorf("edges = %+v, want %+v", arch.Edges, want)
@@ -209,6 +209,7 @@ func TestGenerate_EmbedsQuadrantView(t *testing.T) {
 		`setMode('quadrant',this)`, `id="quadrant"`, `function renderQuadrant`,
 		`"likely_cutoff":55`, `"impact_threshold":61`,
 		`"likelihood":60,"impact":90,"impact_assessed":true,"quadrant":"fragile-critical"`,
+		`"labels":["api/a.go"`, `"default_group":"package"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("dashboard missing %q", want)

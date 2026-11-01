@@ -116,7 +116,9 @@ func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath str
 		"languages":        hm.Metadata.Languages,
 		"likely_cutoff":    hm.Metadata.LikelyCutoff,
 		"impact_threshold": hm.Metadata.ImpactThreshold,
+		"default_group":    defaultGroup(unitView),
 	})
+	quadJSON, _ := json.Marshal(buildQuadrant(files, hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold))
 
 	archJSON, _ := json.Marshal(buildArchitecture(hm))
 	unitsJSON, _ := json.Marshal(map[string]interface{}{
@@ -128,6 +130,7 @@ func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath str
 	html = strings.ReplaceAll(html, "/*__UNITS__*/{}", string(unitsJSON))
 	html = strings.ReplaceAll(html, "/*__STATS__*/{}", string(statsJSON))
 	html = strings.ReplaceAll(html, "/*__INBOX__*/{}", string(inboxJSON))
+	html = strings.ReplaceAll(html, "/*__QUAD__*/{}", string(quadJSON))
 	evidenceJSON, _ := json.Marshal(types.AxisEvidence)
 	html = strings.ReplaceAll(html, "/*__EVIDENCE__*/''", string(evidenceJSON))
 
@@ -144,18 +147,22 @@ const tmpl = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HighStakes Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;900&family=Red+Hat+Text:wght@400;500;600;700&family=Red+Hat+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;600&family=Red+Hat+Text:wght@400;500;600&family=Red+Hat+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0b0b0c;--panel:#131315;--raise:#1b1b1e;--border:rgba(255,255,255,.08);--text:#ececec;--muted:#a8a8ad;--dim:#8c8c92;
---accent:#ee0000;--critical:#f2555a;--high:#e0a43c;--medium:#6aa6e0;--low:#5fae6b;
---font-d:'Red Hat Display',sans-serif;--font-t:'Red Hat Text',sans-serif;--font-m:'Red Hat Mono',monospace;--ease:cubic-bezier(.2,0,0,1)}
-body{background:var(--bg);color:var(--text);font-family:var(--font-t);font-variant-numeric:tabular-nums}
+:root{color-scheme:dark;
+--bg:#0A0A0A;--panel:#151515;--raise:#1F1F1F;--overlay:#292929;--border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.11);
+--text:#F2F2F2;--muted:#C7C7C7;--dim:#A3A3A3;
+--accent:#EE0000;--risk:#FF6B6B;--select:#B6A6E9;--focus:#876FD4;
+--critical:#FF6B6B;--high:#E8B04A;--medium:#B6A6E9;--low:#A3A3A3;
+--font-d:'Red Hat Display','Red Hat Text',system-ui,sans-serif;--font-t:'Red Hat Text',system-ui,sans-serif;--font-m:'Red Hat Mono',ui-monospace,monospace;--ease:cubic-bezier(.2,0,0,1)}
+body{background:var(--bg);color:var(--text);font-family:var(--font-t);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh}
 button{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--medium);outline-offset:2px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.mk{flex-shrink:0;display:inline-block;vertical-align:middle}
 
-header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:16px}
-header h1{font:600 24px var(--font-d);color:#fff}
+header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+header h1{font:600 24px var(--font-d);color:var(--text)}
 header .meta{font:12px var(--font-m);color:var(--muted)}
 
 .inbox{flex:1;overflow-y:auto;padding:20px 24px 32px;display:none}
@@ -163,20 +170,20 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .inbox-intro{font:14px/1.5 var(--font-t);color:var(--muted);max-width:36em;margin-bottom:20px}
 .inbox-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:24px;align-items:start}
 .inbox-cols>section{min-width:0}
-.inbox h2{font:500 18px var(--font-d);color:#fff;display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.inbox h2{font:500 18px var(--font-d);color:var(--text);display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
 .inbox h2 .count{font:12px var(--font-m);color:var(--dim)}
 .inbox .sub{font:13px var(--font-t);color:var(--muted);margin-bottom:12px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:8px;display:grid;grid-template-columns:12px minmax(0,1fr) auto;column-gap:8px;row-gap:4px}
 .card:hover{background:var(--raise)}
-.card .dot{width:8px;height:8px;border-radius:50%;margin-top:6px}
-.card .do{font:500 14px/1.4 var(--font-t);color:#fff;grid-column:2}
+.card .dot{display:flex;margin-top:4px}
+.card .do{font:500 14px/1.4 var(--font-t);color:var(--text);grid-column:2}
 .card .why{font:13px/1.4 var(--font-t);color:var(--muted);grid-column:2}
 .card .who{font:12px var(--font-m);color:var(--dim);grid-column:2;display:flex;flex-wrap:wrap;gap:4px 12px}
 .card .file{background:none;border:0;padding:0;font:12px var(--font-m);color:var(--text);cursor:pointer;text-align:left;overflow-wrap:anywhere}
-.card .file:hover{color:#fff;text-decoration:underline}
+.card .file:hover{color:var(--text);text-decoration:underline}
 .card .side{grid-row:1/span 3;grid-column:3;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .card .posture{font:12px var(--font-t)}
-.card .file.title{grid-column:2;font:500 14px/1.4 var(--font-m);color:#fff}
+.card .file.title{grid-column:2;font:500 14px/1.4 var(--font-m);color:var(--text)}
 .card ul.steps{grid-column:2;list-style:none;margin-top:4px}
 .card ul.steps li,.grp ul.gfiles li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px;margin-bottom:4px;font:13px/1.45 var(--font-t);color:var(--text)}
 .card ul.steps .box{font:12px var(--font-m);color:var(--dim);padding-top:1px}
@@ -198,31 +205,30 @@ details.grp[open]{background:var(--raise)}
 .copy{border:1px solid var(--border);background:var(--raise);border-radius:4px;padding:4px 8px;font:12px var(--font-t);color:var(--text);cursor:pointer;flex-shrink:0}
 .copy:hover{border-color:var(--muted)}
 .more{background:none;border:1px solid var(--border);border-radius:4px;padding:4px 12px;font:13px var(--font-t);color:var(--muted);cursor:pointer;margin-top:4px}
-.more:hover{color:#fff;border-color:var(--muted)}
+.more:hover{color:var(--text);border-color:var(--muted)}
 
 .meter{position:relative;height:4px;background:var(--raise);border-radius:2px;margin:4px 0 0}
 .meter .fill{position:absolute;left:0;top:0;bottom:0;border-radius:2px}
 .meter .tick{position:absolute;top:-3px;width:2px;height:10px;background:var(--text);border-radius:1px}
-.main{display:flex;height:calc(100vh - 106px)}
+.main{display:flex;flex:1;min-height:0}
 
 .treemap-wrap{flex:1;padding:8px;position:relative;overflow:hidden}
 .treemap{width:100%;height:100%;position:relative}
 .tm-node{position:absolute;border:1px solid rgba(0,0,0,.6);cursor:pointer;overflow:hidden;transition:opacity .15s var(--ease);display:flex;flex-direction:column;justify-content:flex-end;padding:3px 5px}
-.tm-node:hover{opacity:.85;z-index:10;border-color:#fff}
+.tm-node:hover{opacity:.85;z-index:10;border-color:var(--text)}
 .tm-node.dimmed{opacity:.2}
-.tm-label{font:500 12px var(--font-m);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tm-score{font:600 14px var(--font-d);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.tm-label{font:500 12px var(--font-m);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .breadcrumb{position:absolute;top:10px;left:12px;z-index:20;display:flex;gap:4px;align-items:center}
-.breadcrumb span{font:500 12px var(--font-m);color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:3px;background:rgba(0,0,0,.7)}
-.breadcrumb span:hover{color:#fff}
-.breadcrumb span.current{color:#fff}
+.breadcrumb span{font:500 12px var(--font-m);color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:4px;background:var(--overlay)}
+.breadcrumb span:hover{color:var(--text)}
+.breadcrumb span.current{color:var(--text)}
 
 .detail{width:380px;border-left:1px solid var(--border);padding:20px;overflow-y:auto;background:var(--panel)}
-.detail h3{font:500 14px var(--font-m);color:#fff;word-break:break-all;margin-bottom:8px}
+.detail h3{font:500 14px var(--font-m);color:var(--text);word-break:break-all;margin-bottom:8px}
 .detail .verdict{font:500 18px var(--font-d);margin-bottom:12px}
 .detail .q{margin:12px 0}
 .detail .q .ql{display:flex;justify-content:space-between;align-items:baseline;font:13px var(--font-t)}
-.detail .q .qv{font:500 14px var(--font-m);color:#fff}
+.detail .q .qv{font:500 14px var(--font-m);color:var(--text)}
 .detail .q .qc{font:12px var(--font-m);color:var(--dim)}
 .detail .note{font:12px/1.5 var(--font-t);color:var(--dim);margin-top:8px}
 .detail ul.check{list-style:none}
@@ -232,12 +238,12 @@ details.grp[open]{background:var(--raise)}
 .detail ul.check .cmd{grid-column:2}
 .detail details{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
 .detail summary{cursor:pointer;font:500 13px var(--font-d);color:var(--muted)}
-.detail summary:hover{color:#fff}
+.detail summary:hover{color:var(--text)}
 .detail .tier-badge{display:inline-block;padding:2px 8px;border-radius:4px;font:500 12px var(--font-t);margin:4px 0}
 .detail .sec{margin-top:16px}
-.detail .sec-title{font:500 13px var(--font-d);color:#fff;margin-bottom:8px}
+.detail .sec-title{font:500 13px var(--font-d);color:var(--text);margin-bottom:8px}
 .detail .reason{font:13px/1.5 var(--font-t);margin-bottom:4px}
-.detail .crit{font:500 12px var(--font-t);color:var(--accent)}
+.detail .crit{font:500 12px var(--font-t);color:var(--risk)}
 .bar-r{display:flex;align-items:center;gap:6px;margin:3px 0}
 .bar-r .bl{font:12px var(--font-t);color:var(--muted);width:80px;text-align:right}
 .bar-r .b{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
@@ -245,9 +251,6 @@ details.grp[open]{background:var(--raise)}
 .bar-r .bv{font:12px var(--font-m);width:24px}
 .rev{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px;font:12px var(--font-t);margin-top:6px}
 .rev div{margin:1px 0}
-.atag{display:inline-block;padding:2px 6px;border-radius:3px;font:600 10px var(--font-d);margin-top:6px}
-.atag.block{background:#5F0000;color:var(--critical)}
-.atag.safe{background:#0A3D0A;color:var(--low)}
 .empty{padding:32px;text-align:center;color:var(--dim);font:14px var(--font-t)}
 
 .explorer{flex:1;overflow-y:auto;padding:4px 0;display:none}
@@ -257,84 +260,107 @@ details.grp[open]{background:var(--raise)}
 .ex-row{display:flex;align-items:center;padding:4px 8px;cursor:pointer;gap:4px;min-height:28px}
 .ex-row:hover{background:var(--panel)}
 .ex-row.selected{background:var(--raise)}
-.ex-dir{font:600 12px var(--font-d);color:var(--muted)}
+.ex-dir{font:500 13px var(--font-d);color:var(--muted)}
 .ex-dir .arrow{display:inline-block;width:12px;font-size:12px;color:var(--dim)}
-.ex-dir .dname{color:#fff}
+.ex-dir .dname{color:var(--text)}
 .ex-dir .dheat{margin-left:auto;font:12px var(--font-t)}
 .ex-file{font:12px var(--font-m)}
 .ex-file .fname{color:var(--text)}
 .ex-file .fheat{margin-left:auto;font:12px var(--font-t);min-width:80px;text-align:right}
-.ex-file .ftier{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .ex-file .freason{color:var(--dim);font:12px var(--font-t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px;margin-left:8px}
 .ex-heat-bar{width:60px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0;margin-left:8px}
 .ex-heat-bar .fill{height:100%;border-radius:2px}
-.view-toggle{display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:8px}
-.view-toggle button{padding:4px 12px;border:none;border-radius:4px;background:none;color:var(--muted);cursor:pointer;font:13px var(--font-t);white-space:nowrap}
-.view-toggle button:hover{color:#fff}
-.view-toggle button.on{background:var(--raise);color:#fff;box-shadow:inset 0 0 0 1px var(--border)}
+.view-toggle{display:flex;gap:4px;align-self:stretch}
+.view-toggle button{position:relative;padding:0 12px;height:40px;border:none;background:none;color:var(--dim);cursor:pointer;font:500 13px var(--font-t);white-space:nowrap;transition:color .12s var(--ease)}
+.view-toggle button:hover{color:var(--text)}
+.view-toggle button.on{color:var(--text)}
+.view-toggle button.on::after{content:"";position:absolute;left:12px;right:12px;bottom:-9px;height:2px;background:var(--accent);border-radius:2px}
 .arch{flex:1;overflow:hidden;display:none;flex-direction:column;position:relative;min-width:0}
-.arch-hint{padding:8px 12px;font:12px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
-.arch-bar{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.arch-hint{padding:8px 16px;font:13px/1.5 var(--font-t);color:var(--dim);background:var(--bg);border-bottom:1px solid var(--border);z-index:2;min-width:0;overflow-wrap:anywhere}
+.arch-hint p{max-width:120ch;margin-top:4px}
+.how summary{cursor:pointer;width:max-content;color:var(--dim)}
+.how summary:hover{color:var(--text)}
+.how[open] summary{color:var(--muted)}
+.arch-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
 .arch-bar label{font:12px var(--font-t);color:var(--muted)}
 .arch-bar .fbtn:disabled{opacity:.4;cursor:not-allowed}
 .arch-zoom{font:12px var(--font-m);color:var(--dim);margin-left:4px}
+.arch-bar .sep{width:8px}
 .arch-vp{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab}
 .arch-vp.panning{cursor:grabbing}
-.arch .band{fill:#ffffff08;stroke:var(--border);stroke-dasharray:4 4}
+.arch .band{fill:rgba(255,255,255,.02);stroke:var(--border-strong);stroke-dasharray:4 4}
 .arch .band-label{font:500 12px var(--font-d);fill:var(--muted)}
 .arch svg{display:block}
 .arch .an{cursor:pointer}
-.arch .an rect{stroke-width:1.5}
-.arch .an:hover rect{stroke-width:2.5}
-.arch .an.sel rect{stroke:var(--text);stroke-width:2.5}
-.arch .an.dim,.arch .ae.dim{opacity:.15}
-.arch .an-dir{font:600 12px var(--font-m);fill:var(--text)}
-.arch .an-hot{font:12px var(--font-t);fill:var(--muted)}
-.arch .an-heat{font:600 13px var(--font-d)}
-.arch .ae path{fill:none;stroke:var(--dim)}
-.arch .ae.hl path{stroke:var(--text)}
-.arch .ae text{font:12px var(--font-m);fill:var(--muted)}
-.arch .ae.hl text{fill:var(--text)}
+.arch .an rect.box{stroke-width:1;fill:var(--panel)}
+.arch .an:hover rect.box{fill:var(--raise)}
+.arch .an.sel rect.box{stroke:var(--select);stroke-width:2;fill:var(--raise)}
+.arch .an:focus{outline:none}
+.arch .an:focus-visible rect.box{stroke:var(--focus);stroke-width:2}
+.arch .an.dim,.arch .ae.dim{opacity:.18}
+.arch .an-dir{font:500 13px var(--font-m);fill:var(--text)}
+.arch .an-hot{font:12px var(--font-t);fill:var(--dim)}
+.arch .an-heat{font:500 13px var(--font-m)}
+.arch .ae path{fill:none;stroke:var(--dim);stroke-opacity:.45}
+.arch .ae.minor{display:none}
+.arch .ae.hl{display:inline}
+.arch .ae.hl path{stroke:var(--text);stroke-opacity:.9}
+.arch .ae.hl path:not(.ae-hit){marker-end:url(#ahl)}
+.arch .ae text{font:12px var(--font-m);fill:var(--dim);display:none}
+.arch .ae.hl text{fill:var(--text);display:inline}
 .arch .ae{cursor:pointer}
-.arch .ae:hover path{stroke:var(--muted)}
-.arch .ae.esel path{stroke:var(--accent)}
+.arch .ae:hover path{stroke-opacity:.9}
+.arch .ae.esel path{stroke:var(--select);stroke-opacity:1}
 .arch .ae path.ae-hit{stroke:transparent;stroke-width:12}
 .arch .ae.declared{cursor:default}
-.arch .ae.declared path{stroke:var(--accent);stroke-dasharray:6 4}
-.arch .ae.declared text{fill:var(--accent)}
+.arch .ae.declared path{stroke:var(--text);stroke-opacity:.8;stroke-dasharray:6 4}
+.arch .ae.declared text{fill:var(--muted);display:inline}
 .elink{font:12px var(--font-m);padding:4px 0;border-bottom:1px solid var(--border);word-break:break-all}
 .elink-file{cursor:pointer;color:var(--text)}
-.elink-file:hover{color:#fff}
-.elink-file .ftier{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
+.elink-file:hover{color:var(--text)}
 .earrow{color:var(--dim);margin:0 6px}
 .fmeta{margin-left:auto;font:12px var(--font-m);color:var(--muted);white-space:nowrap;padding-left:8px}
 .arch .arrow{fill:var(--dim)}
-.arch .an-frag{fill:none;stroke:var(--medium);stroke-width:1.5;stroke-dasharray:4 3}
-.arch .an-likely{font:500 12px var(--font-m);fill:var(--medium)}
-.arch-legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:4px}
-.arch-legend span{display:inline-flex;align-items:center;gap:5px}
-.arch-legend i{display:inline-block;width:12px;height:10px;border-radius:2px;border:1.5px solid}
-.arch-legend i.frag{border:1.5px dashed var(--medium);background:none}
-.quad{flex:1;display:none;position:relative;overflow:hidden}
+.arch .ae.hl .arrow,.arch .arrow.hl{fill:var(--text)}
+.arch .an-frag{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:4 3}
+.arch .an-likely{font:12px var(--font-m);fill:var(--muted)}
+.arch-legend{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:4px}
+.arch-legend span{display:inline-flex;align-items:center;gap:6px}
+.arch-legend i.frag{display:inline-block;width:14px;height:10px;border-radius:2px;border:1px dashed var(--muted)}
+.arch-legend i.edge{display:inline-block;width:16px;height:0;border-top:1px solid var(--dim)}
+.quad{flex:1;display:none;flex-direction:column;position:relative;overflow:hidden;min-width:0}
+.quad-plot{flex:1;position:relative;min-height:320px}
 .quad svg{display:block}
-.quad .qd{cursor:pointer;stroke:#000;stroke-width:.5}
-.quad .qd:hover,.quad .qd.sel{stroke:#fff;stroke-width:2}
-.quad .qline{stroke:var(--muted);stroke-dasharray:5 4}
-.quad .qaxis{stroke:var(--border)}
+.quad .qd{cursor:pointer;stroke:var(--bg);stroke-width:1}
+.quad .qd.est{stroke:var(--c);stroke-width:1.5}
+.quad .qd:hover,.quad .qd.sel{stroke:var(--text);stroke-width:2}
+.quad .qline{stroke:var(--dim);stroke-dasharray:5 4}
+.quad .qaxis{stroke:var(--border-strong)}
+.quad .qgrid{stroke:var(--border)}
 .quad .qtick{font:12px var(--font-m);fill:var(--dim)}
 .quad .qtitle{font:500 13px var(--font-d)}
-.quad .qguide{font:12px var(--font-t);fill:var(--muted);paint-order:stroke;stroke:#000;stroke-width:3px}
-.quad .qlab{font:500 12px var(--font-d);fill:var(--muted)}
+.quad .qguide{font:12px var(--font-t);fill:var(--dim);paint-order:stroke;stroke:var(--bg);stroke-width:3px}
+.quad .qlab{font:500 12px var(--font-d);fill:var(--dim)}
+.quad .qname{font:500 12px var(--font-m);fill:var(--text);paint-order:stroke;stroke:var(--bg);stroke-width:4px;cursor:pointer}
+.quad .qname:focus{outline:none}
+.quad .qname:focus-visible{fill:var(--select)}
+.qtip{position:absolute;z-index:5;pointer-events:none;max-width:360px;background:var(--overlay);border:1px solid var(--border-strong);border-radius:6px;padding:8px 12px;font:12px/1.5 var(--font-t);color:var(--muted);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.qtip b{display:block;font:500 12px var(--font-m);color:var(--text);overflow-wrap:anywhere}
+.qtip[hidden]{display:none}
 .flist .ex-row{padding:4px 0}
+.flist .fname{flex:1;min-width:0;overflow-wrap:anywhere}
 .controls{display:flex;flex-wrap:wrap;gap:8px;padding:8px 24px;align-items:center;border-bottom:1px solid var(--border)}
+.controls .grp{display:inline-flex;gap:8px;align-items:center}
+.controls .grp[hidden]{display:none}
 .controls label{font:12px var(--font-t);color:var(--muted)}
 .fbtn{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--panel);color:var(--muted);cursor:pointer;font:12px var(--font-t)}
-.fbtn.on{border-color:rgba(255,255,255,.24);color:#fff;background:var(--raise)}
-.fbtn:hover{border-color:var(--muted)}
+.fbtn.on{border-color:var(--border-strong);color:var(--text);background:var(--overlay)}
+.fbtn:hover{border-color:var(--dim);color:var(--text)}
+.fbtn:disabled{opacity:.45;cursor:not-allowed}
 input[type=text]{background:var(--panel);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font:12px var(--font-m);width:180px}
-input:focus-visible{outline:2px solid var(--medium);outline-offset:0}
+input:focus-visible{outline:2px solid var(--focus);outline-offset:0}
 input::placeholder{color:var(--dim)}
-@media (max-width:760px){header{flex-wrap:wrap;padding:12px 16px}.view-toggle{max-width:100%;overflow-x:auto}.inbox,.detail{min-width:0}.main{flex-direction:column;height:auto}.detail{width:auto;border-left:0;border-top:1px solid var(--border)}.inbox{padding:16px}.inbox-cols{grid-template-columns:1fr}.controls{padding:8px 16px}}
+@media (max-width:760px){header{flex-wrap:wrap;padding:12px 16px}.view-toggle{max-width:100%;overflow-x:auto}.inbox,.detail{min-width:0}body{height:auto}.main{flex-direction:column}.detail{width:auto;border-left:0;border-top:1px solid var(--border)}.inbox{padding:16px}.inbox-cols{grid-template-columns:1fr}.controls{padding:8px 16px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -352,25 +378,24 @@ input::placeholder{color:var(--dim)}
 <button role="tab" aria-selected="false" tabindex="-1" data-mode="quadrant" onclick="setMode('quadrant',this)">Quadrant</button>
 </div>
 <span style="width:8px"></span>
-<label>Posture</label>
+<span class="grp" role="group" aria-label="Posture"><label>Posture</label>
 <button class="fbtn on" aria-pressed="true" data-tier="all" onclick="setView('all',this)">All</button>
 <button class="fbtn" aria-pressed="false" data-tier="critical" onclick="setView('critical',this)">Harden now</button>
 <button class="fbtn" aria-pressed="false" data-tier="high" onclick="setView('high',this)">Protect</button>
 <button class="fbtn" aria-pressed="false" data-tier="medium" onclick="setView('medium',this)">Stabilize</button>
-<button class="fbtn" aria-pressed="false" data-tier="low" onclick="setView('low',this)">Routine</button>
-<span style="width:8px"></span>
-<label>Agents</label>
+<button class="fbtn" aria-pressed="false" data-tier="low" onclick="setView('low',this)">Routine</button></span>
+<span class="grp" role="group" aria-label="Agent autonomy"><label>Agents</label>
 <button class="fbtn on" aria-pressed="true" data-auto="all" onclick="setAutonomy('all',this)">All</button>
 <button class="fbtn" aria-pressed="false" data-auto="3" onclick="setAutonomy('3',this)" title="L3 auto-merge">L3</button>
 <button class="fbtn" aria-pressed="false" data-auto="2" onclick="setAutonomy('2',this)" title="L2 auto-fix, human merges">L2</button>
 <button class="fbtn" aria-pressed="false" data-auto="1" onclick="setAutonomy('1',this)" title="L1 propose only">L1</button>
-<button class="fbtn" aria-pressed="false" data-auto="0" onclick="setAutonomy('0',this)" title="L0 assist only">L0</button>
+<button class="fbtn" aria-pressed="false" data-auto="0" onclick="setAutonomy('0',this)" title="L0 assist only">L0</button></span>
 <span style="flex:1"></span>
-<label for="search">Search</label>
-<input type=text id=search placeholder="Path or reason" oninput="onSearch()">
-<label>Size</label>
+<span class="grp"><label for="search">Search</label>
+<input type=text id=search placeholder="Path or reason" oninput="onSearch()"></span>
+<span class="grp" id="size-grp" role="group" aria-label="Treemap size" hidden><label>Size</label>
 <button class="fbtn on" aria-pressed="true" data-sz="lines" onclick="setSizing('lines',this)">Lines</button>
-<button class="fbtn" aria-pressed="false" data-sz="impact" onclick="setSizing('impact',this)">Break cost</button>
+<button class="fbtn" aria-pressed="false" data-sz="impact" onclick="setSizing('impact',this)">Break cost</button></span>
 </div>
 <div class="main">
 <div class="inbox active" id="inbox" role="tabpanel" aria-label="Action inbox"></div>
@@ -380,11 +405,12 @@ input::placeholder{color:var(--dim)}
 </div>
 <div class="explorer" id="explorer"></div>
 <div class="arch" id="arch">
-<div class="arch-hint"><div class="arch-bar"><label>Group by:</label>
-<button class="fbtn on" data-g="package" onclick="setGroup('package',this)">Package</button>
-<button class="fbtn" data-g="unit" onclick="setGroup('unit',this)">Unit</button>
-<button class="fbtn" id="sup-toggle" onclick="toggleSupporting(this)" title="Unit view: show supporting units (examples, scripts, tests, helper bins)">Supporting units</button>
-<label style="margin-left:12px">Zoom:</label>
+<div class="arch-hint"><div class="arch-bar"><label>Group by</label>
+<button class="fbtn" aria-pressed="false" data-g="package" onclick="setGroup('package',this)">Package</button>
+<button class="fbtn" aria-pressed="false" data-g="unit" onclick="setGroup('unit',this)">Unit</button>
+<button class="fbtn" aria-pressed="false" id="sup-toggle" onclick="toggleSupporting(this)" title="Show supporting code: docs, CI, scripts, examples, tests, benchmarks, test data, config-only packages and helper bins">Supporting code</button>
+<button class="fbtn" aria-pressed="false" id="edges-toggle" onclick="toggleAllEdges(this)" title="Draw every import arrow, not only the strongest and those touching Harden now or Protect">All arrows</button>
+<span class="sep"></span><label>Zoom</label>
 <button class="fbtn" onclick="archZoomBy(1/1.25)" title="Zoom out">&#8722;</button>
 <button class="fbtn" onclick="archZoomBy(1.25)" title="Zoom in">+</button>
 <button class="fbtn" onclick="archFit()" title="Fit the whole graph on screen">Fit</button>
@@ -401,10 +427,27 @@ const STATS=/*__STATS__*/{};
 const INBOX=/*__INBOX__*/{};
 const ARCH=/*__ARCH__*/{};
 const UNITS=/*__UNITS__*/{};
-// One hue per posture, the same in every view. Tiers map 1:1 to postures.
-const C={critical:'#f2555a',high:'#e0a43c',medium:'#6aa6e0',low:'#5fae6b'};
+const QUADV=/*__QUAD__*/{};
+// One hue and one shape per posture, the same in every view; tiers map 1:1
+// to postures. Only files needing attention carry colour: Routine is grey.
+const C={critical:'#FF6B6B',high:'#E8B04A',medium:'#B6A6E9',low:'#A3A3A3'};
 const POSTURE={critical:'Harden now',high:'Protect',medium:'Stabilize',low:'Routine'};
-const VC={'Harden now':C.critical,'Protect':C.high,'Stabilize':C.medium,'Routine':C.low,'Not assessed':'#8c8c92'};
+const VC={'Harden now':C.critical,'Protect':C.high,'Stabilize':C.medium,'Routine':C.low,'Not assessed':'#A3A3A3'};
+const VT={'Harden now':'critical','Protect':'high','Stabilize':'medium','Routine':'low'};
+// shape draws a tier's mark centred on cx,cy with radius r: diamond for
+// Harden now, triangle for Protect, square for Stabilize, circle for Routine.
+function shape(tier,cx,cy,r,extra){
+  const f=v=>v.toFixed(1),a=extra||'';
+  if(tier==='critical'){const k=r*1.3;return '<polygon points="'+f(cx)+','+f(cy-k)+' '+f(cx+k)+','+f(cy)+' '+f(cx)+','+f(cy+k)+' '+f(cx-k)+','+f(cy)+'"'+a+'/>'}
+  if(tier==='high'){return '<polygon points="'+f(cx)+','+f(cy-r*1.25)+' '+f(cx+r*1.2)+','+f(cy+r*.85)+' '+f(cx-r*1.2)+','+f(cy+r*.85)+'"'+a+'/>'}
+  if(tier==='medium'){const k=r*.88;return '<rect x="'+f(cx-k)+'" y="'+f(cy-k)+'" width="'+f(2*k)+'" height="'+f(2*k)+'" rx="1"'+a+'/>'}
+  return '<circle cx="'+f(cx)+'" cy="'+f(cy)+'" r="'+f(r)+'"'+a+'/>';
+}
+// mark is a tier's shape as a 12px inline icon; hollow for estimates.
+function mark(tier,hollow){
+  const c=C[tier]||C.low;
+  return '<svg class="mk" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">'+shape(tier,6,6,4.2,hollow?' fill="none" stroke="'+c+'" stroke-width="1.5"':' fill="'+c+'"')+'</svg>';
+}
 const QUAD={
   'fragile-critical':{label:'Harden now',guide:'likely to break and costly: owner sign-off, tests before merge'},
   'protect':{label:'Protect',guide:'costly if it breaks: owner review, no auto-merge'},
@@ -566,13 +609,13 @@ function renderTreemap(){
     const mc=C[mr.tier]||C.low;
     // Module container
     html+='<div class="tm-node" style="left:'+mr.x+'px;top:'+mr.y+'px;width:'+mr.w+'px;height:'+mr.h+'px;'+
-      'background:'+mc+'0D;border-color:'+mc+'55;padding:0" onclick="drillDir(\''+esc(mr.name)+'\')">';
+      'background:var(--bg);border-color:var(--border-strong);padding:0" onclick="drillDir(\''+esc(mr.name)+'\')">';
 
     // Module label
     if(mr.w>40&&mr.h>HEADER){
       const label=mr.name.split('/').pop()||mr.name;
-      html+='<div style="padding:1px 5px;font:700 10px var(--font-d);color:'+mc+';letter-spacing:.5px;'+
-        'background:'+mc+'18;border-bottom:1px solid '+mc+'33;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+label+'</div>';
+      html+='<div style="padding:0 6px;font:500 12px/16px var(--font-t);color:var(--muted);'+
+        'background:var(--panel);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+htmlEsc(label)+'</div>';
     }
     html+='</div>';
 
@@ -584,9 +627,9 @@ function renderTreemap(){
     for(const fr of fileRects){
       if(fr.w<3||fr.h<3)continue;
       const fc=C[fr.tier]||C.low;
-      const sat=30+fr.heat_score*0.7;
+      const alpha=Math.round(0x26+fr.heat_score/100*0x50).toString(16);
       html+='<div class="tm-node" style="left:'+fr.x+'px;top:'+fr.y+'px;width:'+fr.w+'px;height:'+fr.h+'px;'+
-        'background:'+fc+';filter:saturate('+sat.toFixed(0)+'%);opacity:'+(0.35+fr.heat_score/100*0.65).toFixed(2)+'" '+
+        'background:'+fc+alpha+';border-color:'+fc+'66" '+
         'onclick="event.stopPropagation();selectFile(\''+esc(fr.path)+'\')" '+
         'title="'+attr(fr.path+'\n'+(POSTURE[fr.tier]||'')+'\n'+axesText(fr)+(fr.reason?'\n'+fr.reason:''))+'">';
       if(fr.w>55&&fr.h>30){
@@ -716,7 +759,7 @@ function inboxMatch(path,verdict,text){
 }
 function fileCardHTML(c){
   const vc=VC[c.verdict]||VC['Not assessed'];
-  let h='<article class="card"><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
+  let h='<article class="card"><span class="dot">'+mark(VT[c.verdict],c.estimated)+'</span>';
   h+='<button class="file title" data-path="'+attr(c.path)+'">'+htmlEsc(c.path)+'</button>';
   h+='<div class="side"><span class="posture" style="color:'+vc+'">'+htmlEsc(c.verdict)+'</span></div>';
   if(c.estimated)h+='<div class="why">'+htmlEsc(INBOX.estimate_note)+'</div>';
@@ -725,11 +768,10 @@ function fileCardHTML(c){
   return h+'</article>';
 }
 function groupHTML(g,items){
-  const vc=g.harden?VC['Harden now']:(VC[g.items[0].verdict]||VC['Not assessed']);
   const parts=[];
   if(g.harden)parts.push(g.harden+' Harden now');
   if(items.length<g.items.length)parts.push(items.length+' match the filter');
-  let h='<details class="card grp" data-kind="'+attr(g.kind)+'"'+(inboxOpen.groups.has(g.kind)?' open':'')+'><summary><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
+  let h='<details class="card grp" data-kind="'+attr(g.kind)+'"'+(inboxOpen.groups.has(g.kind)?' open':'')+'><summary><span class="dot">'+mark(g.harden?'critical':VT[g.items[0].verdict])+'</span>';
   h+='<span class="do">'+htmlEsc(g.title)+'</span><span class="meta">'+htmlEsc(parts.join(' · '))+'</span></summary>';
   if(g.snippet)h+='<div class="snip"><code>'+htmlEsc(g.snippet)+'</code><button class="copy" data-cmd="'+attr(g.snippet)+'" aria-label="Copy all '+g.items.length+' lines">Copy</button></div>';
   h+='<ul class="gfiles">'+items.map(it=>'<li><button class="file" data-path="'+attr(it.path)+'">'+htmlEsc(it.path)+'</button><span class="sig">'+htmlEsc(it.verdict)+(it.estimated?' (estimated)':'')+(it.signal?' · '+htmlEsc(it.signal):'')+(it.owner?' · '+htmlEsc(it.owner):'')+'</span></li>').join('')+'</ul>';
@@ -764,7 +806,9 @@ function setMode(mode,btn){
   document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
   document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
   document.getElementById('arch').style.display=mode==='arch'?'flex':'none';
-  document.getElementById('quadrant').style.display=mode==='quadrant'?'block':'none';
+  document.getElementById('quadrant').style.display=mode==='quadrant'?'flex':'none';
+  document.getElementById('size-grp').hidden=mode!=='treemap';
+  if(location.hash!=='#/'+mode)history.replaceState(null,'','#/'+mode);
   rerender();
 }
 
@@ -828,7 +872,7 @@ function renderExplorer(){
       const indent=depth*16;
       const barW=Math.max(f.heat_score,2);
       html+='<div class="ex-row ex-file" style="padding-left:'+(indent+20)+'px" onclick="selectFile(\''+esc(f.path)+'\')">';
-      html+='<span class="ftier" style="background:'+fc+'"></span>';
+      html+=mark(f.tier);
       html+='<span class="fname">'+f.name+'</span>';
       html+='<div class="ex-heat-bar"><div class="fill" style="width:'+barW+'%;background:'+fc+'"></div></div>';
       if(f.reason){html+='<span class="freason">'+f.reason+'</span>';}
@@ -876,28 +920,36 @@ function rerender(){
 // Architecture view: nodes in dependency layers. Entry points on top,
 // foundations at the bottom; arrows point from importer to dependency.
 // Grouped by package (directory) or by runtime unit (binaries and scripts,
-// with shared libraries as a band below). Wheel or pinch zooms, drag pans.
-let archSel=null,archEdgeSel=null,archGroup='package',archLast=null,archDragged=false,showSupporting=false;
+// with shared libraries as a band below). Go marks supporting nodes (hidden
+// until Supporting units is on) and the key edges drawn by default; hovering
+// or picking a box shows all of its arrows. Wheel or pinch zooms, drag pans.
+let archSel=null,archEdgeSel=null,archLast=null,archDragged=false,showSupporting=false,showAllEdges=false;
+let archGroup=STATS.default_group==='unit'&&(UNITS.nodes||[]).length?'unit':'package';
 const archView={k:1,tx:0,ty:0,fit:true};
-// unitData is the unit view without hidden supporting units, plus the links
-// declared in .heatmap/architecture.yaml.
-function unitData(){
-  const hidden=new Set((UNITS.units||[]).filter(u=>u.supporting&&!showSupporting).map(u=>'u:'+u.name));
-  const keep=e=>!hidden.has(e.from)&&!hidden.has(e.to);
-  const declared=((UNITS.declared||{}).links||[]).map(l=>({from:'u:'+l.from,to:'u:'+l.to,label:l.label||'runtime link',both:!!l.both,evidence:l.evidence||''}));
-  return {nodes:(UNITS.nodes||[]).filter(n=>!hidden.has(n.id)),edges:(UNITS.edges||[]).filter(keep),declared:declared.filter(keep),hidden:hidden.size};
+// archData is the current grouping without hidden supporting nodes, the
+// edges between the nodes left, and in the unit view the links declared in
+// .heatmap/architecture.yaml.
+function archData(){
+  const unit=archGroup==='unit',src=unit?UNITS:ARCH,all=src.nodes||[];
+  const nodes=all.filter(n=>showSupporting||!n.supporting);
+  const ids=new Set(nodes.map(n=>n.id));
+  const keep=e=>ids.has(e.from)&&ids.has(e.to);
+  const declared=unit?((UNITS.declared||{}).links||[]).map(l=>({from:'u:'+l.from,to:'u:'+l.to,label:l.label||'runtime link',both:!!l.both,evidence:l.evidence||''})).filter(keep):[];
+  return {nodes,edges:(src.edges||[]).filter(keep),declared,hidden:all.length-nodes.length,anySupporting:all.some(n=>n.supporting)};
 }
+function isKey(e){return showAllEdges||(showSupporting?e.key_all:e.key)}
+function pressed(btn,on){btn.classList.toggle('on',on);btn.setAttribute('aria-pressed',on)}
 function declaredPlacement(name){return ((UNITS.declared||{}).placement||[]).find(p=>p.unit===name)}
 function toggleSupporting(btn){
-  showSupporting=!showSupporting;btn.classList.toggle('on',showSupporting);
+  showSupporting=!showSupporting;pressed(btn,showSupporting);
   archSel=null;archEdgeSel=null;archView.fit=true;renderArch();
 }
-function archData(){return archGroup==='unit'?unitData():ARCH}
+function toggleAllEdges(btn){showAllEdges=!showAllEdges;pressed(btn,showAllEdges);renderArch()}
 function archLabel(n){return n.label||(n.id==='.'?'(root)':n.id)}
 function archLayout(G){
-  const NODE_H=50,GAP_X=28,GAP_Y=84,GAP_SUB=30,PAD=28;
+  const NODE_H=50,GAP_X=28,GAP_Y=64,GAP_SUB=24,PAD=28;
   const maxLines=Math.max(1,...G.nodes.map(n=>n.lines));
-  const width=n=>Math.round(Math.max(130+110*Math.sqrt(n.lines/maxLines),Math.min(300,archLabel(n).length*7.4+56)));
+  const width=n=>Math.round(Math.max(150+110*Math.sqrt(n.lines/maxLines),Math.min(320,archLabel(n).length*7.8+80)));
   const maxLevel=Math.max(0,...G.nodes.map(n=>n.level));
   const layers=[];
   for(let l=0;l<=maxLevel;l++)layers.push(G.nodes.filter(n=>n.level===l));
@@ -919,8 +971,12 @@ function archLayout(G){
     }
   }
   const rowW=L=>L.reduce((s,n)=>s+width(n),0)+GAP_X*Math.max(0,L.length-1);
-  // Wrap wide layers into several rows so the graph stays near screen shape.
-  const MAX_W=Math.max(1500,...G.nodes.map(width));
+  // Wrap wide layers into several rows so the graph keeps the viewport's
+  // shape and fits the screen at a readable scale.
+  const vr=document.getElementById('archvp').getBoundingClientRect();
+  const aspect=vr.width>0&&vr.height>0?vr.width/vr.height:1.6;
+  const area=G.nodes.reduce((s,n)=>s+(width(n)+GAP_X)*(NODE_H+GAP_SUB),0)+(maxLevel+1)*(GAP_Y-GAP_SUB)*400;
+  const MAX_W=Math.max(900,Math.sqrt(area*aspect),...G.nodes.map(width));
   const rows=[];
   for(let li=maxLevel;li>=0;li--){
     let row=[];
@@ -962,25 +1018,40 @@ function setGroup(g,btn){
   archGroup=g;archSel=null;archEdgeSel=null;archView.fit=true;renderArch();
 }
 
+// archFocus highlights every arrow of node id (the hovered box, else the
+// picked one) or the picked arrow, and fades the rest. It only toggles
+// classes, so hovering never re-renders.
+function archFocus(id){
+  const vp=document.getElementById('archvp'),f=id||archSel,on=!!(f||archEdgeSel),linked=new Set();
+  vp.querySelectorAll('.ae:not(.declared)').forEach(g=>{
+    const a=g.dataset.from,b=g.dataset.to;
+    const hit=f?(a===f||b===f):archEdgeSel===a+'\n'+b;
+    if(hit){linked.add(a);linked.add(b)}
+    g.classList.toggle('hl',hit);g.classList.toggle('dim',on&&!hit);
+  });
+  if(f)linked.add(f);
+  vp.querySelectorAll('.ae.declared').forEach(g=>g.classList.toggle('dim',on&&!(linked.has(g.dataset.from)&&linked.has(g.dataset.to))));
+  vp.querySelectorAll('.an').forEach(g=>g.classList.toggle('dim',g.dataset.out==='1'||(on&&!linked.has(g.dataset.dir))));
+}
+
 function renderArch(){
   const G=archData(),unit=archGroup==='unit';
   const vp=document.getElementById('archvp'),txt=document.getElementById('arch-text');
-  document.querySelectorAll('.arch-bar [data-g]').forEach(b=>b.classList.toggle('on',b.dataset.g===archGroup));
-  if(!G.nodes||!G.nodes.length){
+  document.querySelectorAll('.arch-bar [data-g]').forEach(b=>pressed(b,b.dataset.g===archGroup));
+  const sup=document.getElementById('sup-toggle');
+  sup.disabled=!G.anySupporting;sup.title=G.anySupporting?'Show supporting code: docs, CI, scripts, examples, tests, benchmarks, test data, config-only packages and helper bins':'Nothing supporting in this grouping';
+  sup.textContent='Supporting code';
+  if(!G.nodes.length){
     archLast=null;txt.innerHTML='';
-    vp.innerHTML='<div class="empty">'+(unit?'No runtime units: no Rust bins, Go main packages, package.json bin or start scripts, or Python scripts were found (or the heatmap predates units: re-run highstakes analyze).':'No files in heatmap')+'</div>';
+    vp.innerHTML='<div class="empty">'+(unit?'No runtime units: no Rust bins, Go main packages, package.json bin or start scripts, or Python scripts were found (or the heatmap predates units: re-run highstakes analyze).':G.hidden?'Every package is supporting code. Turn on Supporting code to see them.':'No files in heatmap')+'</div>';
     return;
   }
   archLast=archLayout(G);
   const {boxes,W,H}=archLast;
   const visible=new Set(getFiltered().map(f=>unit?f.unit_node:f.dir));
-  const linked=new Set();
-  const [eFrom,eTo]=archEdgeSel?archEdgeSel.split('\n'):[null,null];
-  if(archSel){linked.add(archSel);G.edges.forEach(e=>{if(e.from===archSel)linked.add(e.to);if(e.to===archSel)linked.add(e.from)})}
-  if(archEdgeSel){linked.add(eFrom);linked.add(eTo)}
-  const focus=archSel||archEdgeSel;
   let s='<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">';
-  s+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0L10,5L0,10z"/></marker></defs><g id="archg">';
+  s+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0L10,5L0,10z"/></marker>'+
+    '<marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow hl" d="M0,0L10,5L0,10z"/></marker></defs><g id="archg">';
   if(unit){
     const sh=Object.values(boxes).filter(b=>b.n.kind==='shared');
     if(sh.length){
@@ -990,57 +1061,63 @@ function renderArch(){
     }
     s+='<text class="band-label" x="18" y="16">Runtime units: entry points and the code only they link</text>';
   }
+  let drawn=0;
   for(const e of G.edges){
     const a=boxes[e.from],b=boxes[e.to];
     if(!a||!b)continue;
+    const key=isKey(e);if(key)drawn++;
     const {x1,y1,x2,y2,d}=edgePath(a,b);
-    const sw=(1+Math.log2(e.count)).toFixed(2);
+    const sw=Math.min(2.5,1+Math.log2(e.count)/3).toFixed(2);
     const esel=archEdgeSel===e.from+'\n'+e.to;
-    const hl=esel||(archSel&&(e.from===archSel||e.to===archSel));
-    const dim=focus&&!hl;
-    s+='<g class="ae'+(hl?' hl':'')+(esel?' esel':'')+(dim?' dim':'')+'" data-from="'+attr(e.from)+'" data-to="'+attr(e.to)+'"><path d="'+d+'" stroke-width="'+sw+'" marker-end="url(#ah)"/><path class="ae-hit" d="'+d+'"/>';
+    s+='<g class="ae'+(key?'':' minor')+(esel?' esel':'')+'" data-from="'+attr(e.from)+'" data-to="'+attr(e.to)+'"><path d="'+d+'" stroke-width="'+sw+'" marker-end="url(#ah)"/><path class="ae-hit" d="'+d+'"/>';
     s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0))+'">'+e.count+'</text>';
     s+='<title>'+e.count+' file(s) in '+html(archLabel(a.n))+' import '+html(archLabel(b.n))+' ('+e.links_total+' file links). Click for the links.</title></g>';
   }
-  for(const e of (unit&&G.declared)||[]){
+  for(const e of G.declared){
     const a=boxes[e.from],b=boxes[e.to];
     if(!a||!b)continue;
     const {x1,y1,x2,y2,d}=edgePath(a,b);
-    const dim=focus&&!(linked.has(e.from)&&linked.has(e.to));
-    s+='<g class="ae declared'+(dim?' dim':'')+'"><path d="'+d+'" marker-end="url(#ah)"'+(e.both?' marker-start="url(#ah)"':'')+'/>';
+    s+='<g class="ae declared" data-from="'+attr(e.from)+'" data-to="'+attr(e.to)+'"><path d="'+d+'" marker-end="url(#ahl)"'+(e.both?' marker-start="url(#ahl)"':'')+'/>';
     s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0)+12)+'">'+html(e.label)+' (declared)</text>';
     s+='<title>Declared in .heatmap/architecture.yaml: '+html(archLabel(a.n))+(e.both?' &lt;-&gt; ':' -&gt; ')+html(archLabel(b.n))+': '+html(e.label)+(e.evidence?' ['+html(e.evidence)+']':'')+'</title></g>';
   }
   for(const id in boxes){
     const {n,x,y,w,h}=boxes[id];
-    const c=C[n.impact_tier||n.tier]||C.low;
-    const dim=(!visible.has(n.id))||(focus&&!linked.has(n.id));
+    const tier=n.impact_tier||n.tier,c=C[tier]||C.low;
     const score=n.max_impact?n.max_impact:Math.max(0,n.max_heat);
     let meta;
     const dp=unit&&n.kind==='unit'?declaredPlacement(n.label):null;
     if(unit)meta=n.kind==='unit'?(dp?'declared: '+dp.runs_in:n.placement?'inferred: '+n.placement:n.files+' own files · no placement found'):n.files+' files';
     else meta=(n.hottest||'').split('/').pop()+' · '+n.files+' files'+(n.likely>0?'':' · '+n.lines+' lines');
-    s+='<g class="an'+(archSel===n.id?' sel':'')+(dim?' dim':'')+'" data-dir="'+attr(n.id)+'">';
+    s+='<g class="an'+(archSel===n.id?' sel':'')+'" data-dir="'+attr(n.id)+'" data-out="'+(visible.has(n.id)?0:1)+'" tabindex="0" role="button" aria-pressed="'+(archSel===n.id)+'" aria-label="'+attr(archLabel(n)+', max impact '+(n.max_impact||'not assessed')+', '+n.files+' files')+'">';
     if(n.likely>0)s+='<rect class="an-frag" x="'+(x-4)+'" y="'+(y-4)+'" width="'+(w+8)+'" height="'+(h+8)+'" rx="9"/>';
-    s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" fill="'+c+'2E" stroke="'+c+'"/>';
-    s+='<text class="an-dir" x="'+(x+10)+'" y="'+(y+20)+'">'+html(clip(archLabel(n),w-50,7.2))+'</text>';
-    s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+20)+'" text-anchor="end" fill="'+c+'">'+score+'</text>';
-    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(meta,w-(n.likely>0?70:20),6))+'</text>';
-    if(n.likely>0)s+='<text class="an-likely" x="'+(x+w-10)+'" y="'+(y+38)+'" text-anchor="end">'+n.likely+' likely</text>';
+    s+='<rect class="box" x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" stroke="'+c+'"'+(n.supporting?' stroke-dasharray="3 3"':'')+'/>';
+    s+=shape(tier,x+15,y+16,4.5,' fill="'+c+'"');
+    s+='<text class="an-dir" x="'+(x+27)+'" y="'+(y+21)+'">'+html(clip(archLabel(n),w-64,7.8))+'</text>';
+    s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+21)+'" text-anchor="end" fill="'+c+'">'+score+'</text>';
+    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+39)+'">'+html(clip(meta,w-(n.likely>0?70:20),6.2))+'</text>';
+    if(n.likely>0)s+='<text class="an-likely" x="'+(x+w-10)+'" y="'+(y+39)+'" text-anchor="end">'+n.likely+' likely</text>';
     const members=unit&&n.members?'\ncomponents: '+n.members.join(', '):'';
     const place=(dp?'\ndeclared placement: '+html(dp.runs_in)+(dp.evidence?' ['+html(dp.evidence)+']':''):'')+(unit&&n.placement?'\ninferred placement: '+n.placement:'');
     s+='<title>'+html(archLabel(n))+members+place+'\nmax impact: '+(n.max_impact||'not assessed')+(n.hottest?'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')':'')+'\n'+n.likely+' file(s) likely to need fixes\n'+n.files+' files, '+n.lines+' lines</title></g>';
   }
   s+='</g></svg>';
-  const legend='<div class="arch-legend">'+['critical','high','medium','low'].map(t=>'<span><i style="border-color:'+C[t]+';background:'+C[t]+'2E"></i>'+t+' impact</span>').join('')+
-    '<span><i class="frag"></i>contains files likely to need fixes</span></div>';
-  const nav=' Click an arrow for the file links behind it. Wheel or pinch to zoom, drag to pan.';
-  txt.innerHTML=(unit?
-    'Boxes on top are runtime units: entry points found from manifests and main files, holding the components only they link. The band below holds shared libraries linked by two or more units. Placement labels are inferred from Dockerfiles, Helm values and Kubernetes manifests, not observed. Arrows point from importer to dependency (label = importing files); color = max impact; number = max impact. Dashed arrows and "declared" placements come from .heatmap/architecture.yaml.'+(G.hidden?' '+G.hidden+' supporting unit(s) hidden (Supporting units shows them).':'')+(UNITS.unlinked?' '+UNITS.unlinked+' non-test file(s) are linked by no unit.':''):
-    'Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines; color = max impact if a file breaks (heat tier when not assessed); number = max impact. A dashed outline marks packages with files likely to need fixes. Click a package to list its files.')+nav+legend;
+  const hidden=G.hidden?'<span>'+G.hidden+' supporting '+(unit?(G.hidden===1?'box':'boxes'):(G.hidden===1?'package':'packages'))+' hidden</span>':'';
+  const legend='<div class="arch-legend">'+['critical','high','medium','low'].map(t=>'<span>'+mark(t)+t+' impact</span>').join('')+
+    '<span><i class="frag"></i>holds files likely to need fixes</span><span><i class="edge"></i>'+(showAllEdges?'every import':'strongest imports and those touching critical or high')+' ('+drawn+' of '+G.edges.length+')</span>'+hidden+'</div>';
+  const nav=' Hover or pick a box for all of its arrows; click an arrow for the file links behind it. Wheel or pinch zooms, drag pans.';
+  txt.innerHTML=legend+'<details class="how"><summary>How to read this view</summary><p>'+(unit?
+    'Boxes on top are runtime units: entry points found from manifests and main files, holding the components only they link. The band below holds shared libraries linked by two or more units. Placement labels are inferred from Dockerfiles, Helm values and Kubernetes manifests, not observed. Arrows point from importer to dependency; colour, shape and number = max impact. Dashed arrows and declared placements come from .heatmap/architecture.yaml.'+(UNITS.unlinked?' '+UNITS.unlinked+' non-test file(s) are linked by no unit.':''):
+    'Packages in dependency layers: entry points on top, foundations below. Arrows point from importer to dependency. Size = lines; colour, shape and number = max impact if a file breaks (heat tier when not assessed). A dashed outline marks packages with files likely to need fixes.')+' Supporting code (docs, CI, scripts, examples, tests, benchmarks, test data, config-only packages, helper bins) stays hidden until Supporting code is on.'+nav+'</p></details>';
   vp.innerHTML=s;
-  vp.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectDir(g.dataset.dir)}));
+  vp.querySelectorAll('.an').forEach(g=>{
+    g.addEventListener('click',()=>{if(!archDragged)selectDir(g.dataset.dir)});
+    g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDir(g.dataset.dir)}});
+    ['mouseenter','focus'].forEach(t=>g.addEventListener(t,()=>archFocus(g.dataset.dir)));
+    ['mouseleave','blur'].forEach(t=>g.addEventListener(t,()=>archFocus(null)));
+  });
   vp.querySelectorAll('.ae:not(.declared)').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectEdge(g.dataset.from,g.dataset.to)}));
+  archFocus(null);
   if(archView.fit)archFit();else archApply();
 }
 
@@ -1092,52 +1169,92 @@ function archZoomBy(f){const r=document.getElementById('archvp').getBoundingClie
   const end=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size){start=null;vp.classList.remove('panning')}};
   ['pointerup','pointercancel','pointerleave'].forEach(t=>vp.addEventListener(t,end));
   if(!(UNITS.nodes||[]).length){const b=document.querySelector('.arch-bar [data-g="unit"]');b.disabled=true;b.title='No runtime units in this heatmap'}
-  if(!(UNITS.units||[]).some(u=>u.supporting)){const b=document.getElementById('sup-toggle');b.disabled=true;b.title='No supporting units in this heatmap'}
 })();
 
-// Quadrant view: x = likelihood of needing fixes, y = impact if it breaks.
-let quadSel=null;
+// Quadrant view: x = will it break, y = how bad if it breaks. Go lays out
+// the axis ranges (zoomed to the data, cutoffs kept in view), dot sizes,
+// offsets for files with identical scores and the five files named on the
+// plot; this only draws. Colour and shape = posture; hollow = estimated.
+let quadSel=null,quadFull=false;
+function quadTip(f){
+  const p=QUADV.points&&QUADV.points[f.path],v=p?POSTURE[p.posture]+(f.impact_assessed?'':' (estimated)'):verdictOf(f);
+  return '<b>'+html(f.path)+'</b>'+html(v)+'<br>Will it break? '+f.likelihood+' · How bad if it breaks? '+(f.impact_assessed?f.impact:'~'+f.impact+' (estimate)');
+}
 function renderQuadrant(){
   const el=document.getElementById('quadrant');
   const files=getFiltered().filter(f=>!f.test);
-  if(!files.length){el.innerHTML='<div class="empty">No files match filter</div>';return}
-  const assessed=files.some(f=>f.impact_assessed);
-  const rect=el.getBoundingClientRect();
-  const W=Math.max(rect.width,420),H=Math.max(rect.height-44,320);
-  const L=54,R=18,T=34,B=44,pw=W-L-R,ph=H-T-B;
-  const X=v=>L+v/100*pw, Y=v=>T+(100-v)/100*ph;
+  const estimates=FILES.some(f=>!f.test&&!f.impact_assessed);
+  const assessed=FILES.some(f=>!f.test&&f.impact_assessed);
   const cut=STATS.likely_cutoff>0&&STATS.likely_cutoff<=100?STATS.likely_cutoff:null;
   const thr=STATS.impact_threshold||61;
+  const legend='<div class="arch-legend">'+['critical','high','medium','low'].map(t=>'<span>'+mark(t)+POSTURE[t]+'</span>').join('')+
+    (estimates?'<span>'+mark('low',true)+'hollow: impact estimated</span>':'')+'<span>size: lines</span></div>';
+  const note=assessed?(estimates?' Hollow dots have no LLM assessment: their impact is estimated.':''):' Impact is not LLM-assessed: it is estimated from centrality and path keywords, so every dot is hollow.';
+  el.innerHTML='<div class="arch-hint"><div class="arch-bar"><button class="fbtn" id="quad-full" aria-pressed="'+quadFull+'">Full scale</button><span class="arch-zoom">'+(quadFull?'0 to 100 on both axes':'axes zoomed to the data')+'</span></div>'+
+    legend+'<p>Each dot is a file (tests left out); the five '+(assessed?'that would hurt most':'most likely to break')+' are named.'+note+'</p>'+
+    '<details class="how"><summary>How to read this view</summary><p>Right of the dashed vertical line: Will it break? at or above the repo cutoff ('+(cut||'n/a')+'). Above the dashed horizontal line: How bad if it breaks? at or above '+thr+'. Full scale shows 0 to 100 on both axes. Files with the same scores are spread a few pixels apart. '+NOTE+' Pick a dot for details.</p></details></div>'+
+    '<div class="quad-plot" id="quad-plot"></div><div class="qtip" id="qtip" hidden></div>';
+  if(quadFull)document.getElementById('quad-full').classList.add('on');
+  document.getElementById('quad-full').addEventListener('click',()=>{quadFull=!quadFull;renderQuadrant()});
+  const plot=document.getElementById('quad-plot');
+  if(!files.length){plot.innerHTML='<div class="empty">No files match filter</div>';return}
+  const rect=plot.getBoundingClientRect();
+  const W=Math.max(rect.width,320),H=Math.max(rect.height,320);
+  const L=56,R=24,T=16,B=52,pw=W-L-R,ph=H-T-B;
+  const xr=quadFull||!QUADV.x?[0,100]:QUADV.x, yr=quadFull||!QUADV.y?[0,100]:QUADV.y;
+  // An inner margin keeps dots at the edges of the range (and their spread)
+  // off the axis labels.
+  const M=20;
+  const X=v=>L+M+(Math.min(xr[1],Math.max(xr[0],v))-xr[0])/(xr[1]-xr[0])*(pw-2*M);
+  const Y=v=>T+M+(yr[1]-Math.min(yr[1],Math.max(yr[0],v)))/(yr[1]-yr[0])*(ph-2*M);
   let s='<svg width="'+W+'" height="'+H+'" xmlns="http://www.w3.org/2000/svg">';
+  const ticks=(r,f)=>{const st=r[1]-r[0]<=50?10:20;for(let v=Math.ceil(r[0]/st)*st;v<=r[1];v+=st)f(v)};
+  ticks(xr,v=>{s+='<line class="qgrid" x1="'+X(v)+'" y1="'+T+'" x2="'+X(v)+'" y2="'+(T+ph)+'"/><text class="qtick" x="'+X(v)+'" y="'+(T+ph+16)+'" text-anchor="middle">'+v+'</text>'});
+  ticks(yr,v=>{s+='<line class="qgrid" x1="'+L+'" y1="'+Y(v)+'" x2="'+(L+pw)+'" y2="'+Y(v)+'"/><text class="qtick" x="'+(L-8)+'" y="'+(Y(v)+4)+'" text-anchor="end">'+v+'</text>'});
   s+='<rect class="qaxis" x="'+L+'" y="'+T+'" width="'+pw+'" height="'+ph+'" fill="none"/>';
-  for(let v=0;v<=100;v+=20){
-    s+='<text class="qtick" x="'+X(v)+'" y="'+(T+ph+14)+'" text-anchor="middle">'+v+'</text>';
-    s+='<text class="qtick" x="'+(L-6)+'" y="'+(Y(v)+3)+'" text-anchor="end">'+v+'</text>';
-  }
-  s+='<text class="qlab" x="'+(L+pw/2)+'" y="'+(H-8)+'" text-anchor="middle">Will it break? (churn, complexity) &#8594;</text>';
-  s+='<text class="qlab" transform="translate(14,'+(T+ph/2)+') rotate(-90)" text-anchor="middle">How bad if it breaks? &#8594;</text>';
+  s+='<text class="qlab" x="'+(L+pw/2)+'" y="'+(H-6)+'" text-anchor="middle">Will it break? (churn, complexity) &#8594;</text>';
+  s+='<text class="qlab" transform="translate(16,'+(T+ph/2)+') rotate(-90)" text-anchor="middle">How bad if it breaks? &#8594;</text>';
   const xm=cut?X(cut):X(80), ym=Y(thr);
-  if(cut)s+='<line class="qline" x1="'+xm+'" y1="'+T+'" x2="'+xm+'" y2="'+(T+ph)+'"><title>will it break: top 20% of non-test files (&#8805; '+cut+')</title></line>';
+  if(cut)s+='<line class="qline" x1="'+xm+'" y1="'+T+'" x2="'+xm+'" y2="'+(T+ph)+'"><title>will it break: top 20% of non-test files (&#8805; '+cut+')</title></line><text class="qtick" x="'+xm+'" y="'+(T+ph+32)+'" text-anchor="middle">cutoff '+cut+'</text>';
   s+='<line class="qline" x1="'+L+'" y1="'+ym+'" x2="'+(L+pw)+'" y2="'+ym+'"><title>how bad: &#8805; '+thr+'</title></line>';
-  const corner=(q,x,y,anchor)=>{const c=q==='fragile-critical'?C.critical:q==='protect'?C.high:q==='watch'?C.medium:C.low;
+  const corner=(q,x,y,anchor)=>{const c=C[{'fragile-critical':'critical',protect:'high',watch:'medium',low:'low'}[q]];
     const room=anchor==='end'?(L+pw-xm-16):(xm-L-16);
     return '<text class="qtitle" x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" fill="'+c+'">'+QUAD[q].label+'</text>'+
-      QUAD[q].guide.split(': ').map((g,i)=>'<text class="qguide" x="'+x+'" y="'+(y+14+i*13)+'" text-anchor="'+anchor+'">'+html(clip(g,room,5.6))+'</text>').join('')};
-  const jit=p=>{let h=0;for(const ch of p)h=(h*31+ch.charCodeAt(0))|0;return ((h%1000)/1000-0.5)*1.6};
-  const sorted=[...files].sort((a,b)=>(a.impact+a.likelihood)-(b.impact+b.likelihood));
+      QUAD[q].guide.split(': ').map((g,i)=>'<text class="qguide" x="'+x+'" y="'+(y+16+i*14)+'" text-anchor="'+anchor+'">'+html(clip(g,room,5.8))+'</text>').join('')};
+  const pt=f=>QUADV.points&&QUADV.points[f.path]||{r:6,dx:0,dy:0};
+  const at=f=>{const p=pt(f);return [X(f.likelihood)+p.dx,Y(f.impact)+p.dy,p.r]};
+  const sorted=[...files].sort((a,b)=>pt(b).r-pt(a).r);
   for(const f of sorted){
-    const c=C[f.tier]||C.low;
-    const cx=X(Math.min(100,Math.max(0,f.likelihood+jit(f.path)))), cy=Y(Math.min(100,Math.max(0,f.impact+jit(f.path+'#'))));
-    s+='<circle class="qd'+(quadSel===f.path?' sel':'')+'" data-path="'+attr(f.path)+'" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+(f.impact_assessed?5:4)+'" fill="'+c+'" fill-opacity="'+(f.impact_assessed?0.85:0.45)+'">'+
-      '<title>'+html(f.path+'\n'+verdictOf(f)+'\n'+axesText(f)+(f.reason?'\n'+f.reason:''))+'</title></circle>';
+    const tier=pt(f).posture||VT[verdictOf(f)]||'low',c=C[tier],[cx,cy,r]=at(f),est=!f.impact_assessed;
+    const a=' class="qd'+(est?' est':'')+(quadSel===f.path?' sel':'')+'" data-path="'+attr(f.path)+'"'+(est?' style="--c:'+c+'" fill="#0A0A0A" fill-opacity=".7"':' fill="'+c+'" fill-opacity=".85"');
+    s+=shape(tier,cx,cy,r,a);
   }
-  // Labels after the dots so they stay readable on top.
-  s+=corner('protect',L+8,T+16,'start')+corner('fragile-critical',L+pw-8,T+16,'end');
-  s+=corner('low',L+8,T+ph-34,'start')+corner('watch',L+pw-8,T+ph-34,'end');
+  s+=corner('protect',L+8,T+18,'start')+corner('fragile-critical',L+pw-8,T+18,'end');
+  s+=corner('low',L+8,T+ph-36,'start')+corner('watch',L+pw-8,T+ph-36,'end');
+  // Named files: each label sits beside its dot and steps down until it
+  // clears the labels already placed; a moved label gets a leader line.
+  const shown=new Set(files.map(f=>f.path)),placed=[];
+  for(const p of (QUADV.labels||[]).filter(p=>shown.has(p))){
+    const f=FILES.find(x=>x.path===p),[cx,cy,r]=at(f),right=cx>L+pw*0.6;
+    const name=p.split('/').slice(-2).join('/'),w=name.length*7.3+8;
+    const x0=right?cx-r-8-w:cx+r+8;
+    let y=cy+4;
+    while(placed.some(b=>x0<b.x+b.w&&b.x<x0+w&&Math.abs(b.y-y)<16))y+=16;
+    placed.push({x:x0,y,w});
+    if(y!==cy+4)s+='<line class="qline" x1="'+(right?cx-r:cx+r)+'" y1="'+cy+'" x2="'+(right?x0+w:x0)+'" y2="'+(y-4)+'" stroke-dasharray="0"/>';
+    s+='<text class="qname" data-path="'+attr(p)+'" tabindex="0" role="button" x="'+(right?x0+w-4:x0)+'" y="'+y+'" text-anchor="'+(right?'end':'start')+'">'+html(name)+'</text>';
+  }
   s+='</svg>';
-  const note=assessed?'':' Impact is estimated from centrality and path keywords (no LLM assessment); tiers come from heat.';
-  el.innerHTML='<div class="arch-hint">Each dot is a file (tests left out). Right of the vertical line: Will it break? at or above the repo cutoff ('+(cut||'n/a')+'). Above the horizontal line: How bad if it breaks? at or above '+thr+'. Color = posture. '+NOTE+' Pick a dot for details.'+note+'</div>'+s;
-  el.querySelectorAll('.qd').forEach(d=>d.addEventListener('click',()=>{quadSel=d.dataset.path;renderQuadrant();selectFile(d.dataset.path)}));
+  plot.innerHTML=s;
+  const tip=document.getElementById('qtip'),byPath={};files.forEach(f=>byPath[f.path]=f);
+  const pick=p=>{quadSel=p;renderQuadrant();selectFile(p)};
+  plot.querySelectorAll('.qd,.qname').forEach(d=>{
+    d.addEventListener('click',()=>pick(d.dataset.path));
+    d.addEventListener('mouseenter',()=>{tip.innerHTML=quadTip(byPath[d.dataset.path]);tip.hidden=false});
+    d.addEventListener('mousemove',e=>{const r=el.getBoundingClientRect();tip.style.left=Math.min(e.clientX-r.left+14,r.width-372)+'px';tip.style.top=(e.clientY-r.top+14)+'px'});
+    d.addEventListener('mouseleave',()=>{tip.hidden=true});
+  });
+  plot.querySelectorAll('.qname').forEach(d=>d.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick(d.dataset.path)}}));
 }
 
 function clip(t,px,charW){const n=Math.max(4,Math.floor(px/charW));return t.length>n?t.slice(0,n-1)+'…':t}
@@ -1148,7 +1265,7 @@ function attr(t){return html(t).replace(/"/g,'&quot;')}
 function fileRow(f,label,axes){
   const fc=C[f.tier]||C.low;
   const meta=axes?'<span class="fmeta">break '+f.likelihood+' · bad '+(f.impact_assessed?'':'~')+f.impact+' · '+verdictOf(f)+'</span>':'<span class="fheat" style="color:'+fc+'">'+POSTURE[f.tier]+'</span>';
-  return '<div class="ex-row ex-file" data-path="'+attr(f.path)+'"><span class="ftier" style="background:'+fc+'"></span><span class="fname">'+html(label)+'</span>'+meta+'</div>';
+  return '<div class="ex-row ex-file" data-path="'+attr(f.path)+'">'+mark(f.tier)+'<span class="fname">'+html(label)+'</span>'+meta+'</div>';
 }
 
 function selectDir(dir){
@@ -1201,7 +1318,7 @@ function selectEdge(from,to){
   if(!archEdgeSel)return;
   const name=id=>{const m=G.nodes.find(x=>x.id===id);return m?archLabel(m):id};
   const byPath={};FILES.forEach(f=>byPath[f.path]=f);
-  const side=p=>{const f=byPath[p],fc=f?(C[f.tier]||C.low):C.low;return '<span class="elink-file" data-path="'+attr(p)+'"><span class="ftier" style="background:'+fc+'"></span>'+html(p)+(f?' <span class="fmeta">I '+f.impact+'</span>':'')+'</span>'};
+  const side=p=>{const f=byPath[p];return '<span class="elink-file" data-path="'+attr(p)+'">'+mark(f?f.tier:'low')+' '+html(p)+(f?' <span class="fmeta">I '+f.impact+'</span>':'')+'</span>'};
   let h='<h3>'+html(name(from))+' &#8594; '+html(name(to))+'</h3>';
   h+='<div class="reason">'+e.count+' importing file(s), '+e.links_total+' file link(s)'+(e.links_total>e.links.length?', showing the first '+e.links.length:'')+'.</div>';
   h+='<div class="sec"><div class="sec-title">File links: importer &#8594; imported</div>'+e.links.map(([a,b])=>'<div class="elink">'+side(a)+'<span class="earrow">&#8594;</span>'+side(b)+'</div>').join('')+'</div>';
@@ -1210,8 +1327,11 @@ function selectEdge(from,to){
   d.querySelectorAll('[data-path]').forEach(r=>r.addEventListener('click',()=>selectFile(r.dataset.path)));
 }
 
-window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap();else if(viewMode==='quadrant')renderQuadrant()});
-renderInbox();
+window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap();else if(viewMode==='quadrant')renderQuadrant();else if(viewMode==='arch'){archView.fit=true;renderArch()}});
+(function(){
+  const b=document.querySelector('.view-toggle [data-mode="'+location.hash.slice(2).replace(/[^a-z]/g,'')+'"]');
+  if(b)setMode(b.dataset.mode,b);else renderInbox();
+})();
 </script>
 </body>
 </html>`

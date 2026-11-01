@@ -62,10 +62,11 @@ func Markers(paths []string, exists func(string) bool) map[string]bool {
 
 // supportingDirs are directory names that hold code around the product
 // rather than the product itself: CI, deployment, scripts, examples, docs,
-// tests, benchmarks, fixtures and vendored code.
+// tests, benchmarks, fixtures, test data and vendored code.
 var supportingDirs = map[string]bool{
 	"examples": true, "scripts": true, ".github": true, "docs": true, "deploy": true,
-	"tests": true, "e2e": true, "benchmarks": true, "fixtures": true, "vendor": true, "third_party": true,
+	"tests": true, "e2e": true, "benchmarks": true, "bench": true, "fixtures": true, "testdata": true,
+	"vendor": true, "third_party": true,
 }
 
 // IsSupporting reports whether a component is supporting code rather than

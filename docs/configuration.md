@@ -62,7 +62,7 @@ Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+a
 
 ## Tour Supporting Components
 
-`get tour` hides supporting components (CI, deployment, scripts, examples) unless `--include-supporting` is given. The same rule marks runtime units supporting when their entry point sits in such a component (see `list units`). A component is supporting when any of its path segments is `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `fixtures`, `vendor` or `third_party`. Add more with globs (Go `path.Match` syntax, matched against the component and each of its parent directories); they extend the defaults:
+`get tour` hides supporting components (CI, deployment, scripts, examples) unless `--include-supporting` is given. The same rule marks runtime units supporting when their entry point sits in such a component (see `list units`). A component is supporting when any of its path segments is `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `bench`, `fixtures`, `testdata`, `vendor` or `third_party`. Add more with globs (Go `path.Match` syntax, matched against the component and each of its parent directories); they extend the defaults:
 
 ```yaml
 tour:

@@ -34,20 +34,32 @@ type archNode struct {
 	Label     string   `json:"label,omitempty"`
 	Members   []string `json:"members,omitempty"`
 	Placement string   `json:"placement,omitempty"`
+	// Supporting nodes are hidden until the view's Supporting toggle is on:
+	// supporting components (tour.IsSupporting: docs, CI, scripts, bench,
+	// testdata, ...), packages holding only config (YAML, TOML, JSON,
+	// Dockerfiles), and supporting units.
+	Supporting bool `json:"supporting,omitempty"`
 }
 
 // maxEdgeLinks caps the file links embedded per edge.
 const maxEdgeLinks = 200
 
+// maxKeyEdges is how many of the strongest edges the Architecture view draws
+// by default, on top of the strongest edge of each Harden now or Protect node.
+const maxKeyEdges = 15
+
 // archEdge says Count distinct files in From import a file in To. Links are
 // the file-level imports (importer, imported) behind the arrow, at most
-// maxEdgeLinks of LinksTotal.
+// maxEdgeLinks of LinksTotal. Key edges are drawn by default with supporting
+// nodes hidden, KeyAll ones with them shown (see keyEdges).
 type archEdge struct {
 	From       string      `json:"from"`
 	To         string      `json:"to"`
 	Count      int         `json:"count"`
 	Links      [][2]string `json:"links"`
 	LinksTotal int         `json:"links_total"`
+	Key        bool        `json:"key,omitempty"`
+	KeyAll     bool        `json:"key_all,omitempty"`
 }
 
 type architecture struct {
@@ -57,10 +69,15 @@ type architecture struct {
 
 var tierRank = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}
 
-// aggregate groups non-test files into nodes by key ("" = left out).
+// nonCode are languages of configuration rather than code.
+var nonCode = map[string]bool{"YAML": true, "TOML": true, "JSON": true, "Dockerfile": true}
+
+// aggregate groups non-test files into nodes by key ("" = left out). A node
+// whose files are all configuration (nonCode) is marked Supporting.
 func aggregate(hm *types.Heatmap, key func(*types.FileHeat) string) map[string]*archNode {
 	nodes := map[string]*archNode{}
 	assessed := map[string]bool{}
+	code := map[string]bool{}
 	for _, f := range hm.Files {
 		if tour.IsTestFile(f.Path) {
 			continue
@@ -76,6 +93,7 @@ func aggregate(hm *types.Heatmap, key func(*types.FileHeat) string) map[string]*
 		}
 		n.Files++
 		n.Lines += f.Size.Lines
+		code[d] = code[d] || !nonCode[f.Language]
 		if f.HeatScore > n.MaxHeat || (f.HeatScore == n.MaxHeat && f.Path < n.Hottest) {
 			n.MaxHeat, n.Hottest = f.HeatScore, f.Path
 		}
@@ -91,6 +109,7 @@ func aggregate(hm *types.Heatmap, key func(*types.FileHeat) string) map[string]*
 		}
 	}
 	for d, n := range nodes {
+		n.Supporting = !code[d]
 		n.ImpactTier = n.Tier
 		if assessed[d] {
 			n.ImpactTier = string(scorer.CalculateTier(n.MaxImpact, scorer.DefaultTierThresholds()))
@@ -155,6 +174,76 @@ func graphOf(es []archEdge) map[string]map[string]int {
 	return g
 }
 
+// keyEdges reports, per edge, whether the Architecture view draws it by
+// default: the top strongest edges by importing-file count (ties by from,
+// then to) plus the strongest edge of each Harden now or Protect node (impact
+// tier critical or high), so every risky node stays connected without
+// drawing all of its edges. Edges with a supporting endpoint only count when
+// withSupporting is set.
+func keyEdges(nodes []archNode, edges []archEdge, top int, withSupporting bool) []bool {
+	byID := make(map[string]archNode, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	risky := func(id string) bool {
+		t := types.Tier(byID[id].ImpactTier)
+		return t == types.TierCritical || t == types.TierHigh
+	}
+	var visible []int
+	key := make([]bool, len(edges))
+	for i, e := range edges {
+		if !withSupporting && (byID[e.From].Supporting || byID[e.To].Supporting) {
+			continue
+		}
+		visible = append(visible, i)
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		a, b := edges[visible[i]], edges[visible[j]]
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		if a.From != b.From {
+			return a.From < b.From
+		}
+		return a.To < b.To
+	})
+	covered := map[string]bool{}
+	for rank, i := range visible {
+		e := edges[i]
+		key[i] = rank < top
+		for _, id := range []string{e.From, e.To} {
+			if risky(id) && !covered[id] {
+				covered[id], key[i] = true, true
+			}
+		}
+	}
+	return key
+}
+
+// markKeyEdges sets Key and KeyAll on edges (see keyEdges).
+func markKeyEdges(nodes []archNode, edges []archEdge) {
+	key, all := keyEdges(nodes, edges, maxKeyEdges, false), keyEdges(nodes, edges, maxKeyEdges, true)
+	for i := range edges {
+		edges[i].Key, edges[i].KeyAll = key[i], all[i]
+	}
+}
+
+// defaultGroup is the Architecture view's opening grouping: "unit" when the
+// repo has two or more product (non-supporting) runtime units, else
+// "package" (a single unit holds everything and shows no structure).
+func defaultGroup(v unitView) string {
+	product := 0
+	for _, n := range v.Nodes {
+		if n.Kind == "unit" && !n.Supporting {
+			product++
+		}
+	}
+	if product >= 2 {
+		return "unit"
+	}
+	return "package"
+}
+
 // sortNodes orders nodes by level, then max heat, then id.
 func sortNodes(ns []archNode) {
 	sort.Slice(ns, func(i, j int) bool {
@@ -181,9 +270,11 @@ func buildArchitecture(hm *types.Heatmap) architecture {
 	levels := tour.Levels(ids, graphOf(arch.Edges))
 	for _, id := range ids {
 		nodes[id].Level = levels[id]
+		nodes[id].Supporting = nodes[id].Supporting || tour.IsSupporting(id, nil)
 		arch.Nodes = append(arch.Nodes, *nodes[id])
 	}
 	sortNodes(arch.Nodes)
+	markKeyEdges(arch.Nodes, arch.Edges)
 	return arch
 }
 
@@ -223,6 +314,7 @@ func buildUnitView(hm *types.Heatmap) (unitView, map[string]string) {
 			nodes[id] = &archNode{ID: id, Tier: string(types.TierLow), ImpactTier: string(types.TierLow)}
 		}
 		nodes[id].Kind, nodes[id].Label, nodes[id].Members = "shared", c, []string{c}
+		nodes[id].Supporting = nodes[id].Supporting || tour.IsSupporting(c, nil)
 		sharedIDs = append(sharedIDs, id)
 	}
 	sharedGraph := map[string]map[string]int{}
@@ -247,6 +339,7 @@ func buildUnitView(hm *types.Heatmap) (unitView, map[string]string) {
 		}
 		n := nodes[id]
 		n.Kind, n.Label, n.Level, n.Placement = "unit", u.Name, top, placementLabel(u.InferredPlacement)
+		n.Supporting = u.Supporting
 		for _, c := range u.Components {
 			if !shared[c] && (owner[c] == "" || owner[c] == u.Name) {
 				n.Members = append(n.Members, c)
@@ -257,6 +350,7 @@ func buildUnitView(hm *types.Heatmap) (unitView, map[string]string) {
 		view.Nodes = append(view.Nodes, *n)
 	}
 	sortNodes(view.Nodes)
+	markKeyEdges(view.Nodes, view.Edges)
 	return view, fileNode
 }
 
