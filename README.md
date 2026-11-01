@@ -87,10 +87,10 @@ Navigate the file tree with colored tier indicators. Select any file to see its 
 
 It opens on the **Action inbox**; four investigation views sit behind tabs. One detail panel: pick a card or a file to see its verdict, both questions with their repo cutoffs (a bar with a tick at the cutoff), the before-merge and backlog checklists, and the reasons folded under **Why**.
 
-**Action inbox**: cards grouped **Before merge** (one per Harden now or Protect file: its top before-merge action, the signal that triggered it, the file and an owner) and **Backlog** (every backlog action, with a **Copy** button for its `gh issue create` command or CODEOWNERS line). The dashboard is static HTML: it copies commands, it never calls GitHub.
+**Action inbox**: a plan, not a list. **Before merge** has one card per Harden now or Protect file: its verdict, path, every before-merge step as a checklist (each with the signal that fired it) and its owners, Harden now first, then by how bad, then by will it break. It shows the top 10 (files tied with the tenth stay in) with **Show all** for the rest. **Backlog** has one card per kind of fix across files, such as "Add 248 CODEOWNERS lines" or "Split 37 oversized files", ordered by how many Harden now files each covers. Open a card to see its files and one **Copy** snippet with every line (all CODEOWNERS lines, sorted, or one `gh issue create` command per file). The posture filter and search apply to both. The dashboard is static HTML: it copies commands, it never calls GitHub.
 
 <p align="center">
-  <img src="docs/images/action-inbox.png" width="820" alt="Action inbox with before-merge and backlog cards, and the detail panel for proxy.rs">
+  <img src="docs/images/action-inbox.png" width="820" alt="Action inbox: the top 10 before-merge files with their checklists, and backlog fixes grouped by kind">
 </p>
 
 **Treemap**: blocks sized by code volume (or break cost), colored by posture. Your eye goes to the big red blocks first.

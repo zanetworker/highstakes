@@ -161,6 +161,7 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .inbox.active{display:block}
 .inbox-intro{font:14px/1.5 var(--font-t);color:var(--muted);max-width:36em;margin-bottom:20px}
 .inbox-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:24px;align-items:start}
+.inbox-cols>section{min-width:0}
 .inbox h2{font:500 18px var(--font-d);color:#fff;display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
 .inbox h2 .count{font:12px var(--font-m);color:var(--dim)}
 .inbox .sub{font:13px var(--font-t);color:var(--muted);margin-bottom:12px}
@@ -174,6 +175,23 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .card .file:hover{color:#fff;text-decoration:underline}
 .card .side{grid-row:1/span 3;grid-column:3;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .card .posture{font:12px var(--font-t)}
+.card .file.title{grid-column:2;font:500 14px/1.4 var(--font-m);color:#fff}
+.card ul.steps{grid-column:2;list-style:none;margin-top:4px}
+.card ul.steps li,.grp ul.gfiles li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px;margin-bottom:4px;font:13px/1.45 var(--font-t);color:var(--text)}
+.card ul.steps .box{font:12px var(--font-m);color:var(--dim);padding-top:1px}
+.card .sig{display:block;color:var(--dim);font-size:12px}
+details.grp{display:block;padding:0}
+details.grp summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:12px minmax(0,1fr) auto;column-gap:8px;align-items:baseline;padding:12px 16px}
+details.grp summary::-webkit-details-marker{display:none}
+details.grp summary .dot{align-self:start}
+details.grp summary .meta{font:12px var(--font-m);color:var(--dim)}
+details.grp summary .do::after{content:' +';color:var(--dim)}
+details.grp[open] summary .do::after{content:' \2212'}
+details.grp[open]{background:var(--raise)}
+.grp ul.gfiles{list-style:none;padding:0 16px 12px 36px}
+.grp ul.gfiles li{grid-template-columns:minmax(0,1fr);gap:0}
+.snip{display:flex;gap:8px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;margin:0 16px 12px 36px}
+.snip code{flex:1;min-width:0;max-height:192px;overflow:auto;font:12px/1.5 var(--font-m);color:var(--muted);white-space:pre}
 .cmd{grid-column:2/span 2;min-width:0;display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 4px 4px 8px;margin-top:4px}
 .cmd code{flex:1;min-width:0;font:12px var(--font-m);color:var(--muted);overflow-x:auto;white-space:nowrap}
 .copy{border:1px solid var(--border);background:var(--raise);border-radius:4px;padding:4px 8px;font:12px var(--font-t);color:var(--text);cursor:pointer;flex-shrink:0}
@@ -666,40 +684,53 @@ function selectFile(path){
   d.innerHTML=h;
 }
 
-// Action inbox: before-merge cards for Harden now and Protect files, and
-// backlog cards with copyable commands. Posture filter and search apply.
-const INBOX_PAGE=8;
-const inboxOpen={before_merge:false,backlog:false};
-function inboxCards(list){
+// Action inbox: one before-merge card per Harden now or Protect file (its
+// steps and owners) and one backlog card per action kind (its files and one
+// combined snippet). Go does the grouping and ordering; this only renders.
+// Posture filter and search apply.
+const inboxOpen={before_merge:false,groups:new Set()};
+function inboxMatch(path,verdict,text){
   const want=currentFilter==='all'?null:POSTURE[currentFilter];
-  return (list||[]).filter(c=>(!want||c.verdict===want)&&(!searchQ||c.path.toLowerCase().includes(searchQ)||c.text.toLowerCase().includes(searchQ)||(c.signal||'').toLowerCase().includes(searchQ)));
+  return (!want||verdict===want)&&(!searchQ||path.toLowerCase().includes(searchQ)||(text||'').toLowerCase().includes(searchQ));
 }
-function cardHTML(c){
+function fileCardHTML(c){
   const vc=VC[c.verdict]||VC['Not assessed'];
   let h='<article class="card"><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
-  h+='<div class="do">'+htmlEsc(c.text)+'</div>';
-  h+='<div class="why">'+htmlEsc(c.signal||'')+'</div>';
-  h+='<div class="who"><button class="file" data-path="'+attr(c.path)+'">'+htmlEsc(c.path)+'</button>'+(c.owner?'<span>'+htmlEsc(c.owner)+'</span>':'')+(c.more?'<span>+'+c.more+' more before merge</span>':'')+'</div>';
+  h+='<button class="file title" data-path="'+attr(c.path)+'">'+htmlEsc(c.path)+'</button>';
   h+='<div class="side"><span class="posture" style="color:'+vc+'">'+htmlEsc(c.verdict)+'</span></div>';
-  if(c.command)h+=cmdRow(c.command);
+  h+='<ul class="steps">'+c.steps.map(s=>'<li><span class="box" aria-hidden="true">[ ]</span><span>'+htmlEsc(s.text)+(s.signal?'<span class="sig">'+htmlEsc(s.signal)+'</span>':'')+'</span></li>').join('')+'</ul>';
+  if(c.owners&&c.owners.length)h+='<div class="who">Owners: '+c.owners.map(htmlEsc).join(', ')+'</div>';
   return h+'</article>';
 }
-function inboxSection(key,title,sub,unit){
-  const all=inboxCards(INBOX[key]);
-  const shown=inboxOpen[key]?all:all.slice(0,INBOX_PAGE);
-  let h='<section aria-labelledby="h-'+key+'"><h2 id="h-'+key+'">'+title+' <span class="count">'+all.length+' '+unit+'</span></h2><div class="sub">'+sub+'</div>';
-  h+=all.length?shown.map(cardHTML).join(''):'<div class="empty">Nothing here for this filter</div>';
-  if(all.length>INBOX_PAGE)h+='<button class="more" data-more="'+key+'">'+(inboxOpen[key]?'Show fewer':'Show all '+all.length)+'</button>';
-  return h+'</section>';
+function groupHTML(g,items){
+  const vc=g.harden?VC['Harden now']:(VC[g.items[0].verdict]||VC['Not assessed']);
+  const parts=[];
+  if(g.harden)parts.push(g.harden+' Harden now');
+  if(items.length<g.items.length)parts.push(items.length+' match the filter');
+  let h='<details class="card grp" data-kind="'+attr(g.kind)+'"'+(inboxOpen.groups.has(g.kind)?' open':'')+'><summary><span class="dot" style="background:'+vc+'" aria-hidden="true"></span>';
+  h+='<span class="do">'+htmlEsc(g.title)+'</span><span class="meta">'+htmlEsc(parts.join(' · '))+'</span></summary>';
+  if(g.snippet)h+='<div class="snip"><code>'+htmlEsc(g.snippet)+'</code><button class="copy" data-cmd="'+attr(g.snippet)+'" aria-label="Copy all '+g.items.length+' lines">Copy</button></div>';
+  h+='<ul class="gfiles">'+items.map(it=>'<li><button class="file" data-path="'+attr(it.path)+'">'+htmlEsc(it.path)+'</button><span class="sig">'+htmlEsc(it.verdict)+(it.signal?' · '+htmlEsc(it.signal):'')+(it.owner?' · '+htmlEsc(it.owner):'')+'</span></li>').join('')+'</ul>';
+  return h+'</details>';
 }
 function renderInbox(){
   const el=document.getElementById('inbox');
-  el.innerHTML='<p class="inbox-intro">What to do about the riskiest files. Before merge is what any PR touching the file needs; backlog is what to fix in the file over time. '+NOTE+'</p>'+
-    '<div class="inbox-cols">'+
-    inboxSection('before_merge','Before merge','Harden now and Protect files, most at stake first','files')+
-    inboxSection('backlog','Backlog','Open each once as an issue or CODEOWNERS line, then work them down','items')+'</div>';
+  const cards=(INBOX.before_merge||[]).filter(c=>inboxMatch(c.path,c.verdict,c.steps.map(s=>s.text+' '+(s.signal||'')).join(' ')));
+  const top=INBOX.top||0;
+  const shown=inboxOpen.before_merge?cards:cards.slice(0,top);
+  const groups=(INBOX.backlog||[]).map(g=>({g,items:g.items.filter(it=>inboxMatch(it.path,it.verdict,g.title+' '+(it.signal||'')))})).filter(x=>x.items.length);
+  const nFiles=new Set(groups.flatMap(x=>x.items.map(it=>it.path))).size;
+  const lead=shown.length===1?'The file where a mistake would hurt most: any PR touching it':'The '+shown.length+' files where a mistake would hurt most: any PR touching them';
+  let h='<p class="inbox-intro">'+(shown.length?lead+' needs these steps before merge. ':'')+'The backlog groups the fixes to make once, across files. '+NOTE+'</p><div class="inbox-cols">';
+  h+='<section aria-labelledby="h-before_merge"><h2 id="h-before_merge">Before merge <span class="count">'+shown.length+' of '+cards.length+' files</span></h2><div class="sub">Harden now first, then by how bad, then by will it break</div>';
+  h+=cards.length?shown.map(fileCardHTML).join(''):'<div class="empty">Nothing here for this filter</div>';
+  if(cards.length>top)h+='<button class="more" data-more="before_merge">'+(inboxOpen.before_merge?'Show top '+top:'Show all '+cards.length)+'</button>';
+  h+='</section><section aria-labelledby="h-backlog"><h2 id="h-backlog">Backlog <span class="count">'+groups.length+' fixes across '+nFiles+' files</span></h2><div class="sub">Open each fix once, then work down its files. Copy takes every line in the group</div>';
+  h+=groups.length?groups.map(x=>groupHTML(x.g,x.items)).join(''):'<div class="empty">Nothing here for this filter</div>';
+  el.innerHTML=h+'</section></div>';
   el.querySelectorAll('.file').forEach(b=>b.addEventListener('click',()=>selectFile(b.dataset.path)));
-  el.querySelectorAll('.more').forEach(b=>b.addEventListener('click',()=>{inboxOpen[b.dataset.more]=!inboxOpen[b.dataset.more];renderInbox()}));
+  el.querySelectorAll('.more').forEach(b=>b.addEventListener('click',()=>{inboxOpen.before_merge=!inboxOpen.before_merge;renderInbox()}));
+  el.querySelectorAll('details.grp').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)inboxOpen.groups.add(d.dataset.kind);else inboxOpen.groups.delete(d.dataset.kind)}));
 }
 
 // View mode toggle

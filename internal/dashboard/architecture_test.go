@@ -242,8 +242,8 @@ func TestGenerate_EmbedsExplanation(t *testing.T) {
 	for _, want := range []string{
 		`"impact_title":"Break cost (HIGH)"`,
 		`"likely_title":"Break signals (LOW)"`,
-		`"before_merge":[{"path":"api/a.go","verdict":"Protect","text":"Get an owner's review (@ana)"`,
-		`"command":"/api/a.go @ana"`,
+		`"before_merge":[{"path":"api/a.go","verdict":"Protect","steps":[{"text":"Get an owner's review (@ana)"`,
+		`"snippet":"/api/a.go @ana"`,
 		`Do before the next merge`, `Put on the backlog`, `function htmlEsc`, `function copyCommand`,
 		`role="tablist"`, `id="inbox"`, `'fragile-critical':{label:'Harden now'`, `Will it break?`, `How bad if it breaks?`,
 		`not a probability`, `validated on bug-fix history`, `AI-assessed, not yet checked against maintainer ratings`,
