@@ -185,7 +185,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	// Units need quadrants (fragile-critical counts); they are optional, so a
 	// failure leaves the heatmap without them.
 	fmt.Println("  - Finding runtime units...")
-	if err := units.Apply(heatmap, os.DirFS(g.repoPath), g.config.Exclude.Dirs); err != nil {
+	if err := units.Apply(heatmap, os.DirFS(g.repoPath), g.config.Exclude.Dirs, g.config.Tour.Supporting); err != nil {
 		fmt.Fprintf(os.Stderr, "  Warning: no runtime units: %v\n", err)
 	}
 

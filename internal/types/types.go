@@ -49,10 +49,41 @@ type Unit struct {
 	MaxImpact       int      `json:"max_impact"` // highest impact among linked files
 	ImpactAssessed  bool     `json:"impact_assessed"`
 	FragileCritical int      `json:"fragile_critical"` // linked files in the fragile-critical quadrant
+	// Supporting marks units around the product: entry points in a
+	// supporting component (examples, scripts, tests, benchmarks, ...) and
+	// helper bins under src/bin/ of a crate that has its own main.
+	Supporting bool `json:"supporting,omitempty"`
 	// InferredPlacement lists deployment hints (Dockerfile entrypoints,
 	// Helm or Kubernetes images) that name this unit. Best effort: a hint
 	// says where the binary is packaged, not that it runs there.
 	InferredPlacement []Placement `json:"inferred_placement,omitempty"`
+}
+
+// DeclaredArchitecture is .heatmap/architecture.yaml: runtime links and
+// placements a human declares because imports and manifests cannot show
+// them (gRPC sessions, sockets, which pod runs what). Outputs mark them
+// "declared" to keep them apart from inferred ones.
+type DeclaredArchitecture struct {
+	Links     []DeclaredLink      `yaml:"links" json:"links"`
+	Placement []DeclaredPlacement `yaml:"placement" json:"placement"`
+}
+
+// DeclaredLink says unit From talks to unit To at runtime (Both: in both
+// directions). Evidence is a file:line backing the claim.
+type DeclaredLink struct {
+	From     string `yaml:"from" json:"from"`
+	To       string `yaml:"to" json:"to"`
+	Label    string `yaml:"label,omitempty" json:"label,omitempty"`
+	Both     bool   `yaml:"both,omitempty" json:"both,omitempty"`
+	Evidence string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// DeclaredPlacement says where a unit runs, e.g. "workload pod". It
+// overrides inferred placement in diagrams.
+type DeclaredPlacement struct {
+	Unit     string `yaml:"unit" json:"unit"`
+	RunsIn   string `yaml:"runs_in" json:"runs_in"`
+	Evidence string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
 }
 
 // Placement is one deployment hint for a unit.

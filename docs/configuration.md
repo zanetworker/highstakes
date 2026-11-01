@@ -60,7 +60,7 @@ Matching is case-insensitive. Without an alias, GitHub noreply addresses (`123+a
 
 ## Tour Supporting Components
 
-`get tour` hides supporting components (CI, deployment, scripts, examples) unless `--include-supporting` is given. A component is supporting when any of its path segments is `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `fixtures`, `vendor` or `third_party`. Add more with globs (Go `path.Match` syntax, matched against the component and each of its parent directories); they extend the defaults:
+`get tour` hides supporting components (CI, deployment, scripts, examples) unless `--include-supporting` is given. The same rule marks runtime units supporting when their entry point sits in such a component (see `list units`). A component is supporting when any of its path segments is `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `fixtures`, `vendor` or `third_party`. Add more with globs (Go `path.Match` syntax, matched against the component and each of its parent directories); they extend the defaults:
 
 ```yaml
 tour:
@@ -70,6 +70,38 @@ tour:
 ```
 
 A malformed glob makes `get tour` exit with code 2.
+
+## Architecture Declarations
+
+`.heatmap/architecture.yaml` is optional. It declares runtime links and placements that imports and manifests cannot show, so generated pictures (`get architecture`, the dashboard unit view, `list units`) draw the real topology. Unit names are the ones `list units --include-supporting` prints.
+
+```yaml
+links:
+  - from: openshell-supervisor
+    to: openshell-gateway
+    label: gRPC control session          # arrow label (SeeCode shows up to 28 characters)
+    both: true                           # two-way arrow
+    evidence: docs/how-it-works/sandboxes/overview.mdx:1070
+  - from: openshell-gateway
+    to: openshell-driver-kubernetes
+    label: creates sandboxes
+placement:
+  - unit: openshell-sandbox
+    runs_in: workload pod                # group label (up to 21 characters fit beside "(declared)")
+    evidence: crates/openshell-driver-kubernetes/src/shared_supervisor.rs:47
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `links[].from`, `links[].to` | yes | Unit names; must differ |
+| `links[].label` | no | What travels; defaults to "runtime link" |
+| `links[].both` | no | The link goes both ways |
+| `links[].evidence` | no | `file:line` backing the claim; shown in `list units` and the dashboard |
+| `placement[].unit` | yes | Unit name; one placement per unit |
+| `placement[].runs_in` | yes | Where it runs ("workload pod", "gateway deployment"); overrides inferred placement in diagrams |
+| `placement[].evidence` | no | `file:line` backing the claim |
+
+Declared links draw dashed, and declared placements carry "declared", everywhere they appear; inferred ones stay solid and "inferred". The file is read on every command, so editing it needs no new `analyze`. Unknown fields, a missing required field, a self link, a second placement for one unit, or a unit name not in the heatmap make `get architecture`, `list units` and `dashboard` exit with code 2, listing every problem and the valid unit names. Write evidence you checked: the picture is only as true as the declarations.
 
 ## LLM Provider
 

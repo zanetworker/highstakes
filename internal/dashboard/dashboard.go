@@ -42,7 +42,10 @@ type fileEntry struct {
 	LikelyTitle string             `json:"likely_title,omitempty"`
 }
 
-func Generate(hm *types.Heatmap, outputPath string) error {
+// Generate writes the dashboard. decl holds the runtime links and placements
+// declared in .heatmap/architecture.yaml; the unit view draws them apart
+// from inferred ones.
+func Generate(hm *types.Heatmap, decl types.DeclaredArchitecture, outputPath string) error {
 	unitView, fileNode := buildUnitView(hm)
 	var files []fileEntry
 	for _, f := range hm.Files {
@@ -123,7 +126,7 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 
 	archJSON, _ := json.Marshal(buildArchitecture(hm))
 	unitsJSON, _ := json.Marshal(map[string]interface{}{
-		"nodes": unitView.Nodes, "edges": unitView.Edges, "unlinked": unitView.Unlinked, "units": hm.Metadata.Units,
+		"nodes": unitView.Nodes, "edges": unitView.Edges, "unlinked": unitView.Unlinked, "units": hm.Metadata.Units, "declared": decl,
 	})
 
 	html := strings.ReplaceAll(tmpl, "/*__FILES__*/[]", string(filesJSON))
@@ -257,6 +260,9 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .arch .ae:hover path{stroke:var(--muted)}
 .arch .ae.esel path{stroke:var(--accent)}
 .arch .ae path.ae-hit{stroke:transparent;stroke-width:12}
+.arch .ae.declared{cursor:default}
+.arch .ae.declared path{stroke:var(--accent);stroke-dasharray:6 4}
+.arch .ae.declared text{fill:var(--accent)}
 .elink{font:11px var(--font-m);padding:4px 0;border-bottom:1px solid var(--border);word-break:break-all}
 .elink-file{cursor:pointer;color:var(--text)}
 .elink-file:hover{color:#fff}
@@ -329,6 +335,7 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="arch-hint"><div class="arch-bar"><label>Group by:</label>
 <button class="fbtn on" data-g="package" onclick="setGroup('package',this)">Package</button>
 <button class="fbtn" data-g="unit" onclick="setGroup('unit',this)">Unit</button>
+<button class="fbtn" id="sup-toggle" onclick="toggleSupporting(this)" title="Unit view: show supporting units (examples, scripts, tests, helper bins)">Supporting units</button>
 <label style="margin-left:12px">Zoom:</label>
 <button class="fbtn" onclick="archZoomBy(1/1.25)" title="Zoom out">&#8722;</button>
 <button class="fbtn" onclick="archZoomBy(1.25)" title="Zoom in">+</button>
@@ -754,9 +761,22 @@ function rerender(){
 // foundations at the bottom; arrows point from importer to dependency.
 // Grouped by package (directory) or by runtime unit (binaries and scripts,
 // with shared libraries as a band below). Wheel or pinch zooms, drag pans.
-let archSel=null,archEdgeSel=null,archGroup='package',archLast=null,archDragged=false;
+let archSel=null,archEdgeSel=null,archGroup='package',archLast=null,archDragged=false,showSupporting=false;
 const archView={k:1,tx:0,ty:0,fit:true};
-function archData(){return archGroup==='unit'?UNITS:ARCH}
+// unitData is the unit view without hidden supporting units, plus the links
+// declared in .heatmap/architecture.yaml.
+function unitData(){
+  const hidden=new Set((UNITS.units||[]).filter(u=>u.supporting&&!showSupporting).map(u=>'u:'+u.name));
+  const keep=e=>!hidden.has(e.from)&&!hidden.has(e.to);
+  const declared=((UNITS.declared||{}).links||[]).map(l=>({from:'u:'+l.from,to:'u:'+l.to,label:l.label||'runtime link',both:!!l.both,evidence:l.evidence||''}));
+  return {nodes:(UNITS.nodes||[]).filter(n=>!hidden.has(n.id)),edges:(UNITS.edges||[]).filter(keep),declared:declared.filter(keep),hidden:hidden.size};
+}
+function declaredPlacement(name){return ((UNITS.declared||{}).placement||[]).find(p=>p.unit===name)}
+function toggleSupporting(btn){
+  showSupporting=!showSupporting;btn.classList.toggle('on',showSupporting);
+  archSel=null;archEdgeSel=null;archView.fit=true;renderArch();
+}
+function archData(){return archGroup==='unit'?unitData():ARCH}
 function archLabel(n){return n.label||(n.id==='.'?'(root)':n.id)}
 function archLayout(G){
   const NODE_H=50,GAP_X=28,GAP_Y=84,GAP_SUB=30,PAD=28;
@@ -805,6 +825,23 @@ function archLayout(G){
   return {boxes,W,H:y+NODE_H+PAD};
 }
 
+// edgePath routes an arrow between two boxes: an arc above when they share
+// a layer, else a vertical S-curve.
+function edgePath(a,b){
+  const x1=a.x+a.w/2,x2=b.x+b.w/2;
+  let y1,y2,d;
+  if(a.y===b.y){ // same layer (import cycle, or a unit linking another unit): arc above
+    y1=a.y;y2=b.y;const lift=Math.min(60,20+Math.abs(x2-x1)/6);
+    d='M'+x1+','+y1+' C'+x1+','+(y1-lift)+' '+x2+','+(y2-lift)+' '+x2+','+y2;
+  }else{
+    const down=a.y<b.y;
+    y1=down?a.y+a.h:a.y;y2=down?b.y:b.y+b.h;
+    const my=(y1+y2)/2;
+    d='M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2;
+  }
+  return {x1,y1,x2,y2,d};
+}
+
 function setGroup(g,btn){
   archGroup=g;archSel=null;archEdgeSel=null;archView.fit=true;renderArch();
 }
@@ -840,17 +877,7 @@ function renderArch(){
   for(const e of G.edges){
     const a=boxes[e.from],b=boxes[e.to];
     if(!a||!b)continue;
-    const x1=a.x+a.w/2,x2=b.x+b.w/2;
-    let y1,y2,d;
-    if(a.y===b.y){ // same layer (import cycle, or a unit linking another unit): arc above
-      y1=a.y;y2=b.y;const lift=Math.min(60,20+Math.abs(x2-x1)/6);
-      d='M'+x1+','+y1+' C'+x1+','+(y1-lift)+' '+x2+','+(y2-lift)+' '+x2+','+y2;
-    }else{
-      const down=a.y<b.y;
-      y1=down?a.y+a.h:a.y;y2=down?b.y:b.y+b.h;
-      const my=(y1+y2)/2;
-      d='M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2;
-    }
+    const {x1,y1,x2,y2,d}=edgePath(a,b);
     const sw=(1+Math.log2(e.count)).toFixed(2);
     const esel=archEdgeSel===e.from+'\n'+e.to;
     const hl=esel||(archSel&&(e.from===archSel||e.to===archSel));
@@ -859,13 +886,23 @@ function renderArch(){
     s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0))+'">'+e.count+'</text>';
     s+='<title>'+e.count+' file(s) in '+html(archLabel(a.n))+' import '+html(archLabel(b.n))+' ('+e.links_total+' file links). Click for the links.</title></g>';
   }
+  for(const e of (unit&&G.declared)||[]){
+    const a=boxes[e.from],b=boxes[e.to];
+    if(!a||!b)continue;
+    const {x1,y1,x2,y2,d}=edgePath(a,b);
+    const dim=focus&&!(linked.has(e.from)&&linked.has(e.to));
+    s+='<g class="ae declared'+(dim?' dim':'')+'"><path d="'+d+'" marker-end="url(#ah)"'+(e.both?' marker-start="url(#ah)"':'')+'/>';
+    s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0)+12)+'">'+html(e.label)+' (declared)</text>';
+    s+='<title>Declared in .heatmap/architecture.yaml: '+html(archLabel(a.n))+(e.both?' &lt;-&gt; ':' -&gt; ')+html(archLabel(b.n))+': '+html(e.label)+(e.evidence?' ['+html(e.evidence)+']':'')+'</title></g>';
+  }
   for(const id in boxes){
     const {n,x,y,w,h}=boxes[id];
     const c=C[n.impact_tier||n.tier]||C.low;
     const dim=(!visible.has(n.id))||(focus&&!linked.has(n.id));
     const score=n.max_impact?n.max_impact:Math.max(0,n.max_heat);
     let meta;
-    if(unit)meta=n.kind==='unit'?(n.placement?'inferred: '+n.placement:n.files+' own files · no placement found'):n.files+' files';
+    const dp=unit&&n.kind==='unit'?declaredPlacement(n.label):null;
+    if(unit)meta=n.kind==='unit'?(dp?'declared: '+dp.runs_in:n.placement?'inferred: '+n.placement:n.files+' own files · no placement found'):n.files+' files';
     else meta=(n.hottest||'').split('/').pop()+' · '+n.files+' files'+(n.likely>0?'':' · '+n.lines+' lines');
     s+='<g class="an'+(archSel===n.id?' sel':'')+(dim?' dim':'')+'" data-dir="'+attr(n.id)+'">';
     if(n.likely>0)s+='<rect class="an-frag" x="'+(x-4)+'" y="'+(y-4)+'" width="'+(w+8)+'" height="'+(h+8)+'" rx="9"/>';
@@ -875,7 +912,7 @@ function renderArch(){
     s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(meta,w-(n.likely>0?70:20),6))+'</text>';
     if(n.likely>0)s+='<text class="an-likely" x="'+(x+w-10)+'" y="'+(y+38)+'" text-anchor="end">'+n.likely+' likely</text>';
     const members=unit&&n.members?'\ncomponents: '+n.members.join(', '):'';
-    const place=unit&&n.placement?'\ninferred placement: '+n.placement:'';
+    const place=(dp?'\ndeclared placement: '+html(dp.runs_in)+(dp.evidence?' ['+html(dp.evidence)+']':''):'')+(unit&&n.placement?'\ninferred placement: '+n.placement:'');
     s+='<title>'+html(archLabel(n))+members+place+'\nmax impact: '+(n.max_impact||'not assessed')+(n.hottest?'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')':'')+'\n'+n.likely+' file(s) likely to need fixes\n'+n.files+' files, '+n.lines+' lines</title></g>';
   }
   s+='</g></svg>';
@@ -883,11 +920,11 @@ function renderArch(){
     '<span><i class="frag"></i>contains files likely to need fixes</span></div>';
   const nav=' Click an arrow for the file links behind it. Wheel or pinch to zoom, drag to pan.';
   txt.innerHTML=(unit?
-    'Boxes on top are runtime units: entry points found from manifests and main files, holding the components only they link. The band below holds shared libraries linked by two or more units. Placement labels are inferred from Dockerfiles, Helm values and Kubernetes manifests, not observed. Arrows point from importer to dependency (label = importing files); color = max impact; number = max impact.'+(UNITS.unlinked?' '+UNITS.unlinked+' non-test file(s) are linked by no unit.':''):
+    'Boxes on top are runtime units: entry points found from manifests and main files, holding the components only they link. The band below holds shared libraries linked by two or more units. Placement labels are inferred from Dockerfiles, Helm values and Kubernetes manifests, not observed. Arrows point from importer to dependency (label = importing files); color = max impact; number = max impact. Dashed arrows and "declared" placements come from .heatmap/architecture.yaml.'+(G.hidden?' '+G.hidden+' supporting unit(s) hidden (Supporting units shows them).':'')+(UNITS.unlinked?' '+UNITS.unlinked+' non-test file(s) are linked by no unit.':''):
     'Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines; color = max impact if a file breaks (heat tier when not assessed); number = max impact. A dashed outline marks packages with files likely to need fixes. Click a package to list its files.')+nav+legend;
   vp.innerHTML=s;
   vp.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectDir(g.dataset.dir)}));
-  vp.querySelectorAll('.ae').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectEdge(g.dataset.from,g.dataset.to)}));
+  vp.querySelectorAll('.ae:not(.declared)').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectEdge(g.dataset.from,g.dataset.to)}));
   if(archView.fit)archFit();else archApply();
 }
 
@@ -939,6 +976,7 @@ function archZoomBy(f){const r=document.getElementById('archvp').getBoundingClie
   const end=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size){start=null;vp.classList.remove('panning')}};
   ['pointerup','pointercancel','pointerleave'].forEach(t=>vp.addEventListener(t,end));
   if(!(UNITS.nodes||[]).length){const b=document.querySelector('.arch-bar [data-g="unit"]');b.disabled=true;b.title='No runtime units in this heatmap'}
+  if(!(UNITS.units||[]).some(u=>u.supporting)){const b=document.getElementById('sup-toggle');b.disabled=true;b.title='No supporting units in this heatmap'}
 })();
 
 // Quadrant view: x = likelihood of needing fixes, y = impact if it breaks.

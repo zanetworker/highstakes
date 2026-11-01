@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
@@ -52,14 +53,15 @@ func runCLI(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { os.Stdout = orig }()
 
 	// Reset flags that persist across Execute calls in one process.
-	for _, c := range []string{"json", "limit", "focus", "per-component", "min-impact", "components", "include-supporting"} {
-		if f := tourCmd.Flags().Lookup(c); f != nil {
+	for _, c := range []*cobra.Command{tourCmd, listUnitsCmd, architectureCmd} {
+		c.Flags().VisitAll(func(f *pflag.Flag) {
 			if sv, ok := f.Value.(pflag.SliceValue); ok {
 				_ = sv.Replace(nil)
 			} else {
 				_ = f.Value.Set(f.DefValue)
 			}
-		}
+			f.Changed = false
+		})
 	}
 	if f := scoreCmd.Flags().Lookup("json"); f != nil {
 		_ = f.Value.Set(f.DefValue)

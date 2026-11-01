@@ -196,17 +196,16 @@ type unitView struct {
 	Unlinked int        `json:"unlinked"` // non-test files no unit links
 }
 
-// buildUnitView groups files into unit and shared-component nodes. A file in
-// a shared component goes to that component's node ("c:<component>"); any
-// other linked file goes to the unit that links it alone, else to the unit
-// owning its component (see units.Owners). It also returns each file's node
-// id ("" when no unit links it).
+// buildUnitView groups files into unit and shared-component nodes (see
+// units.Assign). It also returns each file's node id ("" when no unit links
+// it).
 func buildUnitView(hm *types.Heatmap) (unitView, map[string]string) {
 	view := unitView{Nodes: []archNode{}, Edges: []archEdge{}}
-	fileNode := map[string]string{}
+	fileNode, unlinked := units.Assign(hm)
 	if len(hm.Metadata.Units) == 0 {
 		return view, fileNode
 	}
+	view.Unlinked = unlinked
 	shared := map[string]bool{}
 	for _, u := range hm.Metadata.Units {
 		for _, c := range u.Shared {
@@ -214,22 +213,6 @@ func buildUnitView(hm *types.Heatmap) (unitView, map[string]string) {
 		}
 	}
 	owner := units.Owners(hm.Metadata.Units)
-	for p, f := range hm.Files {
-		switch {
-		case shared[f.Component]:
-			fileNode[p] = "c:" + f.Component
-		case len(f.Units) == 0:
-			if !tour.IsTestFile(p) {
-				view.Unlinked++
-			}
-		case len(f.Units) == 1 && f.Units[0] != owner[f.Component]:
-			fileNode[p] = "u:" + f.Units[0] // e.g. a helper bin's own file in another unit's crate
-		case owner[f.Component] != "":
-			fileNode[p] = "u:" + owner[f.Component]
-		default:
-			fileNode[p] = "u:" + f.Units[0]
-		}
-	}
 	nodes := aggregate(hm, func(f *types.FileHeat) string { return fileNode[f.Path] })
 	view.Edges = edges(hm, func(p string) string { return fileNode[p] })
 

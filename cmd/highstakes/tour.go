@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
+	"github.com/zanetworker/highstakes/internal/units"
 )
 
 // tourCmd is a subcommand of `get`; cobra matches subcommands before
@@ -19,7 +20,14 @@ var tourCmd = &cobra.Command{
 	Short: "Get a reading path for learning the code (most important first, dependencies before them)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		format, _ := cmd.Flags().GetString("format")
+		if j, _ := cmd.Flags().GetBool("json"); j {
+			format = "json"
+		}
+		out, _ := cmd.Flags().GetString("out")
+		if format != "text" && format != "json" && format != "walkthrough" {
+			return cliError(2, "--format %q is not supported (valid: text, json, walkthrough)", format)
+		}
 		limit, _ := cmd.Flags().GetInt("limit")
 		focus, _ := cmd.Flags().GetString("focus")
 		perComponent, _ := cmd.Flags().GetInt("per-component")
@@ -72,12 +80,59 @@ var tourCmd = &cobra.Command{
 			return cliError(1, "build tour: %v", err)
 		}
 
-		if jsonOut {
-			return printJSON(tr)
+		switch format {
+		case "json":
+			return writeOutput(tr, out)
+		case "walkthrough":
+			page, err := tour.Walkthrough(tr, componentRoles(hm.Metadata.Units))
+			if err != nil {
+				return cliError(4, "%v", err)
+			}
+			return writeOutput(page, out)
 		}
-		printTour(os.Stdout, tr)
+		if out == "" {
+			printTour(os.Stdout, tr)
+			return nil
+		}
+		f, err := os.Create(out)
+		if err != nil {
+			return cliError(1, "write %s: %v", out, err)
+		}
+		printTour(f, tr)
+		if err := f.Close(); err != nil {
+			return cliError(1, "write %s: %v", out, err)
+		}
+		fmt.Fprintf(os.Stderr, "Wrote %s\n", out)
 		return nil
 	},
+}
+
+// componentRoles labels components for walkthrough boxes: the unit owning
+// a unit home or linking a component alone, or "shared by N units" for a
+// library several units link (the own/shared split of list units).
+func componentRoles(us []types.Unit) map[string]string {
+	roles := map[string]string{}
+	owner := units.Owners(us)
+	for home, name := range owner {
+		roles[home] = name
+	}
+	for _, u := range us {
+		for _, c := range u.Components {
+			if roles[c] == "" && owner[c] == "" {
+				roles[c] = u.Name
+			}
+		}
+	}
+	linkers := map[string]int{}
+	for _, u := range us {
+		for _, c := range u.Shared {
+			linkers[c]++
+		}
+	}
+	for c, n := range linkers {
+		roles[c] = fmt.Sprintf("shared by %d units", n)
+	}
+	return roles
 }
 
 func printTour(w io.Writer, tr *tour.Tour) {
@@ -148,7 +203,9 @@ func more(total, shown int) string {
 }
 
 func init() {
-	tourCmd.Flags().Bool("json", false, "Output as JSON")
+	tourCmd.Flags().Bool("json", false, "Output as JSON (same as --format json)")
+	tourCmd.Flags().String("format", "text", "Output format: text, json, or walkthrough (data for the show-me rich step-through)")
+	tourCmd.Flags().String("out", "", "Write to this file instead of stdout")
 	tourCmd.Flags().Int("limit", 0, "Keep the N most impactful files (0 = all); ignored with --per-component")
 	tourCmd.Flags().Int("per-component", 0, "Keep the N most important files of each component, one section per component (0 = off)")
 	tourCmd.Flags().Int("min-impact", 0, "Skip files whose impact is below this, and components left without files (0-100)")

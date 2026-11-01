@@ -672,8 +672,12 @@ var dashboardCmd = &cobra.Command{
 		if output == "" {
 			output = filepath.Join(".heatmap", "dashboard.html")
 		}
+		decl, err := loadDeclared(hm)
+		if err != nil {
+			return err
+		}
 
-		if err := dashboard.Generate(hm, output); err != nil {
+		if err := dashboard.Generate(hm, decl, output); err != nil {
 			return err
 		}
 
@@ -720,9 +724,21 @@ var agentContextCmd = &cobra.Command{
 						"tour": map[string]interface{}{
 							"description": "Risk-ordered reading path: directories in dependency order (dependencies first), hottest files first, with file:line anchors",
 							"flags": map[string]interface{}{
-								"--json":  flagDef("bool", false, "Output as JSON (schema version 1)"),
-								"--limit": flagDef("int", 0, "Keep the N hottest files (0 = all)"),
-								"--focus": flagDef("string", "", "Only files under this repo-relative directory or file"),
+								"--json":   flagDef("bool", false, "Output as JSON (schema version 1)"),
+								"--limit":  flagDef("int", 0, "Keep the N hottest files (0 = all)"),
+								"--focus":  flagDef("string", "", "Only files under this repo-relative directory or file"),
+								"--format": flagDef("enum", "text", "Values: text, json, walkthrough (show-me step-through data)"),
+								"--out":    flagDef("string", "", "Write to this file instead of stdout"),
+							},
+						},
+						"architecture": map[string]interface{}{
+							"description": "Generated architecture diagram of runtime units: SeeCode spec or plain JSON, with declared links from .heatmap/architecture.yaml and top files per box as evidence",
+							"flags": map[string]interface{}{
+								"--format":             flagDef("enum", "seecode", "Values: seecode, json"),
+								"--json":               flagDef("bool", false, "Same as --format json"),
+								"--max-nodes":          flagDef("int", 9, "Most boxes (2-24); the rest fold into one other-units box"),
+								"--out":                flagDef("string", "", "Write to this file instead of stdout"),
+								"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
 							},
 						},
 					},
@@ -737,7 +753,10 @@ var agentContextCmd = &cobra.Command{
 					"subcommands": map[string]interface{}{
 						"units": map[string]interface{}{
 							"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
-							"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+							"flags": map[string]interface{}{
+								"--json":               flagDef("bool", false, "Output as JSON"),
+								"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
+							},
 						},
 					},
 				},
@@ -1023,6 +1042,7 @@ func init() {
 	listCmd.Flags().Int("limit", 0, "Max files to return (0 = all)")
 	listCmd.Flags().String("sort", "heat", "Sort by: heat, likelihood, impact")
 	listUnitsCmd.Flags().Bool("json", false, "Output as JSON")
+	listUnitsCmd.Flags().Bool("include-supporting", false, "Include supporting units (examples, scripts, tests, helper bins under src/bin/)")
 	listCmd.AddCommand(listUnitsCmd)
 	rootCmd.AddCommand(listCmd)
 

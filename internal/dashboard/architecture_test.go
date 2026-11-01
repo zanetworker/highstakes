@@ -102,7 +102,7 @@ func TestBuildArchitecture_TierIsMaxSeverity(t *testing.T) {
 
 func TestGenerate_EmbedsArchitecture(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "d.html")
-	if err := Generate(archHeatmap(), out); err != nil {
+	if err := Generate(archHeatmap(), types.DeclaredArchitecture{}, out); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(out)
@@ -197,7 +197,7 @@ func TestGenerate_EmbedsQuadrantView(t *testing.T) {
 	f := hm.Files["api/a.go"]
 	f.Likelihood, f.Impact, f.ImpactAssessed, f.Quadrant = 60, 90, true, types.QuadrantFragileCritical
 	out := filepath.Join(t.TempDir(), "d.html")
-	if err := Generate(hm, out); err != nil {
+	if err := Generate(hm, types.DeclaredArchitecture{}, out); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(out)
@@ -227,7 +227,7 @@ func TestGenerate_EmbedsExplanation(t *testing.T) {
 		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
 	}
 	out := filepath.Join(t.TempDir(), "d.html")
-	if err := Generate(hm, out); err != nil {
+	if err := Generate(hm, types.DeclaredArchitecture{}, out); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(out)

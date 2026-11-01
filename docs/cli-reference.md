@@ -57,7 +57,7 @@ If the file is not found, suggests similar paths from the heatmap.
 Get a reading path for learning the repository: the most important product code first, each section after the sections it depends on. Makes no LLM calls; reads `.heatmap/heatmap.json`, `.heatmap/config.yaml` (for `tour.supporting`) and the source files (for line anchors).
 
 ```sh
-highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--include-supporting] [--limit N] [--focus <dir|file>] [--json]
+highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--include-supporting] [--limit N] [--focus <dir|file>] [--format text|json|walkthrough] [--out FILE] [--json]
 ```
 
 | Flag | Default | Description |
@@ -68,7 +68,9 @@ highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--i
 | `--include-supporting` | `false` | Add supporting components (see below) in a final part titled "Supporting: CI, deployment, scripts and examples" |
 | `--limit` | `0` | Keep the N most impactful files across the repo (0 = all). Selection happens before ordering. Ignored with `--per-component` |
 | `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
-| `--json` | `false` | Output as JSON |
+| `--format` | `text` | `text`, `json`, or `walkthrough` (data for the show-me rich step-through; see below). Another value exits 2 listing these |
+| `--out` | stdout | Write the output to this file instead |
+| `--json` | `false` | Same as `--format json` |
 
 Ordering:
 
@@ -177,6 +179,58 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 | `stops[].owners` | Annotation owner first, then recent commit authors by commit count; up to 3 |
 | `stops[].explanation` | The file's explanation (headline, impact and likelihood reasons, actions); see `get`. The text tour prints the first likelihood reason as `likely because:` and the top two actions as `do:` |
 
+### Walkthrough format
+
+`--format walkthrough` writes the data file of the show-me rich step-through (the `/show-me walkthrough` skill's `walkthrough_build.py` turns it into one self-contained HTML page):
+
+```sh
+highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out openshell-walkthrough.data.json
+python3 <show-me skill>/scripts/walkthrough_build.py openshell-walkthrough.data.json   # writes openshell-walkthrough.html
+```
+
+| Walkthrough element | From the tour |
+|---------------------|---------------|
+| Box (node) | One per component, in tour order, left to right and top to bottom; name without the `<repo>-` prefix; sub line = max impact of its stops and its role (owning unit, or "N units" for a shared library, drawn darker) |
+| Flow | One per part: `product`, and `supporting` with `--include-supporting` |
+| Step (hop) | One per stop, travelling from the previous stop's box (a self step when it stays in one component) |
+| Payload chip | The stop's `file:line` anchor |
+| Rail gist | `do:` the first action, else `read <file>` |
+| Caption | The anchor, both axes and quadrant, why it matters (critical reason or summary) and the first likelihood reason |
+| Color | The stop's quadrant (fragile-critical, protect, watch, low; grey for an impact estimate) |
+
+All heatmap text is HTML-escaped. The map holds 28 boxes; further components are left out and counted in the intro (narrow with `--components`, `--focus` or `--min-impact`). **Exit code 4** when the tour has no stops.
+
+## highstakes get architecture
+
+Get a generated architecture diagram of the runtime units, ready for SeeCode. Reads `.heatmap/heatmap.json`, `.heatmap/architecture.yaml` (declared links and placements; see [Configuration](configuration.md#architecture-declarations)) and the source files (evidence line anchors). No LLM calls.
+
+```sh
+highstakes get architecture [--format seecode|json] [--max-nodes 9] [--out FILE] [--include-supporting] [--json]
+node <seecode skill>/scripts/seecode.mjs render arch.json    # after --out arch.json: writes arch.html
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `seecode` | `seecode` (a SeeCode `architecture` spec) or `json` (the same diagram as plain data). Another value exits 2 listing these |
+| `--max-nodes` | `9` | Most boxes (2-24). The arrow budget follows SeeCode: 12 up to 9 boxes, 20 up to 16, else 36 |
+| `--out` | stdout | Write to this file instead |
+| `--include-supporting` | `false` | Include supporting units (examples, scripts, tests, helper bins) |
+| `--json` | `false` | Same as `--format json` |
+
+What it draws:
+
+- **Boxes**: the product units by max impact (ties: more fragile-critical files, then name). When they fit, all of them plus the shared library the most units import directly. Otherwise the top `max-nodes - 2`, that library (from 4 boxes on; else `max-nodes - 1` units), and one muted "N other units" box for the rest. The highest-impact unit is `focal`.
+- **Arrows**: declared links first (dashed, SeeCode kind `async`, legend "declared (architecture.yaml)"), then imports between boxes labelled with the number of importing files, most first. Arrows over the budget are dropped and counted in the caption. Links into folded units point at "other units".
+- **Groups**: a unit's declared placement (dashed, "(declared)"), else its first inferred deployment hint ("(inferred)": Dockerfile name, `helm <values key>`, `k8s <manifest>`).
+- **Layout**: top to bottom; rows by dependency level over all arrows, drawn or not (callers above what they use), each row centered and ordered to reduce crossings.
+- **Evidence**: every box lists its top 3 files by impact as `{id, file, line, note}`, `note` = quadrant (or impact estimate) and the first action. SeeCode shows them in the box's detail panel.
+
+Text is clipped to SeeCode's limits (box label 40, sub 48, arrow label 28, group label 32 characters).
+
+JSON (`--format json`): `title`, `repo`, `commit`, `nodes[]` (`id`, `label`, `sub`, `tag`, `kind` = `unit`, `library` or `other`, `members`, `max_impact`, `impact_assessed`, `fragile_critical`, `focal`, `group`, `row`, `col`, `files[]` = `{path, line, impact, quadrant, note}`), `edges[]` (`from`, `to`, `label`, `source` = `imports` or `declared`, `count`, `both`, `evidence`), `groups[]` (`id`, `label`, `source` = `declared` or `inferred`, `evidence`), `product_units`, `supporting_hidden`, `dropped_edges`.
+
+**Exit code 2** for a bad flag or an invalid `architecture.yaml` (unknown unit names are listed with the valid ones). **Exit code 4** with no heatmap, no units, or only supporting units (add `--include-supporting`).
+
 ## highstakes list
 
 List files sorted by heat, likelihood or impact. Text rows show heat, `L` (likelihood) and `I` (impact; `I~` marks an estimate without the LLM).
@@ -220,18 +274,19 @@ The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely
 List runtime units: the deployable entry points `analyze` found (Rust bins, Go `main` packages, `package.json` bin and start scripts, Python scripts and `__main__.py`) and what each links through the import graph. Sorted by max impact, then name.
 
 ```sh
-highstakes list units [--json]
+highstakes list units [--include-supporting] [--json]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--include-supporting` | `false` | Show supporting units too: entry points in a supporting component (`examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ..., plus `tour.supporting` globs) and helper bins (Rust bins under `src/bin/` of a crate with its own main). Hidden ones are counted on the last line |
 | `--json` | `false` | Output as JSON |
 
-Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when estimated), fragile-critical file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), and each inferred placement with its evidence (`none found` when there is none).
+Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when estimated), fragile-critical file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), each declared link (`declared link: -> | <- | <-> <unit>: <label> [evidence]`) and declared placement from `.heatmap/architecture.yaml`, and each inferred placement with its evidence (`none found` when there is none).
 
-JSON: `{"units": [...], "count": N}`. Each unit has `name`, `kind` (`rust-bin`, `go-main`, `node-bin`, `node-start`, `python-script`, `python-main`), `entry`, `evidence`, `home` (the entry's component), `components` (home first), `shared`, `files`, `lines`, `max_impact`, `impact_assessed`, `fragile_critical` and `inferred_placement` (each `{kind, detail, evidence}`, kind `dockerfile`, `helm` or `k8s`). The same list is stored in the heatmap `metadata.units`.
+JSON: `{"units": [...], "count": N, "supporting_hidden": N, "declared": {"links": [...], "placement": [...]}}`. Each unit has `name`, `kind` (`rust-bin`, `go-main`, `node-bin`, `node-start`, `python-script`, `python-main`), `entry`, `evidence`, `home` (the entry's component), `components` (home first), `shared`, `files`, `lines`, `max_impact`, `impact_assessed`, `fragile_critical`, `supporting` (omitted when false) and `inferred_placement` (each `{kind, detail, evidence}`, kind `dockerfile`, `helm` or `k8s`). The same list is stored in the heatmap `metadata.units`.
 
-A repo with no entry points (a library) prints a note and exits 0; so does a heatmap written before units existed (run `analyze` again). **Exit code 4** if there is no heatmap. See [How It Works](how-it-works.md#runtime-units) for detection rules and limits.
+A repo with no entry points (a library) prints a note and exits 0; so does a heatmap written before units existed (run `analyze` again). **Exit code 4** if there is no heatmap; **exit code 2** if `.heatmap/architecture.yaml` is invalid. See [How It Works](how-it-works.md#runtime-units) for detection rules and limits.
 
 ## highstakes pr check
 
@@ -402,7 +457,7 @@ The dashboard has four views: a treemap (visual overview), a file explorer (hier
 
 The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. Clicking an arrow lists the file-level imports behind it (importer -> imported, with each file's impact; at most 200 per arrow). The layout is computed in the page (layered, with barycenter ordering to reduce crossings; layers wider than about 1500px wrap into extra rows), so the HTML stays self-contained. The `-`, `+`, **Fit** and **1:1** buttons, the mouse wheel and trackpad or touch pinch zoom; drag to pan. The view fits the screen when first opened.
 
-**Group by: Unit** redraws the view by runtime unit (see `list units`): a top row of unit boxes, each holding the components only that unit links, and a band below with the shared libraries, layered by their own imports. Unit boxes are coloured by the max impact of their own files, carry the same fragility marker, and show the inferred placement (Dockerfile name, Helm values key, Kubernetes manifest). Clicking a unit shows its entry point and evidence, placement evidence, totals across everything it links, own components, shared libraries and files with impact, likelihood and quadrant; clicking a shared library shows the units that link it. The hint line counts non-test files no unit links. The toggle is disabled when the heatmap has no units.
+**Group by: Unit** redraws the view by runtime unit (see `list units`): a top row of unit boxes, each holding the components only that unit links, and a band below with the shared libraries, layered by their own imports. Unit boxes are coloured by the max impact of their own files, carry the same fragility marker, and show the inferred placement (Dockerfile name, Helm values key, Kubernetes manifest). Clicking a unit shows its entry point and evidence, placement evidence, totals across everything it links, own components, shared libraries and files with impact, likelihood and quadrant; clicking a shared library shows the units that link it. The hint line counts non-test files no unit links. The toggle is disabled when the heatmap has no units. Supporting units are hidden until **Supporting units** is on (the hint line counts them; the button is disabled when there are none). Links declared in `.heatmap/architecture.yaml` draw as dashed accent arrows labelled "(declared)", with the evidence in the tooltip, and a declared placement replaces the inferred one on the box as "declared: <runs_in>". An invalid `architecture.yaml` makes `dashboard` exit 2.
 
 The quadrant view plots every non-test file with likelihood on x and impact on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its review guidance. Faded dots have an estimated impact. Click a dot to open the file in the detail panel.
 

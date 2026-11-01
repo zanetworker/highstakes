@@ -9,8 +9,10 @@ import (
 
 // Apply detects the entry points in fsys (rooted at the repo), links them
 // through hm's import graph, attaches deployment hints and stores the units
-// in hm.Metadata.Units. It also sets every file's Component and Units.
-func Apply(hm *types.Heatmap, fsys fs.FS, skipDirs []string) error {
+// in hm.Metadata.Units. It also sets every file's Component and Units, and
+// marks supporting units (see MarkSupporting; supporting holds the
+// tour.supporting globs from config).
+func Apply(hm *types.Heatmap, fsys fs.FS, skipDirs, supporting []string) error {
 	entries, err := Detect(fsys, skipDirs)
 	if err != nil {
 		return err
@@ -36,6 +38,7 @@ func Apply(hm *types.Heatmap, fsys fs.FS, skipDirs []string) error {
 	for i := range us {
 		us[i].InferredPlacement = hints[us[i].Name]
 	}
+	MarkSupporting(us, supporting)
 	hm.Metadata.Units = us
 	return nil
 }

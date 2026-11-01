@@ -145,7 +145,7 @@ func TestPlacementLabel(t *testing.T) {
 
 func TestGenerate_EmbedsUnitView(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "d.html")
-	if err := Generate(unitsHeatmap(), out); err != nil {
+	if err := Generate(unitsHeatmap(), types.DeclaredArchitecture{}, out); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(out)
@@ -160,5 +160,34 @@ func TestGenerate_EmbedsUnitView(t *testing.T) {
 	}
 	if strings.Contains(html, "/*__UNITS__*/") {
 		t.Error("units placeholder not replaced")
+	}
+}
+
+func TestGenerate_DeclaredAndSupporting(t *testing.T) {
+	hm := unitsHeatmap()
+	hm.Metadata.Units[2].Supporting = true // sbx-perf, a helper bin
+	decl := types.DeclaredArchitecture{
+		Links:     []types.DeclaredLink{{From: "sup", To: "sbx", Label: "boundary protocol", Both: true, Evidence: "docs/x.md:3"}},
+		Placement: []types.DeclaredPlacement{{Unit: "sbx", RunsIn: "workload pod"}},
+	}
+	out := filepath.Join(t.TempDir(), "d.html")
+	if err := Generate(hm, decl, out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{
+		`"declared":{"links":[{"from":"sup","to":"sbx","label":"boundary protocol","both":true,"evidence":"docs/x.md:3"}]`,
+		`"runs_in":"workload pod"`,
+		`"supporting":true`,
+		`function toggleSupporting`, // the unit view hides supporting units until toggled
+		`class="ae declared`,        // declared links draw dashed, apart from imports
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
 	}
 }

@@ -99,7 +99,7 @@ All views respond to tier filters (Critical / High / Medium / Low) and search; t
 
 **Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `supervisor-network/src/host.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
 
-**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. On NVIDIA/OpenShell this shows `openshell-sandbox` and `openshell-supervisor` as separate binaries (separate pods), `openshell-supervisor-network` inside the supervisor and `openshell-server` inside the gateway. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
+**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. On NVIDIA/OpenShell this shows `openshell-sandbox` and `openshell-supervisor` as separate binaries (separate pods), `openshell-supervisor-network` inside the supervisor and `openshell-server` inside the gateway. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Supporting units (examples, scripts, helper bins) stay hidden until **Supporting units** is on, and links declared in `.heatmap/architecture.yaml` draw dashed. Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
 
 **Quadrant**: every file as a dot, likelihood on x and impact on y, with the two thresholds drawn and each quadrant labelled with its review guidance. Click a dot to open the file in the detail panel.
 
@@ -168,6 +168,7 @@ highstakes get <file>                                   # Why impact, why likely
 highstakes list --tier high --limit 10                  # Filter files
 highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
 highstakes list units                                   # Binaries and scripts, what each links, where it is packaged
+highstakes get architecture --out arch.json             # Generated architecture diagram (SeeCode spec)
 highstakes report                                       # Distribution report
 ```
 
@@ -289,7 +290,36 @@ A component is a Rust crate, JS/TS package, Python package or Go module (the sha
 
 </details>
 
+`--format walkthrough --out tour.data.json` writes the same tour as data for the show-me rich step-through (see [Generated Pictures and Walkthroughs](#generated-pictures-and-walkthroughs)).
+
 The tour is a starting draft. Add expert guidance through the `annotations` map in `.heatmap/heatmap.json` (`owner`, `notes`); both appear on each stop.
+
+### Generated Pictures and Walkthroughs
+
+Hand-drawn architecture diagrams drift and get topology wrong (a sandbox runtime and its supervisor drawn as one box when they run in separate pods). HighStakes generates the picture and the walkthrough from the heatmap instead, and every box links to its files.
+
+```sh
+highstakes get architecture --format seecode --out arch.json      # SeeCode architecture spec: top units, imports, placements
+node <seecode skill>/scripts/seecode.mjs render arch.json          # arch.html: animated, explorable diagram
+highstakes get architecture --json                                 # Same diagram as plain data
+highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out tour.data.json
+python3 <show-me skill>/scripts/walkthrough_build.py tour.data.json   # tour.html: step-through, one step per stop
+```
+
+The architecture spec holds the top product units by max impact (9 boxes by default, the rest folded into one "other units" box), the library most units import, import arrows labelled with importing-file counts, placement groups, and per box its top 3 files with quadrant and first action as evidence. Supporting units (examples, scripts, tests, helper bins) are left out unless `--include-supporting`.
+
+Imports cannot see runtime links such as a gRPC session between two binaries. Declare those, with evidence, in `.heatmap/architecture.yaml`; they draw dashed and marked "declared", apart from what was inferred:
+
+```yaml
+links:
+  - {from: openshell-supervisor, to: openshell-gateway, label: gRPC control session, both: true,
+     evidence: "docs/how-it-works/sandboxes/overview.mdx:1070"}
+placement:
+  - {unit: openshell-sandbox, runs_in: workload pod,
+     evidence: "crates/openshell-driver-kubernetes/src/shared_supervisor.rs:47"}
+```
+
+On NVIDIA/OpenShell this yields the supervisor in its own pod talking to the gateway (control session) and to the sandbox runtime in the workload pod (boundary protocol), the gateway calling four compute drivers, and all of them importing `openshell-core`. See [the CLI reference](docs/cli-reference.md#highstakes-get-architecture) and [Configuration](docs/configuration.md#architecture-declarations).
 
 ### PR Risk
 
