@@ -150,7 +150,7 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 			if !fc.Unscored || !types.Blocking(fc.Posture()) || tour.IsTestFile(fc.Path) {
 				continue
 			}
-			f = unscoredReview(fc)
+			f = unscoredReview(fc, directoryOwners(hm, fc.Path))
 		}
 		acts := explain.ForPR(f, c)
 		fc.Actions = nil
@@ -169,14 +169,51 @@ var tierOrder = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.
 // unscoredReview is a stand-in record for a new, unassessed file that
 // inherits Harden now or Protect: one review item that approvals and the
 // sign-off label can satisfy like any other.
-func unscoredReview(fc *types.FileChange) *types.FileHeat {
+func unscoredReview(fc *types.FileChange, owners []string) *types.FileHeat {
 	id, who := "owner-review", "someone who knows its directory"
 	if fc.Posture() == "Harden now" {
 		id, who = "senior-review", "a senior owner of its directory"
 	}
 	return &types.FileHeat{Path: fc.Path, Explanation: &types.Explanation{Actions: []types.Action{{
-		ID: id, Scope: types.ScopeBeforeMerge,
+		ID: id, Scope: types.ScopeBeforeMerge, Owners: owners,
 		Text:   "Review the new file `" + fc.Path + "` with " + who,
 		Signal: "new file: not scored yet, treated like its directory (" + fc.Posture() + ")",
 	}}}}
+}
+
+// directoryOwners are the review owners of scored files in the file's
+// directory, or the nearest parent with any, so an owner's approval can
+// satisfy a new file's review item. At most three, in first-seen order.
+func directoryOwners(hm *types.Heatmap, p string) []string {
+	for dir := path.Dir(p); ; dir = path.Dir(dir) {
+		var paths []string
+		for q := range hm.Files {
+			if path.Dir(q) == dir {
+				paths = append(paths, q)
+			}
+		}
+		sort.Strings(paths)
+		var out []string
+		seen := map[string]bool{}
+		for _, q := range paths {
+			f := hm.Files[q]
+			if f.Explanation == nil {
+				continue
+			}
+			for _, a := range f.Explanation.Actions {
+				if a.ID != "senior-review" && a.ID != "owner-review" {
+					continue
+				}
+				for _, o := range a.Owners {
+					if !seen[o] && len(out) < 3 {
+						seen[o] = true
+						out = append(out, o)
+					}
+				}
+			}
+		}
+		if len(out) > 0 || dir == "." || dir == "/" {
+			return out
+		}
+	}
 }

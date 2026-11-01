@@ -72,11 +72,12 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 			"issues: write",                              // to remove the label
 			`"$ACTION" = "synchronize"`,                  // a new push clears the sign-off
 			"labels/highstakes:signed-off",               // ... by deleting the label
-			"collaborators/$actor/permission",            // only write access signs off
+			"collaborators/$SENDER/permission",           // only write access signs off
 			"admin|maintain|write",
-			"highstakes-signed-off-sha",            // sign-off bound to the reviewed commit
-			"github.event.pull_request.head.sha",   // ... compared with the current head
-			"steps.signoff.outputs.sha",            // ... and recorded in the comment
+			"statuses: write",                              // sign-off recorded as a commit status
+			"statuses/$HEAD_SHA",                           // ... on the reviewed head commit
+			"commits/$HEAD_SHA/statuses",                   // ... read back for that commit only
+			`.creator.login == "github-actions[bot]"`,      // ... only the workflow's own status counts
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)
@@ -84,6 +85,9 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 		}
 		if strings.Contains(wf, "contains(github.event.pull_request.labels") {
 			t.Errorf("%s workflow trusts the label's presence alone", name)
+		}
+		if strings.Contains(wf, "highstakes-signed-off-sha") {
+			t.Errorf("%s workflow trusts a comment marker that any commenter can write", name)
 		}
 	}
 }

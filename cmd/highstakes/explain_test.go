@@ -104,7 +104,7 @@ func TestAttachPRActions(t *testing.T) {
 	for _, a := range risk.Checklist {
 		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
 	}
-	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open,owner-review=open" {
+	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open,owner-review=done" {
 		t.Errorf("checklist = %v", got)
 	}
 	if len(risk.WorthDoing) != 1 || risk.WorthDoing[0].ID != "refactor" {
@@ -206,6 +206,34 @@ func TestAttachPRActions_UnscoredCriticalFileBlocks(t *testing.T) {
 			risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/new.go", Tier: tt.tier, Unscored: true, IsNew: true}}}
 			c := buildChange([]prscore.FileChange{{Path: "core/new.go", LinesAdded: 5, IsNew: true}}, hm, nil, nil)
 			c.SignedOff = tt.signedOff
+			attachPRActions(risk, hm, c)
+			var got []string
+			for _, a := range risk.Checklist {
+				got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+			}
+			if strings.Join(got, ",") != tt.want {
+				t.Errorf("checklist = %v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAttachPRActions_UnscoredReviewUsesDirectoryOwners(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"core/old.go": {Path: "core/old.go", ImpactAssessed: true, Quadrant: types.QuadrantProtect,
+			Explanation: &types.Explanation{Actions: []types.Action{{ID: "owner-review", Scope: types.ScopeBeforeMerge, Owners: []string{"@ana"}}}}},
+	}}
+	for _, tt := range []struct {
+		name      string
+		approvals []string
+		want      string
+	}{
+		{"a directory owner's approval ticks it", []string{"ana"}, "owner-review=done"},
+		{"someone else's approval does not", []string{"carl"}, "owner-review=open"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/new.go", Tier: types.TierHigh, Unscored: true, IsNew: true}}}
+			c := buildChange([]prscore.FileChange{{Path: "core/new.go", LinesAdded: 5, IsNew: true}}, hm, tt.approvals, nil)
 			attachPRActions(risk, hm, c)
 			var got []string
 			for _, a := range risk.Checklist {
