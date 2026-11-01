@@ -22,16 +22,39 @@ var tourCmd = &cobra.Command{
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		limit, _ := cmd.Flags().GetInt("limit")
 		focus, _ := cmd.Flags().GetString("focus")
+		perComponent, _ := cmd.Flags().GetInt("per-component")
+		minImpact, _ := cmd.Flags().GetInt("min-impact")
+		components, _ := cmd.Flags().GetStringSlice("components")
 
 		hm, err := loadHeatmap()
 		if err != nil {
 			return err
 		}
 
-		tr, err := tour.Build(hm, tour.Options{Limit: limit, Focus: focus, Source: os.ReadFile})
+		paths := make([]string, 0, len(hm.Files))
+		for p := range hm.Files {
+			paths = append(paths, p)
+		}
+		markers := tour.Markers(paths, func(p string) bool {
+			_, err := os.Stat(p)
+			return err == nil
+		})
+
+		tr, err := tour.Build(hm, tour.Options{
+			Limit: limit, Focus: focus, Source: os.ReadFile,
+			PerComponent: perComponent, MinImpact: minImpact, Components: components, Markers: markers,
+		})
 		switch {
 		case errors.Is(err, tour.ErrInvalidLimit):
 			return cliError(2, "--limit must be 0 (all) or a positive number (got: %d)", limit)
+		case errors.Is(err, tour.ErrInvalidPerComponent):
+			return cliError(2, "--per-component must be 0 (off) or a positive number (got: %d)", perComponent)
+		case errors.Is(err, tour.ErrInvalidMinImpact):
+			return cliError(2, "--min-impact must be 0-100 (got: %d)", minImpact)
+		case errors.Is(err, tour.ErrUnknownComponent):
+			return cliError(2, "--components: %v", err)
+		case errors.Is(err, tour.ErrBelowMinImpact):
+			return cliError(4, "no component under --focus %q reaches --min-impact %d. Lower --min-impact", focus, minImpact)
 		case errors.Is(err, tour.ErrNoFiles):
 			return cliError(4, "no heatmap files under --focus %q. Use a repo-relative directory or file path", focus)
 		case err != nil:
@@ -91,7 +114,10 @@ func more(total, shown int) string {
 
 func init() {
 	tourCmd.Flags().Bool("json", false, "Output as JSON")
-	tourCmd.Flags().Int("limit", 0, "Keep the N most impactful files (0 = all)")
+	tourCmd.Flags().Int("limit", 0, "Keep the N most impactful files (0 = all); ignored with --per-component")
+	tourCmd.Flags().Int("per-component", 0, "Keep the N most important files of each component, one section per component (0 = off)")
+	tourCmd.Flags().Int("min-impact", 0, "Skip components whose highest file impact is below this (0-100)")
+	tourCmd.Flags().StringSlice("components", nil, "Only these components, comma-separated (e.g. crates/openshell-core,internal/tour)")
 	tourCmd.Flags().String("focus", "", "Only files under this repo-relative directory or file")
 	scoreCmd.AddCommand(tourCmd)
 }

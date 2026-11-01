@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 	"github.com/zanetworker/highstakes/pkg/heatmap"
@@ -51,9 +52,13 @@ func runCLI(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { os.Stdout = orig }()
 
 	// Reset flags that persist across Execute calls in one process.
-	for _, c := range []string{"json", "limit", "focus"} {
+	for _, c := range []string{"json", "limit", "focus", "per-component", "min-impact", "components"} {
 		if f := tourCmd.Flags().Lookup(c); f != nil {
-			_ = f.Value.Set(f.DefValue)
+			if sv, ok := f.Value.(pflag.SliceValue); ok {
+				_ = sv.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
 		}
 	}
 	if f := scoreCmd.Flags().Lookup("json"); f != nil {
@@ -74,9 +79,9 @@ func writeHeatmap(t *testing.T) string {
 	hm := &types.Heatmap{
 		Version: "1",
 		Files: map[string]*types.FileHeat{
-			"core/a.go": {Path: "core/a.go", HeatScore: 80, Tier: types.TierHigh,
+			"core/a.go": {Path: "core/a.go", HeatScore: 80, Impact: 80, Tier: types.TierHigh,
 				Dependencies: types.Dependencies{ImportedBy: []types.Dependency{{Path: "cmd/main.go"}}}},
-			"cmd/main.go": {Path: "cmd/main.go", HeatScore: 30, Tier: types.TierLow},
+			"cmd/main.go": {Path: "cmd/main.go", HeatScore: 30, Impact: 30, Tier: types.TierLow},
 		},
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".heatmap"), 0o755); err != nil {
@@ -122,6 +127,10 @@ func TestGetTour_Errors(t *testing.T) {
 	}{
 		{"negative limit", []string{"get", "tour", "--limit", "-1"}, 2, "limit"},
 		{"unknown focus", []string{"get", "tour", "--focus", "nope"}, 4, "nope"},
+		{"negative per-component", []string{"get", "tour", "--per-component", "-1"}, 2, "per-component"},
+		{"min impact above 100", []string{"get", "tour", "--min-impact", "101"}, 2, "min-impact"},
+		{"unknown component lists valid ones", []string{"get", "tour", "--per-component", "1", "--components", "nope"}, 2, "valid: cmd, core"},
+		{"min impact leaves nothing", []string{"get", "tour", "--per-component", "1", "--min-impact", "100"}, 4, "min-impact"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -170,5 +179,37 @@ func TestPrintTour(t *testing.T) {
 	}
 	if strings.Index(out, "core/a.go:1") > strings.Index(out, "cmd/main.go:1") {
 		t.Errorf("dependency should be listed first:\n%s", out)
+	}
+}
+
+func TestGetTour_PerComponent(t *testing.T) {
+	dir := writeHeatmap(t)
+	tests := []struct {
+		name string
+		args []string
+		want []string // section components in order
+	}{
+		{"one section per component", []string{"get", "tour", "--per-component", "1", "--json"}, []string{"core", "cmd"}},
+		{"components restricts", []string{"get", "tour", "--per-component", "1", "--components", "cmd", "--json"}, []string{"cmd"}},
+		{"min impact filters", []string{"get", "tour", "--per-component", "1", "--min-impact", "50", "--json"}, []string{"core"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := runCLI(t, dir, tt.args...)
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			var tr tour.Tour
+			if err := json.Unmarshal([]byte(out), &tr); err != nil {
+				t.Fatalf("invalid JSON %q: %v", out, err)
+			}
+			var got []string
+			for _, s := range tr.Sections {
+				got = append(got, s.Component)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("components = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

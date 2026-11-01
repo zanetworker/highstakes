@@ -217,7 +217,9 @@ Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the
 A reading path for newcomers, auditors and agents learning the codebase. Packages come in dependency order (what everything else imports first), and within each level the most impactful code comes first (then the most central). Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
 
 ```sh
-highstakes get tour --limit 10                          # 10 most impactful files, dependencies first
+highstakes get tour --per-component 2                   # 2 most important files of every crate/package/module
+highstakes get tour --per-component 2 --min-impact 80   # Only components that reach impact 80
+highstakes get tour --limit 10                          # 10 most impactful files repo-wide, dependencies first
 highstakes get tour --focus internal/llm                # One directory
 highstakes get tour --json > tour.json                  # Feed /show-me walkthrough or an agent
 ```
@@ -242,6 +244,29 @@ Tour: 3 stops, dependencies first
       why: JWT cryptographic security boundary
       used by: src/middleware/jwk/jwk.ts, src/utils/jwt/jwt.ts, src/middleware/jwt/jwt.ts, src/utils/jwt/types.ts
 ```
+
+</details>
+
+<details><summary><b>Example: highstakes get tour --per-component 1 (two components shown)</b></summary>
+
+```
+$ highstakes get tour --per-component 1 --components crates/openshell-sandbox,crates/openshell-supervisor-network   # NVIDIA/OpenShell
+Tour: 2 stops, dependencies first
+
+1. crates/openshell-sandbox  [level 4, max impact 95, CRITICAL]
+   1. crates/openshell-sandbox/src/boundary_server.rs:15  🔥🔥🔥 critical  impact 95, likelihood 42, fragile-critical
+      why: Enforces sandbox isolation and authorized control
+      depends on: crates/openshell-sandbox-backend/src/boundary_protocol.rs, crates/openshell-sandbox/src/lib.rs, crates/openshell-sandbox-backend/src/sandbox_auth.rs, crates/openshell-sandbox/src/boundary_io.rs, crates/openshell-sandbox/src/network_broker.rs (+12 more)
+      used by: crates/openshell-sandbox/src/lib.rs
+
+2. crates/openshell-supervisor-network  [level 5, max impact 92, CRITICAL]
+   2. crates/openshell-supervisor-network/src/proxy.rs:6  🔥🔥🔥 critical  impact 92, likelihood 50, fragile-critical
+      why: Enforces sandbox network access and identity-bound policy
+      depends on: crates/openshell-core/src/secrets.rs, crates/openshell-supervisor-network/src/l7/tls.rs, crates/openshell-supervisor-network/src/proxy/destination.rs, crates/openshell-supervisor-network/src/lib.rs, crates/openshell-supervisor-network/src/opa.rs (+18 more)
+      used by: crates/openshell-supervisor-network/src/proxy/destination.rs, crates/openshell-supervisor-network/src/run.rs, crates/openshell-supervisor-network/src/lib.rs, crates/openshell-supervisor-network/src/proxy/relay.rs, crates/openshell-supervisor-network/src/host.rs (+4 more)
+```
+
+A component is a Rust crate, JS/TS package, Python package or Go module (the shallowest directory with its marker file), else the top two segments under `cmd/`, `internal/` and `pkg/`, else the top-level directory. See [the CLI reference](docs/cli-reference.md#highstakes-get-tour).
 
 </details>
 

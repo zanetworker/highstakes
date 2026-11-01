@@ -3,6 +3,7 @@ package tour
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -357,6 +358,14 @@ func TestLineHint(t *testing.T) {
 		{"python class", "class A:\n    pass\n", 1},
 		{"ts export", "import x from 'y'\nexport function f() {}\n", 2},
 		{"rust pub fn", "use std::io;\npub fn run() {}\n", 2},
+		// boundary_server.rs: everything sits in a cfg-gated mod, so the only
+		// earlier match was a pub fn near the end of a 10k-line file.
+		{"rust cfg mod before late pub fn", "//! doc\n\nuse std::path::Path;\n\n#[cfg(target_os = \"linux\")]\nmod linux {\n    fn x() {}\n}\n\npub fn run() {}\n", 6},
+		{"rust enum", "use a::b;\nenum State { A }\n", 2},
+		{"rust trait", "use a::b;\ntrait Driver {}\n", 2},
+		{"rust unsafe fn", "use a::b;\nunsafe fn raw() {}\n", 2},
+		{"rust async fn", "use a::b;\nasync fn serve() {}\n", 2},
+		{"word starting with mod is not a declaration", "modules: x\nfn f() {}\n", 2},
 		{"indented method is not top level", "package x\n  func inner() {}\n", 1},
 		{"no declaration falls back to 1", "key: value\nother: 1\n", 1},
 		{"empty content", "", 1},
@@ -452,6 +461,16 @@ func TestIsTestFile(t *testing.T) {
 		{"tests/ServiceTests.cs", true},
 		{"src/Testing.java", false},
 		{"src/Latest.java", false},
+		{"crates/a/tests/integration.rs", true},
+		{"tests/e2e/sandbox.rs", true},
+		{"crates/a/src/grpc/tests/mod.rs", true},
+		{"crates/a/src/tests.rs", true},
+		{"crates/a/src/lifecycle_tests.rs", true},
+		{"crates/a/src/attests.rs", false},
+		{"crates/a/src/testing/mod.rs", false},
+		{"contest/main.rs", false},
+		{"crates/tests-support/src/lib.rs", false},
+		{"tests", false},
 		{"", false},
 	}
 	for _, tt := range tests {
@@ -545,4 +564,206 @@ func TestBuild_OrdersByImpact(t *testing.T) {
 			t.Errorf("stops = %v, want %v", got, want)
 		}
 	})
+}
+
+func TestComponent(t *testing.T) {
+	markers := map[string]bool{
+		"Cargo.toml":                    true, // workspace root: never a component
+		"crates/net/Cargo.toml":         true,
+		"crates/net/fuzz/Cargo.toml":    true, // nested crate folds into the outer one
+		"packages/web/package.json":     true,
+		"python/sdk/__init__.py":        true,
+		"python/sdk/client/__init__.py": true,
+		"tools/gen/pyproject.toml":      true,
+		"staging/mod/go.mod":            true,
+	}
+	tests := []struct {
+		name, path, want string
+	}{
+		{"rust crate", "crates/net/src/proxy/tls.rs", "crates/net"},
+		{"nested crate folds into outer", "crates/net/fuzz/src/main.rs", "crates/net"},
+		{"js package", "packages/web/src/app.tsx", "packages/web"},
+		{"python package", "python/sdk/client/http.py", "python/sdk"},
+		{"python pyproject", "tools/gen/src/gen/main.py", "tools/gen"},
+		{"nested go module", "staging/mod/pkg/x.go", "staging/mod"},
+		{"go internal package", "internal/tour/tour.go", "internal/tour"},
+		{"go cmd package subdir", "cmd/highstakes/sub/x.go", "cmd/highstakes"},
+		{"go pkg file at depth one", "pkg/doc.go", "pkg"},
+		{"fallback top-level dir", "deploy/helm/values.yaml", "deploy"},
+		{"crate without marker falls back", "crates/other/src/lib.rs", "crates"},
+		{"root file", "Cargo.lock", "."},
+		{"empty path", "", "."},
+		{"nil markers", "crates/net/src/lib.rs", "crates"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := markers
+			if tt.name == "nil markers" {
+				m = nil
+			}
+			if got := Component(tt.path, m); got != tt.want {
+				t.Errorf("Component(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarkers(t *testing.T) {
+	present := map[string]bool{"crates/net/Cargo.toml": true, "Cargo.toml": true, "web/package.json": true}
+	exists := func(p string) bool { return present[p] }
+	tests := []struct {
+		name  string
+		paths []string
+		want  map[string]bool
+	}{
+		{"ancestors are checked once per dir", []string{"crates/net/src/a.rs", "crates/net/src/b.rs", "web/x.ts"},
+			map[string]bool{"crates/net/Cargo.toml": true, "web/package.json": true}},
+		{"root markers are not reported", []string{"main.rs"}, map[string]bool{}},
+		{"no paths", nil, map[string]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Markers(tt.paths, exists); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Markers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// crates: core is imported by net; net has a fragile-critical file with
+// lower impact than its protect files; ui is low impact.
+func crates() (*types.Heatmap, map[string]bool) {
+	mk := func(p string, impact, likelihood int, centrality float64, q types.Quadrant, importedBy ...string) *types.FileHeat {
+		f := file(p, impact, types.TierHigh, importedBy...)
+		f.Impact, f.Likelihood, f.ImpactAssessed, f.Quadrant = impact, likelihood, true, q
+		f.Factors.DependencyCentrality.Score = centrality
+		return f
+	}
+	hm := hmOf(
+		mk("crates/core/src/lib.rs", 70, 10, 0.9, types.QuadrantProtect, "crates/net/src/proxy.rs"),
+		mk("crates/core/src/jwt.rs", 80, 10, 0.1, types.QuadrantProtect),
+		mk("crates/core/src/util.rs", 20, 10, 0.1, types.QuadrantLow),
+		mk("crates/net/src/proxy.rs", 95, 20, 0.1, types.QuadrantProtect),
+		mk("crates/net/src/policy.rs", 95, 40, 0.1, types.QuadrantProtect), // same impact, more likely
+		mk("crates/net/src/tls.rs", 60, 90, 0.1, types.QuadrantFragileCritical),
+		mk("crates/net/tests/e2e.rs", 99, 99, 1, types.QuadrantFragileCritical),
+		mk("crates/ui/src/main.rs", 30, 10, 0, types.QuadrantLow),
+	)
+	markers := map[string]bool{"crates/core/Cargo.toml": true, "crates/net/Cargo.toml": true, "crates/ui/Cargo.toml": true}
+	return hm, markers
+}
+
+func TestBuild_PerComponent(t *testing.T) {
+	hm, markers := crates()
+	tests := []struct {
+		name         string
+		opts         Options
+		wantStops    []string
+		wantSections []string
+	}{
+		{
+			name:         "two per component, fragile-critical first, dependencies first",
+			opts:         Options{PerComponent: 2, Markers: markers},
+			wantStops:    []string{"crates/core/src/jwt.rs", "crates/core/src/lib.rs", "crates/ui/src/main.rs", "crates/net/src/tls.rs", "crates/net/src/policy.rs"},
+			wantSections: []string{"crates/core", "crates/ui", "crates/net"},
+		},
+		{
+			name:         "per-component wins over limit",
+			opts:         Options{PerComponent: 1, Limit: 1, Markers: markers},
+			wantStops:    []string{"crates/core/src/jwt.rs", "crates/ui/src/main.rs", "crates/net/src/tls.rs"},
+			wantSections: []string{"crates/core", "crates/ui", "crates/net"},
+		},
+		{
+			name:         "min impact drops low components",
+			opts:         Options{PerComponent: 1, MinImpact: 50, Markers: markers},
+			wantStops:    []string{"crates/core/src/jwt.rs", "crates/net/src/tls.rs"},
+			wantSections: []string{"crates/core", "crates/net"},
+		},
+		{
+			name:         "min impact equal to max impact keeps the component",
+			opts:         Options{PerComponent: 1, MinImpact: 95, Markers: markers},
+			wantStops:    []string{"crates/net/src/tls.rs"},
+			wantSections: []string{"crates/net"},
+		},
+		{
+			name:         "components restricts",
+			opts:         Options{PerComponent: 5, Components: []string{"crates/net"}, Markers: markers},
+			wantStops:    []string{"crates/net/src/tls.rs", "crates/net/src/policy.rs", "crates/net/src/proxy.rs"},
+			wantSections: []string{"crates/net"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := Build(hm, tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := stopPaths(tr); !reflect.DeepEqual(got, tt.wantStops) {
+				t.Errorf("stops = %v, want %v", got, tt.wantStops)
+			}
+			var secs []string
+			for _, s := range tr.Sections {
+				secs = append(secs, s.Component)
+				if s.Title != s.Component || s.Dir != s.Component {
+					t.Errorf("section title %q dir %q, want component %q", s.Title, s.Dir, s.Component)
+				}
+			}
+			if !reflect.DeepEqual(secs, tt.wantSections) {
+				t.Errorf("sections = %v, want %v", secs, tt.wantSections)
+			}
+		})
+	}
+
+	t.Run("component graph sets levels and neighbours", func(t *testing.T) {
+		tr, err := Build(hm, Options{PerComponent: 2, Markers: markers})
+		if err != nil {
+			t.Fatal(err)
+		}
+		net := tr.Sections[2]
+		if net.Level != 1 || !reflect.DeepEqual(net.DependsOn, []string{"crates/core"}) {
+			t.Errorf("net level %d depends_on %v, want 1 [crates/core]", net.Level, net.DependsOn)
+		}
+		if net.MaxImpact != 95 {
+			t.Errorf("net max_impact = %d, want 95 (policy.rs, listed after the fragile-critical tls.rs)", net.MaxImpact)
+		}
+		if core := tr.Sections[0]; !reflect.DeepEqual(core.UsedBy, []string{"crates/net"}) || core.MaxImpact != 80 {
+			t.Errorf("core used_by %v max_impact %d, want [crates/net] 80", core.UsedBy, core.MaxImpact)
+		}
+	})
+}
+
+func TestBuild_PerComponentErrors(t *testing.T) {
+	hm, markers := crates()
+	tests := []struct {
+		name    string
+		opts    Options
+		wantErr error
+		wantMsg string
+	}{
+		{"negative per-component", Options{PerComponent: -1}, ErrInvalidPerComponent, "-1"},
+		{"negative min impact", Options{MinImpact: -1}, ErrInvalidMinImpact, "-1"},
+		{"min impact above 100", Options{MinImpact: 101}, ErrInvalidMinImpact, "101"},
+		{"unknown component lists valid ones", Options{PerComponent: 1, Components: []string{"crates/nope"}, Markers: markers},
+			ErrUnknownComponent, "crates/core, crates/net, crates/ui"},
+		{"min impact above every component", Options{PerComponent: 1, MinImpact: 100, Markers: markers}, ErrBelowMinImpact, "100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(hm, tt.opts)
+			if !errors.Is(err, tt.wantErr) || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("err = %v, want %v containing %q", err, tt.wantErr, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestBuild_LimitModeSetsComponent(t *testing.T) {
+	hm, markers := crates()
+	tr, err := Build(hm, Options{Limit: 1, Markers: markers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := tr.Sections[0]; s.Dir != "crates/net/src" || s.Component != "crates/net" {
+		t.Errorf("section dir %q component %q, want crates/net/src crates/net", s.Dir, s.Component)
+	}
 }

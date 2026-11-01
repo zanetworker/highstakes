@@ -57,12 +57,15 @@ If the file is not found, suggests similar paths from the heatmap.
 Get a reading path for learning the repository: dependencies first, the most impactful files first. Makes no LLM calls; reads only `.heatmap/heatmap.json` and the source files (for line anchors).
 
 ```sh
-highstakes get tour [--limit N] [--focus <dir|file>] [--json]
+highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--limit N] [--focus <dir|file>] [--json]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--limit` | `0` | Keep the N most impactful files (0 = all). Selection happens before ordering |
+| `--per-component` | `0` | Keep the N most important files of every component, one section per component (0 = off). Takes precedence over `--limit` |
+| `--min-impact` | `0` | Skip components whose highest file impact is below this (0-100) |
+| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/openshell-core,internal/tour`) |
+| `--limit` | `0` | Keep the N most impactful files across the repo (0 = all). Selection happens before ordering. Ignored with `--per-component` |
 | `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
 | `--json` | `false` | Output as JSON |
 
@@ -72,13 +75,25 @@ Ordering:
 2. Sections are ordered by dependency level: level 0 imports no other directory, level N imports something at level N-1. Levels come from the whole repo's import graph, so the order holds even when `--limit` drops the directories in between. Directories in an import cycle share a level.
 3. Within a level, sections go by max impact; within a section, files go by impact, then dependency centrality. Heat breaks remaining ties, so heatmaps from before the two axes still order sensibly.
 
+With `--per-component`, sections are components instead of directories, levels come from the component import graph, and files within a component go fragile-critical first, then by impact, likelihood and centrality. A repo-wide `--limit` can fill every stop from two or three hot components; `--per-component` covers every part of the repo, which suits onboarding.
+
+A component is the top-level unit a file belongs to, decided in this order:
+
+1. The shallowest directory below the repo root that holds `Cargo.toml` (Rust crate), `package.json` (JS/TS package), `pyproject.toml` or `__init__.py` (Python package) or `go.mod` (Go module). Units nested inside it fold into it.
+2. Under `cmd/`, `internal/` and `pkg/`, the top two path segments (`internal/tour`).
+3. Otherwise the top-level directory, and `.` for files at the repo root.
+
+Every section carries its `component` in the JSON output, in both modes.
+
 Each stop shows impact, likelihood and quadrant, and its `why` leads with the impact reason (LLM `critical_reason`, else `summary`).
 
-Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
+Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`, `tests.rs`, `*_tests.rs`, `*_test.rs`, and any file under a `tests/` directory) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
 
 `tour` is a subcommand of `get`, so `highstakes get tour` runs the tour and `highstakes get <file>` still looks up a file. A file literally named `tour` at the repo root cannot be looked up with `get`; use `list` instead.
 
-**Exit code 2** for a negative `--limit`. **Exit code 4** if `--focus` matches no file.
+Line anchors point at the first top-level declaration (`func`, `type`, `class`, `def`, `export`, `fn`, `pub`, `struct`, `enum`, `trait`, `impl`, `mod` and similar).
+
+**Exit code 2** for a negative `--limit` or `--per-component`, a `--min-impact` outside 0-100, or an unknown component in `--components` (the error lists the valid names). **Exit code 4** if `--focus` matches no file or no component reaches `--min-impact`.
 
 JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: sections are the grouped narrative, stops carry `file:line` anchors.
 

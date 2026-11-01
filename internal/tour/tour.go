@@ -29,12 +29,28 @@ var (
 	ErrNoFiles = errors.New("no files match")
 	// ErrInvalidLimit means a negative limit was given.
 	ErrInvalidLimit = errors.New("limit must be >= 0")
+	// ErrInvalidPerComponent means a negative per-component count was given.
+	ErrInvalidPerComponent = errors.New("per-component must be >= 0")
+	// ErrInvalidMinImpact means a min impact outside 0-100 was given.
+	ErrInvalidMinImpact = errors.New("min impact must be 0-100")
+	// ErrBelowMinImpact means files matched but no component reached the
+	// min impact. It wraps ErrNoFiles.
+	ErrBelowMinImpact = fmt.Errorf("%w: no component reaches min impact", ErrNoFiles)
+	// ErrUnknownComponent means a requested component has no files in focus.
+	ErrUnknownComponent = errors.New("unknown component")
 )
 
 // Options controls tour selection.
 type Options struct {
 	Limit int    // keep the N most impactful files; 0 = all
 	Focus string // directory or file path prefix; "" or "." = whole repo
+	// PerComponent keeps the N most important files of every component and
+	// makes one section per component. It takes precedence over Limit.
+	PerComponent int
+	MinImpact    int      // drop components whose max impact is lower
+	Components   []string // keep only these components; empty = all
+	// Markers lists marker files that exist (see Markers), for Component.
+	Markers map[string]bool
 	// Source optionally returns a file's content so stops get a line hint
 	// pointing at the first top-level declaration. Errors leave line 1.
 	Source func(path string) ([]byte, error)
@@ -54,12 +70,14 @@ type Tour struct {
 	Sections   []Section `json:"sections"`
 }
 
-// Section groups the stops of one directory (Go package).
+// Section groups the stops of one directory (Go package), or of one
+// component in per-component tours.
 type Section struct {
 	Order     int        `json:"order"`
 	Title     string     `json:"title"`
 	Dir       string     `json:"dir"`
-	Level     int        `json:"level"` // 0 = depends on no other directory
+	Component string     `json:"component"` // top-level unit (see Component)
+	Level     int        `json:"level"`     // 0 = depends on no other directory
 	MaxHeat   int        `json:"max_heat"`
 	MaxImpact int        `json:"max_impact"`
 	Tier      types.Tier `json:"tier"`       // most severe tier among its stops
@@ -96,17 +114,25 @@ type Stop struct {
 // Dir returns the directory of a slash-separated repo path ("." for root files).
 func Dir(p string) string { return path.Dir(p) }
 
-// IsTestFile reports whether a path is a test file by its name. Tests are
-// left out of tours and the package graph: they import everything and teach
-// little about where the stakes are.
+// IsTestFile reports whether a path is a test file by its name or because it
+// sits under a tests/ directory (Rust integration tests, test modules). Tests
+// are left out of tours and the package graph: they import everything and
+// teach little about where the stakes are.
 func IsTestFile(p string) bool {
 	base := path.Base(p)
 	if strings.HasPrefix(base, "test_") {
 		return true
 	}
+	for _, seg := range strings.Split(path.Dir(p), "/") {
+		if seg == "tests" {
+			return true
+		}
+	}
 	ext := path.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 	switch ext {
+	case ".rs":
+		return stem == "tests" || strings.HasSuffix(stem, "_tests") || strings.HasSuffix(stem, "_test")
 	case ".go", ".py", ".rb":
 		return strings.HasSuffix(stem, "_test") || (ext == ".rb" && strings.HasSuffix(stem, "_spec"))
 	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts":
@@ -121,10 +147,15 @@ func IsTestFile(p string) bool {
 // graph[a][b] = number of distinct files in a that import a file in b.
 // Same-directory imports and importers missing from the heatmap are skipped.
 func DirGraph(hm *types.Heatmap) map[string]map[string]int {
+	return graphBy(hm, Dir)
+}
+
+// graphBy aggregates the file import graph to the groups key returns.
+func graphBy(hm *types.Heatmap, key func(string) string) map[string]map[string]int {
 	seen := map[[3]string]bool{}
 	g := map[string]map[string]int{}
 	for _, f := range hm.Files {
-		to := Dir(f.Path)
+		to := key(f.Path)
 		if IsTestFile(f.Path) {
 			continue
 		}
@@ -132,12 +163,12 @@ func DirGraph(hm *types.Heatmap) map[string]map[string]int {
 			if _, ok := hm.Files[dep.Path]; !ok || IsTestFile(dep.Path) {
 				continue
 			}
-			from := Dir(dep.Path)
-			key := [3]string{dep.Path, from, to}
-			if from == to || seen[key] {
+			from := key(dep.Path)
+			edge := [3]string{dep.Path, from, to}
+			if from == to || seen[edge] {
 				continue
 			}
-			seen[key] = true
+			seen[edge] = true
 			if g[from] == nil {
 				g[from] = map[string]int{}
 			}
@@ -271,6 +302,24 @@ func moreImpactful(a, b *types.FileHeat) bool {
 	return a.Path < b.Path
 }
 
+// moreImportant orders files within a component: fragile-critical first,
+// then impact, likelihood, centrality, path.
+func moreImportant(a, b *types.FileHeat) bool {
+	if af, bf := a.Quadrant == types.QuadrantFragileCritical, b.Quadrant == types.QuadrantFragileCritical; af != bf {
+		return af
+	}
+	if a.Impact != b.Impact {
+		return a.Impact > b.Impact
+	}
+	if a.Likelihood != b.Likelihood {
+		return a.Likelihood > b.Likelihood
+	}
+	if ac, bc := a.Factors.DependencyCentrality.Score, b.Factors.DependencyCentrality.Score; ac != bc {
+		return ac > bc
+	}
+	return a.Path < b.Path
+}
+
 func hotter(a, b *types.FileHeat) bool {
 	if a.HeatScore != b.HeatScore {
 		return a.HeatScore > b.HeatScore
@@ -280,30 +329,73 @@ func hotter(a, b *types.FileHeat) bool {
 
 var tierRank = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}
 
-// Build creates the tour. It returns ErrInvalidLimit for a negative limit and
-// ErrNoFiles when nothing matches the focus.
+// Build creates the tour. It returns ErrInvalidLimit, ErrInvalidPerComponent
+// or ErrInvalidMinImpact for out-of-range options, ErrUnknownComponent for a
+// requested component without files, and ErrNoFiles when nothing is left.
 func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
-	if opts.Limit < 0 {
+	switch {
+	case opts.Limit < 0:
 		return nil, fmt.Errorf("%w: got %d", ErrInvalidLimit, opts.Limit)
+	case opts.PerComponent < 0:
+		return nil, fmt.Errorf("%w: got %d", ErrInvalidPerComponent, opts.PerComponent)
+	case opts.MinImpact < 0 || opts.MinImpact > 100:
+		return nil, fmt.Errorf("%w: got %d", ErrInvalidMinImpact, opts.MinImpact)
+	}
+	component := func(p string) string { return Component(p, opts.Markers) }
+
+	byComp := map[string][]*types.FileHeat{}
+	for _, f := range hm.Files {
+		if inFocus(f.Path, opts.Focus) && !IsTestFile(f.Path) {
+			c := component(f.Path)
+			byComp[c] = append(byComp[c], f)
+		}
+	}
+	if len(byComp) == 0 {
+		return nil, fmt.Errorf("%w focus %q", ErrNoFiles, opts.Focus)
+	}
+	if len(opts.Components) > 0 {
+		kept := map[string][]*types.FileHeat{}
+		for _, c := range opts.Components {
+			if byComp[c] == nil {
+				return nil, fmt.Errorf("%w %q (valid: %s)", ErrUnknownComponent, c, strings.Join(sortedKeysOf(byComp), ", "))
+			}
+			kept[c] = byComp[c]
+		}
+		byComp = kept
 	}
 
 	var picked []*types.FileHeat
-	for _, f := range hm.Files {
-		if inFocus(f.Path, opts.Focus) && !IsTestFile(f.Path) {
-			picked = append(picked, f)
+	for _, c := range sortedKeysOf(byComp) {
+		fs := byComp[c]
+		maxImpact := 0
+		for _, f := range fs {
+			maxImpact = max(maxImpact, f.Impact)
 		}
+		if maxImpact < opts.MinImpact {
+			continue
+		}
+		if opts.PerComponent > 0 {
+			sort.Slice(fs, func(i, j int) bool { return moreImportant(fs[i], fs[j]) })
+			fs = fs[:min(len(fs), opts.PerComponent)]
+		}
+		picked = append(picked, fs...)
 	}
 	if len(picked) == 0 {
-		return nil, fmt.Errorf("%w focus %q", ErrNoFiles, opts.Focus)
+		return nil, fmt.Errorf("%w %d", ErrBelowMinImpact, opts.MinImpact)
 	}
-	sort.Slice(picked, func(i, j int) bool { return moreImpactful(picked[i], picked[j]) })
-	if opts.Limit > 0 && len(picked) > opts.Limit {
-		picked = picked[:opts.Limit]
+	group, ordering := Dir, "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality"
+	if opts.PerComponent > 0 {
+		group, ordering = component, "sections by component dependency level (dependencies first), then max impact; stops fragile-critical first, then impact, likelihood, centrality"
+	} else {
+		sort.Slice(picked, func(i, j int) bool { return moreImpactful(picked[i], picked[j]) })
+		if opts.Limit > 0 && len(picked) > opts.Limit {
+			picked = picked[:opts.Limit]
+		}
 	}
 
 	// Levels come from the whole repo graph so transitive order holds even
-	// when intermediate directories were not selected.
-	graph := DirGraph(hm)
+	// when intermediate groups were not selected.
+	graph := graphBy(hm, group)
 	usedByDir := map[string][]string{}
 	for from, tos := range graph {
 		for to := range tos {
@@ -323,14 +415,15 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	byDir := map[string]*Section{}
 	var dirs []string
 	for _, f := range picked {
-		d := Dir(f.Path)
+		d := group(f.Path)
 		s := byDir[d]
 		if s == nil {
-			s = &Section{Title: d, Dir: d, MaxImpact: f.Impact, Tier: f.Tier}
+			s = &Section{Title: d, Dir: d, Component: component(f.Path), MaxImpact: f.Impact, Tier: f.Tier}
 			byDir[d] = s
 			dirs = append(dirs, d)
 		}
 		s.MaxHeat = max(s.MaxHeat, f.HeatScore)
+		s.MaxImpact = max(s.MaxImpact, f.Impact)
 		if tierRank[f.Tier] > tierRank[s.Tier] {
 			s.Tier = f.Tier
 		}
@@ -376,7 +469,7 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		Branch:     hm.Metadata.Branch,
 		AnalyzedAt: formatTime(hm),
 		Focus:      opts.Focus,
-		Ordering:   "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality",
+		Ordering:   ordering,
 		TotalStops: order,
 		Sections:   sections,
 	}, nil
@@ -543,6 +636,15 @@ func sortedKeys(m map[string]int) []string {
 	return out
 }
 
+func sortedKeysOf(m map[string][]*types.FileHeat) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func sortedCopy(s []string) []string {
 	out := append([]string{}, s...)
 	sort.Strings(out)
@@ -550,7 +652,7 @@ func sortedCopy(s []string) []string {
 }
 
 // declRe matches a top-level declaration in common languages.
-var declRe = regexp.MustCompile(`^(func|type|class|def|async def|export|fn|pub|interface|struct|impl|public|abstract|final|module)\b`)
+var declRe = regexp.MustCompile(`^(func|type|class|def|async def|async fn|export|fn|pub|interface|struct|enum|trait|impl|mod|unsafe|public|abstract|final|module)\b`)
 
 // LineHint returns the 1-based line of the first top-level declaration in
 // content, or 1 when there is none.
