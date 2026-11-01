@@ -25,6 +25,16 @@ var headings = map[string]string{
 	"Routine":    "✅ Routine",
 }
 
+// MaxCommentChars keeps the comment under GitHub's 65,536-character limit for
+// issue comments, with headroom; past it the API rejects the post (422).
+const MaxCommentChars = 60000
+
+// reserve is room kept for the omitted notice, reviewers, gate and closing tags.
+const reserve = 2000
+
+// fits reports whether adding s keeps the comment within budget.
+func fits(b *strings.Builder, s string) bool { return b.Len()+len(s) <= MaxCommentChars-reserve }
+
 var severity = map[string]int{"Harden now": 3, "Protect": 2, "Stabilize": 1, "Routine": 0}
 
 // posture is a changed file's posture: its quadrant label, else the
@@ -51,12 +61,32 @@ func Render(risk *types.PRRisk, hm *types.Heatmap) string {
 
 	if len(risk.Checklist) > 0 {
 		b.WriteString("### Do before merge\n\n")
-		for _, a := range risk.Checklist {
+		for i, a := range risk.Checklist {
 			box := " "
 			if a.Done {
 				box = "x"
 			}
-			fmt.Fprintf(&b, "- [%s] %s (%s)\n", box, a.Text, codeList(a.Files))
+			line := fmt.Sprintf("- [%s] %s (%s)\n", box, a.Text, codeList(a.Files))
+			if !fits(&b, line) {
+				fmt.Fprintf(&b, "- _%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list_\n", plural(len(risk.Checklist)-i, "item"))
+				break
+			}
+			b.WriteString(line)
+		}
+		b.WriteString("\n")
+	}
+
+	// Circuit breakers (unscored files, large diffs, low test ratio) stay
+	// visible: they flag where the scores themselves are not to be trusted.
+	if len(risk.CircuitBreakerSignals) > 0 {
+		b.WriteString("### Warnings\n\n")
+		for _, s := range risk.CircuitBreakerSignals {
+			line := "- " + s + "\n"
+			if room := MaxCommentChars - reserve - b.Len(); len(line) > room/2 {
+				// One signal can list thousands of paths: keep its start, cut the rest.
+				line = "- " + s[:max(0, room/2-200)] + "... (omitted to fit GitHub's comment size limit)\n"
+			}
+			b.WriteString(line)
 		}
 		b.WriteString("\n")
 	}
@@ -166,28 +196,49 @@ func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChan
 	b.WriteString("<details><summary>Why these actions?</summary>\n\n")
 	fmt.Fprintf(b, "%s %s Repo cutoffs: will it break %d, how bad %d (a score at or above its cutoff is high).\n\n",
 		types.AxisNote, types.AxisEvidence, risk.LikelyCutoff, risk.ImpactThreshold)
+	omittedFiles := 0
 	for _, fc := range files {
 		if posture(fc) == "Routine" {
 			continue
 		}
-		fmt.Fprintf(b, "**`%s`** (%s)\n", fc.Path, posture(fc))
-		if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil {
-			if r := f.Explanation.LikelihoodReasons; len(r) > 0 {
-				fmt.Fprintf(b, "- Break signals: %s\n", strings.Join(r, "; "))
-			}
-			if r := f.Explanation.ImpactReasons; len(r) > 0 {
-				fmt.Fprintf(b, "- Break cost: %s\n", strings.Join(r, "; "))
-			}
-		} else if fc.Unscored {
-			b.WriteString("- New file: not scored yet, so it takes the tier of its directory\n")
+		var e strings.Builder
+		writeFileReasons(&e, risk, fc, hm)
+		if omittedFiles > 0 || !fits(b, e.String()) {
+			omittedFiles++
+			continue
 		}
-		for _, a := range risk.Checklist {
-			if contains(a.Files, fc.Path) && a.Signal != "" {
-				fmt.Fprintf(b, "- %s: %s\n", a.Text, a.Signal)
-			}
-		}
-		b.WriteString("\n")
+		b.WriteString(e.String())
 	}
+	if omittedFiles > 0 {
+		fmt.Fprintf(b, "_%s omitted to fit GitHub's comment size limit; run `highstakes pr check` for the full list._\n\n", plural(omittedFiles, "more file"))
+	}
+	writeReviewersBacklogGate(b, risk)
+	b.WriteString("</details>\n")
+}
+
+// writeFileReasons writes one non-routine file's reasons and checklist signals.
+func writeFileReasons(b *strings.Builder, risk *types.PRRisk, fc types.FileChange, hm *types.Heatmap) {
+	fmt.Fprintf(b, "**`%s`** (%s)\n", fc.Path, posture(fc))
+	if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil {
+		if r := f.Explanation.LikelihoodReasons; len(r) > 0 {
+			fmt.Fprintf(b, "- Break signals: %s\n", strings.Join(r, "; "))
+		}
+		if r := f.Explanation.ImpactReasons; len(r) > 0 {
+			fmt.Fprintf(b, "- Break cost: %s\n", strings.Join(r, "; "))
+		}
+	} else if fc.Unscored {
+		b.WriteString("- New file: not scored yet, so it takes the tier of its directory\n")
+	}
+	for _, a := range risk.Checklist {
+		if contains(a.Files, fc.Path) && a.Signal != "" {
+			fmt.Fprintf(b, "- %s: %s\n", a.Text, a.Signal)
+		}
+	}
+	b.WriteString("\n")
+}
+
+// writeReviewersBacklogGate writes the tail of the details block.
+func writeReviewersBacklogGate(b *strings.Builder, risk *types.PRRisk) {
 	if len(risk.SuggestedReviewers) > 0 {
 		var names []string
 		for _, r := range risk.SuggestedReviewers {
@@ -197,11 +248,16 @@ func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChan
 	}
 	if len(risk.Backlog) > 0 {
 		b.WriteString("**Backlog** (the file over time, not this PR)\n")
-		for _, a := range risk.Backlog {
-			fmt.Fprintf(b, "- %s (%s): %s\n", a.Text, codeList(a.Files), a.Signal)
+		for i, a := range risk.Backlog {
+			item := fmt.Sprintf("- %s (%s): %s\n", a.Text, codeList(a.Files), a.Signal)
 			if a.Command != "" {
-				fmt.Fprintf(b, "  `%s`\n", a.Command)
+				item += fmt.Sprintf("  `%s`\n", a.Command)
 			}
+			if !fits(b, item) {
+				fmt.Fprintf(b, "- _%s omitted to fit GitHub's comment size limit_\n", plural(len(risk.Backlog)-i, "backlog item"))
+				break
+			}
+			b.WriteString(item)
 		}
 		b.WriteString("\n")
 	}
@@ -212,7 +268,6 @@ func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChan
 		}
 		fmt.Fprintf(b, "Gate: %s at --fail-on %s%s.\n\n", risk.Decision, risk.FailOn, mode)
 	}
-	b.WriteString("</details>\n")
 }
 
 func codeList(paths []string) string {

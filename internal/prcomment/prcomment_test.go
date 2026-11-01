@@ -102,6 +102,65 @@ func TestRender_RoutineGolden(t *testing.T) {
 }
 
 func TestRender_Rules(t *testing.T) {
+	t.Run("huge PRs stay under GitHub's comment limit", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78}
+		hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+		long := strings.Repeat("signal ", 40)
+		for i := 0; i < 3000; i++ {
+			p := fmt.Sprintf("pkg/dir%d/file_with_a_long_name_%d.go", i%50, i)
+			risk.FilesChanged = append(risk.FilesChanged, types.FileChange{Path: p, Tier: types.TierCritical,
+				Likelihood: 60, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical})
+			hm.Files[p] = &types.FileHeat{Path: p, Explanation: &types.Explanation{LikelihoodReasons: []string{long}, ImpactReasons: []string{long}}}
+			risk.Backlog = append(risk.Backlog, types.Action{ID: "split", Text: "Split it", Files: []string{p}, Signal: long, Command: "gh issue create --title " + p})
+		}
+		out := Render(risk, hm)
+		if len(out) > MaxCommentChars {
+			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
+		}
+		if !strings.Contains(out, "omitted to fit GitHub's comment size limit") {
+			t.Errorf("no omitted-content notice")
+		}
+		if !strings.HasSuffix(out, "</details>\n") {
+			t.Errorf("details block not closed")
+		}
+	})
+	t.Run("a giant circuit-breaker warning is budgeted too", func(t *testing.T) {
+		var paths []string
+		for i := 0; i < 4000; i++ {
+			paths = append(paths, fmt.Sprintf("pkg/dir%d/new_unscored_file_%d.go", i%50, i))
+		}
+		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
+			CircuitBreakerSignals: []string{"Unscored new file(s), heat inherited from directory: " + strings.Join(paths, ", ")}}
+		out := Render(risk, &types.Heatmap{})
+		if len(out) > MaxCommentChars {
+			t.Fatalf("comment is %d chars, over the %d budget", len(out), MaxCommentChars)
+		}
+		if !strings.Contains(out, "Unscored new file(s)") || !strings.Contains(out, "omitted to fit GitHub's comment size limit") {
+			t.Errorf("warning should be kept but truncated with a notice")
+		}
+	})
+	t.Run("small PRs are not truncated", func(t *testing.T) {
+		risk, hm := hardenPR()
+		if out := Render(risk, hm); strings.Contains(out, "omitted") {
+			t.Errorf("unexpected truncation notice:\n%s", out)
+		}
+	})
+	t.Run("circuit breaker warnings are shown", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
+			CircuitBreakerSignals: []string{"Unscored new file(s), heat inherited from directory: a/new.go"},
+			FilesChanged:          []types.FileChange{{Path: "a/new.go", Tier: types.TierLow, Unscored: true}}}
+		out := Render(risk, &types.Heatmap{})
+		if !strings.Contains(out, "Unscored new file(s), heat inherited from directory: a/new.go") {
+			t.Errorf("circuit breaker warning missing:\n%s", out)
+		}
+	})
+	t.Run("no warnings section without signals", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.CircuitBreakerSignals = nil
+		if out := Render(risk, hm); strings.Contains(out, "Warnings") {
+			t.Errorf("unexpected warnings section:\n%s", out)
+		}
+	})
 	t.Run("at most five non-routine rows, overflow kept apart from routine", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78}
 		for i := 0; i < 7; i++ {

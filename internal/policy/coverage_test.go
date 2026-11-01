@@ -15,6 +15,7 @@ crates/**/vendor/ @vendor
 docs/*.txt @writers
 /crates/net/src/unowned.rs
 build @builders
+guides/ @team
 `
 	tests := []struct {
 		path string
@@ -33,6 +34,8 @@ build @builders
 		{"x/docs/a.txt", false},                // ... so it is not matched deeper
 		{"crates/net/src/unowned.rs", false},   // last match has no owners
 		{"src/build/main.go", true},            // bare name matches a directory anywhere
+		{"packages/foo/guides/intro.md", true}, // trailing-slash dir rule matches at any depth
+		{"guides", false},                      // dir-only rule does not match a file named guides
 		{"", false},
 	}
 	c := ParseCodeowners(content)

@@ -1,6 +1,7 @@
 package prdata
 
 import (
+	"strings"
 	"context"
 	"errors"
 	"fmt"
@@ -290,4 +291,13 @@ func numbers(prs []PR) []int {
 		out = append(out, p.Number)
 	}
 	return out
+}
+
+// TestPRQuery_FetchesLastCommitHeadlines guards rebase mapping for PRs with
+// more than 100 commits: the merge commit is the PR's last commit, so its
+// headline is only guaranteed with commits(last:100).
+func TestPRQuery_FetchesLastCommitHeadlines(t *testing.T) {
+	if !strings.Contains(prQuery, "commits(last:100)") || strings.Contains(prQuery, "commits(first:") {
+		t.Errorf("prQuery must fetch the last 100 commit headlines:\n%s", prQuery)
+	}
 }
