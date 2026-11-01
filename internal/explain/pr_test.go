@@ -26,6 +26,8 @@ func TestForPR(t *testing.T) {
 		open     []string
 		absent   []string
 		smallerT string
+		signals  map[string]string // id -> wanted signal
+		texts    map[string]string // id -> wanted text
 	}{
 		{name: "nothing satisfied yet",
 			edit: func(*types.FileHeat) {}, change: small,
@@ -84,6 +86,46 @@ func TestForPR(t *testing.T) {
 			change:   Change{Paths: small.Paths, Lines: 10, Components: 3},
 			open:     []string{"smaller-pr"},
 			smallerT: "Ask for a smaller PR: 10 lines across 3 components"},
+		{name: "sign-off label marks the senior sign-off done",
+			edit:    func(*types.FileHeat) {},
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, SignedOff: true},
+			done:    []string{"senior-review"},
+			open:    []string{"regression-tests", "no-auto-merge"},
+			signals: map[string]string{"senior-review": "signed off with the highstakes:signed-off label"}},
+		{name: "sign-off label marks a Protect owner review done",
+			edit:    func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect },
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, SignedOff: true},
+			done:    []string{"owner-review"},
+			signals: map[string]string{"owner-review": "signed off with the highstakes:signed-off label"}},
+		{name: "an owner's approval keeps its own signal when also signed off",
+			edit:    func(*types.FileHeat) {},
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, Approvals: []string{"ana"}, SignedOff: true},
+			done:    []string{"senior-review"},
+			signals: map[string]string{"senior-review": "Harden now: likely to break and costly when it does"}},
+		{name: "auto-merge off marks keep auto-merge off done",
+			edit:    func(*types.FileHeat) {},
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, AutoMerge: AutoMergeOff},
+			done:    []string{"no-auto-merge"},
+			open:    []string{"senior-review"},
+			signals: map[string]string{"no-auto-merge": "auto-merge is not enabled on this PR"},
+			texts:   map[string]string{"no-auto-merge": "Keep auto-merge off"}},
+		{name: "auto-merge off marks a Protect block auto-merge done",
+			edit:   func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect },
+			change: Change{Paths: small.Paths, Lines: 40, Components: 1, AutoMerge: AutoMergeOff},
+			done:   []string{"no-auto-merge"},
+			texts:  map[string]string{"no-auto-merge": "Block auto-merge"}},
+		{name: "auto-merge on stays open and says to turn it off",
+			edit:    func(*types.FileHeat) {},
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, AutoMerge: AutoMergeOn},
+			open:    []string{"no-auto-merge"},
+			signals: map[string]string{"no-auto-merge": "auto-merge is enabled on this PR"},
+			texts:   map[string]string{"no-auto-merge": "Turn auto-merge off: it is enabled on this PR"}},
+		{name: "unknown auto-merge state stays open as before",
+			edit:    func(*types.FileHeat) {},
+			change:  Change{Paths: small.Paths, Lines: 40, Components: 1, AutoMerge: AutoMergeUnknown},
+			open:    []string{"no-auto-merge"},
+			signals: map[string]string{"no-auto-merge": "Harden now files never auto-merge"},
+			texts:   map[string]string{"no-auto-merge": "Keep auto-merge off"}},
 		{name: "protect files never ask for a smaller PR",
 			edit:   func(f *types.FileHeat) { f.Quadrant = types.QuadrantProtect },
 			change: Change{Paths: small.Paths, Lines: 900, Components: 5},
@@ -105,6 +147,16 @@ func TestForPR(t *testing.T) {
 			for _, id := range tt.absent {
 				if find(got, id).ID != "" {
 					t.Errorf("unexpected %s", id)
+				}
+			}
+			for id, want := range tt.signals {
+				if a := find(got, id); a.Signal != want {
+					t.Errorf("%s signal = %q, want %q", id, a.Signal, want)
+				}
+			}
+			for id, want := range tt.texts {
+				if a := find(got, id); a.Text != want {
+					t.Errorf("%s text = %q, want %q", id, a.Text, want)
 				}
 			}
 			if tt.smallerT != "" {

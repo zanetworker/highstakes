@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/ownership"
 	"github.com/zanetworker/highstakes/internal/policy"
 	"github.com/zanetworker/highstakes/internal/prdata"
@@ -19,7 +20,8 @@ import (
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
-// exitBlocked is returned by `pr check --fail-on` when the PR tier meets the gate.
+// exitBlocked is returned by `pr check --fail-on` when the PR tier meets the
+// gate with before-merge items open (with --strict: on the tier alone).
 const exitBlocked = 5
 
 // shadowLogPath collects `pr check --shadow` decisions for later calibration.
@@ -89,9 +91,12 @@ func addReviewers(risk *types.PRRisk, author string, n int) {
 	risk.SuggestedReviewers = prscore.SuggestReviewers(*risk, owners, author, n)
 }
 
-// applyGate sets FailOn/Decision/Shadow. Shadow mode defaults the gate to
-// critical (matching the shipped workflow) and never returns a block error.
-func applyGate(risk *types.PRRisk, failOn string, shadow bool) error {
+// applyGate sets OpenItems and FailOn/Decision/DecisionReason/Shadow. At or
+// above the gate the PR blocks while checklist items are open (strict: on
+// the tier alone). Shadow mode defaults the gate to critical (matching the
+// shipped workflow) and never returns a block error.
+func applyGate(risk *types.PRRisk, failOn string, shadow, strict bool) error {
+	risk.OpenItems = prscore.OpenItems(risk.Checklist)
 	if failOn == "" && shadow {
 		failOn = string(types.TierCritical)
 	}
@@ -104,11 +109,20 @@ func applyGate(risk *types.PRRisk, failOn string, shadow bool) error {
 		return cliError(2, "--fail-on: %v", err)
 	}
 	risk.FailOn = tier
-	risk.Decision = prscore.Decide(risk.Tier, tier)
+	risk.Decision, risk.DecisionReason = prscore.Decide(risk.Tier, tier, risk.OpenItems, strict)
 	if risk.Decision == prscore.DecisionBlock && !shadow {
-		return cliError(exitBlocked, "PR blocked: tier %s is at or above --fail-on %s", risk.Tier, tier)
+		return cliError(exitBlocked, "PR blocked: %s", risk.DecisionReason)
 	}
 	return nil
+}
+
+// parseAutoMerge validates --auto-merge-enabled (case-insensitive).
+func parseAutoMerge(v string) (string, error) {
+	switch s := strings.ToLower(v); s {
+	case explain.AutoMergeOn, explain.AutoMergeOff, explain.AutoMergeUnknown:
+		return s, nil
+	}
+	return "", fmt.Errorf("--auto-merge-enabled must be one of: true, false, unknown (got: %q)", v)
 }
 
 // appendShadowLog appends one JSON line per shadow run.
@@ -226,7 +240,11 @@ func printDecision(risk *types.PRRisk) {
 	if risk.Shadow {
 		mode = " (shadow: not enforced)"
 	}
-	fmt.Printf("Decision: %s (fail-on %s)%s\n", strings.ToUpper(risk.Decision), risk.FailOn, mode)
+	reason := ""
+	if risk.DecisionReason != "" {
+		reason = ": " + risk.DecisionReason
+	}
+	fmt.Printf("Decision: %s (fail-on %s)%s%s\n", strings.ToUpper(risk.Decision), risk.FailOn, mode, reason)
 }
 
 // commentRepo is the owner/name the PR comment links to: --repo, else

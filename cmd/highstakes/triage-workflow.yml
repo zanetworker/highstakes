@@ -1,7 +1,8 @@
 name: HighStakes Triage
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # labeled/unlabeled re-run on the highstakes:signed-off label.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   # Re-run on reviews so owner approvals tick the checklist.
   pull_request_review:
     types: [submitted, dismissed]
@@ -52,16 +53,23 @@ jobs:
             | sort | paste -sd, -)
           echo "logins=$logins" >> "$GITHUB_OUTPUT"
 
-      # Exit 5 means the PR changes a Harden now file (--fail-on critical).
+      # Exit 5 means the PR changes a Harden now file (--fail-on critical) and
+      # before-merge items are still open. A maintainer with write access adds
+      # the highstakes:signed-off label after reviewing to tick sign-off items
+      # (authors cannot approve their own PRs). Both events carry pull_request.
       - name: Assess PR risk
         id: risk
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
+          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
+          signed=
+          if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
@@ -90,7 +98,7 @@ jobs:
           CODE: ${{ steps.risk.outputs.code }}
         run: |
           if [ "$CODE" = "5" ]; then
-            echo "::error::This PR changes Harden now files. Work through 'Do before merge' in the HighStakes comment."
+            echo "::error::This PR changes Harden now files with before-merge items open. Work through 'Do before merge' in the HighStakes comment."
           else
             echo "::error::highstakes pr check failed (exit $CODE)."
           fi

@@ -12,26 +12,34 @@ import (
 )
 
 func TestApplyGate(t *testing.T) {
+	open := []types.Action{{ID: "senior-review"}, {ID: "no-tests", Done: true}}
+	allDone := []types.Action{{ID: "senior-review", Done: true}, {ID: "no-tests", Done: true}}
 	tests := []struct {
 		name         string
 		tier         types.Tier
+		checklist    []types.Action
 		failOn       string
 		shadow       bool
+		strict       bool
 		wantDecision string
+		wantReason   string
+		wantOpen     int
 		wantFailOn   types.Tier
 		wantCode     int // 0 = no error
 	}{
-		{"no gate leaves decision empty", types.TierCritical, "", false, "", "", 0},
-		{"gate passes below threshold", types.TierHigh, "critical", false, "pass", types.TierCritical, 0},
-		{"gate blocks at threshold with exit 5", types.TierCritical, "critical", false, "block", types.TierCritical, 5},
-		{"shadow defaults gate to critical and never fails", types.TierCritical, "", true, "block", types.TierCritical, 0},
-		{"shadow honours explicit gate", types.TierHigh, "high", true, "block", types.TierHigh, 0},
-		{"invalid tier is exit 2 with valid values", types.TierLow, "severe", false, "", "", 2},
+		{"no gate leaves decision empty", types.TierCritical, open, "", false, false, "", "", 1, "", 0},
+		{"gate passes below threshold", types.TierHigh, open, "critical", false, false, "pass", "tier high is below --fail-on critical", 1, types.TierCritical, 0},
+		{"gate blocks at threshold with one item open, exit 5", types.TierCritical, open, "critical", false, false, "block", "1 before-merge item open", 1, types.TierCritical, 5},
+		{"gate passes at threshold once every item is done", types.TierCritical, allDone, "critical", false, false, "pass", "all before-merge items done", 0, types.TierCritical, 0},
+		{"strict blocks on tier alone even when all done", types.TierCritical, allDone, "critical", false, true, "block", "tier critical is at or above --fail-on critical (--strict)", 0, types.TierCritical, 5},
+		{"shadow defaults gate to critical and never fails", types.TierCritical, open, "", true, false, "block", "1 before-merge item open", 1, types.TierCritical, 0},
+		{"shadow honours explicit gate", types.TierHigh, open, "high", true, false, "block", "1 before-merge item open", 1, types.TierHigh, 0},
+		{"invalid tier is exit 2 with valid values", types.TierLow, nil, "severe", false, false, "", "", 0, "", 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			risk := &types.PRRisk{Tier: tt.tier}
-			err := applyGate(risk, tt.failOn, tt.shadow)
+			risk := &types.PRRisk{Tier: tt.tier, Checklist: tt.checklist}
+			err := applyGate(risk, tt.failOn, tt.shadow, tt.strict)
 			code := 0
 			var ee *exitError
 			if errors.As(err, &ee) {
@@ -51,6 +59,12 @@ func TestApplyGate(t *testing.T) {
 			if risk.Decision != tt.wantDecision || risk.FailOn != tt.wantFailOn || risk.Shadow != tt.shadow {
 				t.Errorf("risk = decision %q failOn %q shadow %v, want %q %q %v",
 					risk.Decision, risk.FailOn, risk.Shadow, tt.wantDecision, tt.wantFailOn, tt.shadow)
+			}
+			if risk.DecisionReason != tt.wantReason || risk.OpenItems != tt.wantOpen {
+				t.Errorf("reason %q open %d, want %q %d", risk.DecisionReason, risk.OpenItems, tt.wantReason, tt.wantOpen)
+			}
+			if code == 5 && !strings.Contains(err.Error(), tt.wantReason) {
+				t.Errorf("block error should give the reason %q: %v", tt.wantReason, err)
 			}
 		})
 	}
@@ -149,6 +163,31 @@ func TestPRNumber(t *testing.T) {
 			got, err := prNumber(tt.flag, tt.ref)
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Errorf("prNumber(%d, %q) = %d, %v; want %d, err=%v", tt.flag, tt.ref, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseAutoMerge(t *testing.T) {
+	tests := []struct {
+		in, want string
+		wantErr  bool
+	}{
+		{"true", "true", false},
+		{"false", "false", false},
+		{"unknown", "unknown", false},
+		{"FALSE", "false", false},
+		{"", "", true},
+		{"yes", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := parseAutoMerge(tt.in)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Errorf("parseAutoMerge(%q) = %q, %v; want %q, err=%v", tt.in, got, err, tt.want, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "true, false, unknown") {
+				t.Errorf("error should list valid values: %v", err)
 			}
 		})
 	}

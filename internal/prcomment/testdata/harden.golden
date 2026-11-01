@@ -7,7 +7,9 @@
 
 ### ✅ Do before merge (1 of 3 done)
 
-- [ ] 👀 Get sign-off from @ana, @bo on `net/proxy.rs`
+⛔ Merge blocked: 2 before-merge items open
+
+- [ ] 👀 Get sign-off from @ana, @bo on `net/proxy.rs` (a maintainer adds the `highstakes:signed-off` label after reviewing)
 - [x] 🧪 Add regression tests around the recent fix (`net/proxy.rs`)
 - [ ] 🚫 Keep auto-merge off
 
@@ -81,6 +83,6 @@ Scores are a relative signal within this repo, not a probability. Will it break?
 - Split it into smaller files (`net/proxy.rs`): 479 functions in one file (top 1%)
   `gh issue create --title 'Split net/proxy.rs' --body 'x'`
 
-Gate: block at --fail-on critical.
+Gate: block at --fail-on critical (2 before-merge items open).
 
 </details>

@@ -202,20 +202,49 @@ func TestSuggestReviewers(t *testing.T) {
 
 func TestDecide(t *testing.T) {
 	tests := []struct {
-		tier   types.Tier
-		failOn types.Tier
-		want   string
+		name       string
+		tier       types.Tier
+		failOn     types.Tier
+		open       int
+		strict     bool
+		want       string
+		wantReason string
 	}{
-		{types.TierCritical, types.TierCritical, DecisionBlock},
-		{types.TierHigh, types.TierCritical, DecisionPass},
-		{types.TierHigh, types.TierHigh, DecisionBlock},
-		{types.TierLow, types.TierLow, DecisionBlock},
-		{types.TierCritical, "", DecisionPass},
+		{"at gate with one item open blocks", types.TierCritical, types.TierCritical, 1, false, DecisionBlock, "1 before-merge item open"},
+		{"at gate with items open names the count", types.TierHigh, types.TierHigh, 3, false, DecisionBlock, "3 before-merge items open"},
+		{"at gate with none open passes", types.TierCritical, types.TierCritical, 0, false, DecisionPass, "all before-merge items done"},
+		{"above gate with none open passes", types.TierCritical, types.TierHigh, 0, false, DecisionPass, "all before-merge items done"},
+		{"below gate passes whatever is open", types.TierHigh, types.TierCritical, 4, false, DecisionPass, "tier high is below --fail-on critical"},
+		{"strict blocks on tier alone", types.TierCritical, types.TierCritical, 0, true, DecisionBlock, "tier critical is at or above --fail-on critical (--strict)"},
+		{"strict blocks at the lowest gate", types.TierLow, types.TierLow, 0, true, DecisionBlock, "tier low is at or above --fail-on low (--strict)"},
+		{"strict below gate passes", types.TierHigh, types.TierCritical, 2, true, DecisionPass, "tier high is below --fail-on critical"},
+		{"no gate never blocks", types.TierCritical, "", 5, false, DecisionPass, ""},
 	}
 	for _, tt := range tests {
-		t.Run(string(tt.tier)+"/"+string(tt.failOn), func(t *testing.T) {
-			if got := Decide(tt.tier, tt.failOn); got != tt.want {
-				t.Errorf("Decide(%s, %s) = %s, want %s", tt.tier, tt.failOn, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := Decide(tt.tier, tt.failOn, tt.open, tt.strict)
+			if got != tt.want || reason != tt.wantReason {
+				t.Errorf("Decide(%s, %s, %d, %v) = %s, %q; want %s, %q", tt.tier, tt.failOn, tt.open, tt.strict, got, reason, tt.want, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestOpenItems(t *testing.T) {
+	tests := []struct {
+		name string
+		list []types.Action
+		want int
+	}{
+		{"empty", nil, 0},
+		{"counts open items", []types.Action{{ID: "senior-review"}, {ID: "no-tests", Done: true}, {ID: "no-auto-merge"}}, 2},
+		{"all done", []types.Action{{ID: "senior-review", Done: true}}, 0},
+		{"smaller-pr is asked once in the one-click actions, not ticked", []types.Action{{ID: "smaller-pr"}, {ID: "no-tests", Done: true}}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := OpenItems(tt.list); got != tt.want {
+				t.Errorf("OpenItems = %d, want %d", got, tt.want)
 			}
 		})
 	}

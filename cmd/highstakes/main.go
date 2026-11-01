@@ -399,6 +399,9 @@ var prCheckCmd = &cobra.Command{
 		format, _ := cmd.Flags().GetString("format")
 		shadow, _ := cmd.Flags().GetBool("shadow")
 		failOn, _ := cmd.Flags().GetString("fail-on")
+		strict, _ := cmd.Flags().GetBool("strict")
+		signedOff, _ := cmd.Flags().GetBool("signed-off")
+		autoMergeFlag, _ := cmd.Flags().GetString("auto-merge-enabled")
 		authorFlag, _ := cmd.Flags().GetString("author")
 		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
 		approvals, _ := cmd.Flags().GetStringSlice("approvals")
@@ -412,6 +415,10 @@ var prCheckCmd = &cobra.Command{
 			return cliError(2, "--format must be one of: text, markdown, json (got: %q)", format)
 		}
 
+		autoMerge, err := parseAutoMerge(autoMergeFlag)
+		if err != nil {
+			return cliError(2, "%v", err)
+		}
 		repo, err := commentRepo(repoFlag, os.Getenv("GITHUB_REPOSITORY"), func() (prdata.Repo, error) { return prdata.OriginRepo(".") })
 		if err != nil {
 			return cliError(2, "%v", err)
@@ -455,8 +462,10 @@ var prCheckCmd = &cobra.Command{
 		applyAutonomy(&risk, hm)
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
 		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
-		attachPRActions(&risk, hm, buildChange(changes, hm, approvals, codeowners.Covers))
-		gateErr := applyGate(&risk, failOn, shadow)
+		change := buildChange(changes, hm, approvals, codeowners.Covers)
+		change.SignedOff, change.AutoMerge = signedOff, autoMerge
+		attachPRActions(&risk, hm, change)
+		gateErr := applyGate(&risk, failOn, shadow, strict)
 		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
 			return gateErr
 		}
@@ -476,6 +485,7 @@ var prCheckCmd = &cobra.Command{
 			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
 			if risk.Decision != "" {
 				empty["decision"], empty["fail_on"], empty["shadow"] = risk.Decision, risk.FailOn, risk.Shadow
+				empty["decision_reason"], empty["open_items"] = risk.DecisionReason, risk.OpenItems
 			}
 			if err := printJSON(empty); err != nil {
 				return err
@@ -791,16 +801,19 @@ func agentContext() map[string]interface{} {
 					"check": map[string]interface{}{
 						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist of Harden now and Protect files with done items, worth-doing items that do not block (JSON worth_doing), backlog, and agent autonomy (JSON autonomy_level: lowest level over touched files; auto_merge_allowed: true only at level 3; autonomy_reason; files_changed[].autonomy)",
 						"flags": map[string]interface{}{
-							"--json":      flagDef("bool", false, "Output as JSON (same as --format json)"),
-							"--format":    flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
-							"--approvals": flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
-							"--repo":      flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
-							"--pr":        flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
-							"--base":      flagDef("string", "main", "Base branch"),
-							"--fail-on":   flagDef("enum", "", "Exit 5 when tier >= this. Values: critical, high, medium, low"),
-							"--shadow":    flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
-							"--author":    flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
-							"--reviewers": flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+							"--json":               flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--format":             flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
+							"--approvals":          flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
+							"--repo":               flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
+							"--pr":                 flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
+							"--base":               flagDef("string", "main", "Base branch"),
+							"--fail-on":            flagDef("enum", "", "Exit 5 when tier >= this and before-merge items are open (JSON open_items, decision_reason). Values: critical, high, medium, low"),
+							"--strict":             flagDef("bool", false, "With --fail-on, block on tier alone even when every before-merge item is done"),
+							"--signed-off":         flagDef("bool", false, "PR has the highstakes:signed-off label (added by a maintainer with write access); ticks sign-off and owner-review items"),
+							"--auto-merge-enabled": flagDef("enum", "unknown", "Values: true, false, unknown; false ticks the no-auto-merge items, true asks to turn it off"),
+							"--shadow":             flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
+							"--author":             flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
+							"--reviewers":          flagDef("int", 3, "Max suggested reviewers (0 = off)"),
 						},
 					},
 				},
@@ -902,7 +915,7 @@ func agentContext() map[string]interface{} {
 				"description": "GitHub integration",
 				"subcommands": map[string]interface{}{
 					"install": map[string]interface{}{
-						"description": "Write .github/workflows/heatmap-triage.yml: posts pr check --format markdown as a PR comment, fills --approvals from reviews, fails on Harden now files (--fail-on critical)",
+						"description": "Write .github/workflows/heatmap-triage.yml: posts pr check --format markdown as a PR comment, fills --approvals from reviews, --signed-off from the highstakes:signed-off label and --auto-merge-enabled from the PR, re-runs on reviews and label changes, fails while Harden now files have open before-merge items (--fail-on critical)",
 					},
 				},
 			},
@@ -1051,7 +1064,10 @@ func init() {
 
 	prCheckCmd.Flags().String("base", "main", "Base branch to compare against")
 	prCheckCmd.Flags().Bool("json", false, "Output as JSON")
-	prCheckCmd.Flags().String("fail-on", "", "Exit 5 when the PR tier is at or above this tier: critical, high, medium, low")
+	prCheckCmd.Flags().String("fail-on", "", "Exit 5 when the PR tier is at or above this tier and before-merge items are open: critical, high, medium, low")
+	prCheckCmd.Flags().Bool("strict", false, "With --fail-on, block on the tier alone, even when every before-merge item is done")
+	prCheckCmd.Flags().Bool("signed-off", false, "The PR carries the highstakes:signed-off label (CI fills it); ticks sign-off and owner-review items")
+	prCheckCmd.Flags().String("auto-merge-enabled", "unknown", "Whether auto-merge is on for the PR (CI fills it): true, false, unknown; false ticks the no-auto-merge item")
 	prCheckCmd.Flags().Bool("shadow", false, "Log tier and decision to .heatmap/shadow.jsonl but always exit 0 (gate defaults to critical)")
 	prCheckCmd.Flags().String("author", "", "PR author email or handle to exclude from reviewers (default: HEAD commit author)")
 	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")

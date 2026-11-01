@@ -24,6 +24,11 @@ func TestGithubInstall_WritesTriageWorkflow(t *testing.T) {
 		"<!-- highstakes-triage -->",
 		"pull_request_review:",
 		"BASE: origin/${{ github.event.pull_request.base.ref }}",
+		"types: [opened, synchronize, reopened, labeled, unlabeled]",
+		"SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}",
+		"AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}",
+		`--auto-merge-enabled "$AUTO_MERGE"`,
+		`if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi`,
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("workflow missing %q", want)

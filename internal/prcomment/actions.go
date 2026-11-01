@@ -120,6 +120,9 @@ func checklistLine(a types.Action) string {
 	switch a.ID {
 	case "senior-review", "owner-review":
 		text = reviewText(a)
+		if !a.Done {
+			text += " (a maintainer adds the `" + explain.SignOffLabel + "` label after reviewing)"
+		}
 	case "no-auto-merge":
 		text = a.Text
 	}

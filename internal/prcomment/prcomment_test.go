@@ -43,7 +43,8 @@ func hardenPR() (*types.PRRisk, *types.Heatmap) {
 	}}
 	risk := &types.PRRisk{
 		Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78,
-		FailOn: types.TierCritical, Decision: "block", AutonomyReason: "touches Harden now files",
+		FailOn: types.TierCritical, Decision: "block", DecisionReason: "2 before-merge items open", OpenItems: 2,
+		AutonomyReason: "touches Harden now files",
 		FilesChanged: []types.FileChange{
 			{Path: "docs/readme.md", Tier: types.TierLow},
 			{Path: "net/proxy.rs", Tier: types.TierCritical, Likelihood: 50, Impact: 92, ImpactAssessed: true,
@@ -202,7 +203,7 @@ func TestRender_Rules(t *testing.T) {
 		if top, _, _ := strings.Cut(out, "<details><summary>Why"); strings.Contains(top, "a top owner") {
 			t.Errorf("checklist names an unmapped owner as \"a top owner\":\n%s", out)
 		}
-		if !strings.Contains(out, "- [ ] 👀 Request a review from @bo on `net/policy.rs`\n") {
+		if !strings.Contains(out, "- [ ] 👀 Request a review from @bo on `net/policy.rs` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n") {
 			t.Errorf("review request should name the GitHub handle only:\n%s", out)
 		}
 	})
@@ -478,6 +479,65 @@ func TestRender_Rules(t *testing.T) {
 		}
 		if !strings.Contains(out, "### ✅ Do before merge (1 of 3 done)") {
 			t.Errorf("smaller PR counted as a checklist item:\n%s", out)
+		}
+	})
+	t.Run("a blocked gate says why under the checklist heading", func(t *testing.T) {
+		risk, hm := hardenPR()
+		out := Render(risk, hm, Links{})
+		if !strings.Contains(out, "### ✅ Do before merge (1 of 3 done)\n\n⛔ Merge blocked: 2 before-merge items open\n\n- [ ]") {
+			t.Errorf("blocked line missing under the heading:\n%s", out)
+		}
+		if strings.Contains(out, "ready to merge") {
+			t.Errorf("blocked PR says ready to merge:\n%s", out)
+		}
+		if !strings.Contains(out, "Gate: block at --fail-on critical (2 before-merge items open).") {
+			t.Errorf("gate line lacks the reason:\n%s", out)
+		}
+	})
+	t.Run("a gate passed because every item is done says ready to merge", func(t *testing.T) {
+		risk, hm := hardenPR()
+		for i := range risk.Checklist {
+			risk.Checklist[i].Done = true
+		}
+		risk.Decision, risk.DecisionReason, risk.OpenItems = "pass", "all before-merge items done", 0
+		out := Render(risk, hm, Links{})
+		if !strings.Contains(out, "### ✅ Do before merge (3 of 3 done)\n\n✅ All before-merge items done: ready to merge\n\n") {
+			t.Errorf("ready line missing:\n%s", out)
+		}
+		if strings.Contains(out, "Merge blocked") {
+			t.Errorf("passed PR says blocked:\n%s", out)
+		}
+	})
+	t.Run("a pass below the gate does not claim everything is done", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.Decision, risk.DecisionReason = "pass", "tier high is below --fail-on critical"
+		out := Render(risk, hm, Links{})
+		if strings.Contains(out, "ready to merge") || strings.Contains(out, "Merge blocked") {
+			t.Errorf("below-gate pass should add no gate line under the heading:\n%s", out)
+		}
+	})
+	t.Run("a shadow block is marked not enforced", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.Shadow = true
+		if out := Render(risk, hm, Links{}); !strings.Contains(out, "⛔ Merge blocked: 2 before-merge items open (shadow: not enforced)\n") {
+			t.Errorf("shadow block line missing:\n%s", out)
+		}
+	})
+	t.Run("open sign-off items say how to satisfy them; done ones do not", func(t *testing.T) {
+		risk := &types.PRRisk{Verdict: "Harden now", Checklist: []types.Action{
+			{ID: "senior-review", Text: "Get sign-off from a senior owner", Files: []string{"core/a.go"}},
+			{ID: "owner-review", Text: "Get an owner's review", Owners: []string{"@bo"}, Files: []string{"core/b.go"}},
+			{ID: "senior-review", Text: "Get sign-off from a senior owner (@cy)", Owners: []string{"@cy"}, Files: []string{"core/c.go"}, Done: true},
+		}}
+		out := Render(risk, &types.Heatmap{}, Links{})
+		for _, want := range []string{
+			"- [ ] 👀 Get sign-off from someone who knows `core/a.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n",
+			"- [ ] 👀 Request a review from @bo on `core/b.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n",
+			"- [x] 👀 Get sign-off from @cy on `core/c.go`\n",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q in:\n%s", want, out)
+			}
 		}
 	})
 	t.Run("marker lets the workflow update its own comment", func(t *testing.T) {

@@ -10,11 +10,11 @@ Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/hig
 
 1. Runs `highstakes init` only when `.heatmap/config.yaml` is missing (a committed config is kept), then `highstakes analyze` (cached by file content).
 2. Collects the reviewers whose latest review is an approval, with `gh api repos/<repo>/pulls/<n>/reviews`.
-3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --repo <owner/name>`, which renders the comment in Go and exits 5 when the PR changes a Harden now file.
+3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --repo <owner/name> --auto-merge-enabled <true|false> [--signed-off]`, which renders the comment in Go and exits 5 when the PR changes a Harden now file and **Do before merge** items are still open.
 4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
 5. Fails the `triage` job when `pr check` exited 5.
 
-The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run. The core step:
+The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run, and on `labeled`/`unlabeled`, so the sign-off label does too. `SIGNED_OFF` and `AUTO_MERGE` come from `github.event.pull_request`, which both events carry. The core step:
 
 ```yaml
       - name: Assess PR risk
@@ -23,13 +23,21 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
+          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
+          signed=
+          if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-The comment is built to act on at a glance. It leads with the verdict (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize` or `✅ Routine`), the changed files per posture (`🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`) and one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels. Then come **Do before merge (N of M done)**, a checklist of the Harden now and Protect files' items with an emoji per kind (👀 review, 🧪 tests, ✂️ split, 🚫 auto-merge off, 📝 docs, 👥 ownership; `[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved), a short file table in plain words (posture emoji, File, If it breaks, Breaks often? as 🔴 with the strongest signal or 🟢 rarely, and Next step), a fold that groups further files by next step, **⚡ One-click actions** (a smaller-PR ask once for the whole PR; prefilled GitHub issues for split, complexity, test and invariant work, each a full brief with why it matters, why now, a suggested approach, a done-when checklist and context, previewed in a folded **What's in this issue** under the link; a CODEOWNERS edit link; and the circuit breakers as things to do), a folded Mermaid quadrant chart of where the PR lands (numbered points with a legend), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items and the backlog. `--repo "$REPO"` makes the issue and CODEOWNERS actions links; without a repo they stay plain text. The issues link back to the PR, whose number `pr check` reads from `$GITHUB_REF` in Actions (pass `--pr N` elsewhere). See the [CLI reference](cli-reference.md#verdict-and-checklist).
+### Sign-off label
+
+Review items ask for an owner's approval, but GitHub does not let authors approve their own PRs, so a sole maintainer could never tick them. A maintainer with write access reviews the change and adds the label `highstakes:signed-off` to the PR; the next run ticks the sign-off and owner-review items ("signed off with the highstakes:signed-off label"). Removing the label reopens them. Create the label once in **Issues > Labels**. Only people with write access can add labels, which is what makes the label a sign-off.
+
+The comment is built to act on at a glance. It leads with the verdict (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize` or `✅ Routine`), the changed files per posture (`🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`) and one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels. Then come **Do before merge (N of M done)**, a checklist of the Harden now and Protect files' items with an emoji per kind (👀 review, 🧪 tests, ✂️ split, 🚫 auto-merge off, 📝 docs, 👥 ownership; `[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved, the sign-off label is on, auto-merge is off) with the gate's state under the heading (`⛔ Merge blocked: 2 before-merge items open` or `✅ All before-merge items done: ready to merge`), a short file table in plain words (posture emoji, File, If it breaks, Breaks often? as 🔴 with the strongest signal or 🟢 rarely, and Next step), a fold that groups further files by next step, **⚡ One-click actions** (a smaller-PR ask once for the whole PR; prefilled GitHub issues for split, complexity, test and invariant work, each a full brief with why it matters, why now, a suggested approach, a done-when checklist and context, previewed in a folded **What's in this issue** under the link; a CODEOWNERS edit link; and the circuit breakers as things to do), a folded Mermaid quadrant chart of where the PR lands (numbered points with a legend), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items and the backlog. `--repo "$REPO"` makes the issue and CODEOWNERS actions links; without a repo they stay plain text. The issues link back to the PR, whose number `pr check` reads from `$GITHUB_REF` in Actions (pass `--pr N` elsewhere). See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 ### Secrets
 
@@ -37,7 +45,7 @@ Add `OPENROUTER_API_KEY` in **Settings > Secrets and variables > Actions > New r
 
 ### Block Merge on Harden Now Files
 
-The shipped workflow already gates with `--fail-on critical` (exit 5 on Harden now files). In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to block Protect files too, or `--shadow` to log decisions without failing while you calibrate.
+The shipped workflow already gates with `--fail-on critical`: exit 5 while a PR that changes Harden now files has open **Do before merge** items. Working through the checklist (tests next to the file, sign-off by approval or label, auto-merge off) unblocks it. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to gate Protect files too, `--strict` to block on the tier alone whatever is done, or `--shadow` to log decisions without failing while you calibrate.
 
 ## GitLab CI
 

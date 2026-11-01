@@ -362,11 +362,12 @@ highstakes pr check                                     # Verdict and before-mer
 highstakes pr check --format markdown                   # The PR comment the triage workflow posts
 highstakes pr check --approvals ana,bo                  # Tick owner-review items these approvers satisfy
 highstakes pr check --base dev --json                   # For CI pipelines
-highstakes pr check --fail-on critical                  # Exit 5 when the PR changes a Harden now file
+highstakes pr check --fail-on critical                  # Exit 5 while a Harden now PR has open before-merge items
+highstakes pr check --fail-on critical --signed-off     # A maintainer added the highstakes:signed-off label
 highstakes pr check --shadow                            # Log the decision, never fail
 ```
 
-`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine) and whether AI may auto-merge it, then one checklist of the before-merge items of the Harden now and Protect files it touches; Stabilize work (refactor the touched function, regression tests) is listed as worth doing, not blocking. It ticks the items the PR already satisfies: a test next to a risky file was added or changed, not deleted ("add tests" items), CODEOWNERS already covers the path, or a suggested owner approved (`--approvals`, filled from the GitHub API in CI). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+`pr check` leads with the verdict of the most severe changed file (Harden now, Protect, Stabilize, Routine) and whether AI may auto-merge it, then one checklist of the before-merge items of the Harden now and Protect files it touches; Stabilize work (refactor the touched function, regression tests) is listed as worth doing, not blocking. It ticks the items the PR already satisfies: a test next to a risky file was added or changed, not deleted ("add tests" items), CODEOWNERS already covers the path, a suggested owner approved (`--approvals`, filled from the GitHub API in CI), a maintainer added the `highstakes:signed-off` label (`--signed-off`), or auto-merge is off (`--auto-merge-enabled false`). Harden now files also get "ask for a smaller PR" when the diff is over 500 lines or spans 3+ components. Backlog items (split the file, a CODEOWNERS line, a test-gap issue) come with a copyable command. It also reports change risk and suggested reviewers. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
 
 ### Review Policy
 
@@ -422,19 +423,25 @@ Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.y
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
+          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" > pr-comment.md
+          signed=
+          if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist.
+A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist, and on `labeled`/`unlabeled`, so the sign-off label does too.
 
 </details>
 
 <details><summary><b>Block merge on Harden now files</b></summary>
 
-`--fail-on critical` exits 5 when the PR changes a Harden now file (tier `critical`); the shipped workflow turns that into a failed `triage` job. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to also block Protect files. Start with `--shadow` to log decisions without failing.
+`--fail-on critical` exits 5 while a PR that changes a Harden now file (tier `critical`) has open **Do before merge** items; once every item is ticked it passes (`✅ All before-merge items done: ready to merge`). The shipped workflow turns exit 5 into a failed `triage` job. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to also gate Protect files, `--strict` to block on the tier alone whatever is done. Start with `--shadow` to log decisions without failing.
+
+GitHub does not let authors approve their own PRs, so a sole maintainer could never tick a sign-off item. A maintainer with write access adds the label `highstakes:signed-off` after reviewing instead; the workflow passes `--signed-off` while it is on.
 
 </details>
 
@@ -448,7 +455,7 @@ go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 [ -f .heatmap/config.yaml ] || highstakes init
 highstakes analyze                                      # cached: only changed files are re-assessed
 
-# The comment body for your CI's merge request API; exit 5 blocks Harden now files.
+# The comment body for your CI's merge request API; exit 5 blocks Harden now files with open items.
 highstakes pr check --base origin/main --format markdown --fail-on critical > comment.md
 
 # Or JSON: verdict, checklist (with done) and backlog.
@@ -468,7 +475,7 @@ highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] |
 
 ### ✅ Do before merge (2 of 4 done)
 
-- [ ] 👀 Get sign-off from @johntmyers on `crates/openshell-supervisor-network/src/proxy.rs`
+- [ ] 👀 Get sign-off from @johntmyers on `crates/openshell-supervisor-network/src/proxy.rs` (a maintainer adds the `highstakes:signed-off` label after reviewing)
 - [x] 🧪 Add regression tests around the 4 recent fixes (`crates/openshell-supervisor-network/src/proxy.rs`)
 - [x] 🧪 Add contract tests for its public interface (`crates/openshell-supervisor-network/src/proxy.rs`)
 - [ ] 🚫 Keep auto-merge off

@@ -5,7 +5,7 @@
 
 ### ✅ Do before merge (0 of 1 done)
 
-- [ ] 👀 Get sign-off from someone who knows `core/h0.go`, `core/h5.go`
+- [ ] 👀 Get sign-off from someone who knows `core/h0.go`, `core/h5.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)
 
 |    | File | If it breaks | Breaks often? | Next step |
 |---|---|---|---|---|

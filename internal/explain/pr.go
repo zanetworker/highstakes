@@ -24,7 +24,24 @@ type Change struct {
 	Components int               // distinct components among changed non-test files
 	Approvals  []string          // GitHub logins that approved the PR (from CI)
 	Codeowned  func(string) bool // CODEOWNERS at HEAD covers a path; nil: nothing
+	SignedOff  bool              // the PR carries the SignOffLabel
+	AutoMerge  string            // AutoMergeOn, AutoMergeOff, else unknown
 }
+
+// SignOffLabel is the PR label a maintainer adds after reviewing; it ticks
+// the sign-off and owner-review items, since GitHub does not let authors
+// approve their own PRs (a sole maintainer could never satisfy them).
+const SignOffLabel = "highstakes:signed-off"
+
+// Auto-merge states of the PR, as pr check --auto-merge-enabled takes them.
+const (
+	AutoMergeOn      = "true"
+	AutoMergeOff     = "false"
+	AutoMergeUnknown = "unknown"
+)
+
+// reviewActions are satisfied by an owner's approval or the sign-off label.
+var reviewActions = map[string]bool{"senior-review": true, "owner-review": true}
 
 // testActions are satisfied by adding or changing a test next to the file;
 // deleting one does not count.
@@ -44,6 +61,7 @@ func ForPR(f *types.FileHeat, c Change) []types.Action {
 			out, added = appendSmallerPR(out, f, c), true
 		}
 		a.Done = satisfied(a, f.Path, c)
+		applyPRState(&a, c)
 		out = append(out, a)
 	}
 	if !added {
@@ -80,10 +98,24 @@ func satisfied(a types.Action, file string, c Change) bool {
 		}
 	case a.ID == "codeowners":
 		return c.Codeowned != nil && c.Codeowned(file)
-	case a.ID == "senior-review" || a.ID == "owner-review":
+	case reviewActions[a.ID]:
 		return approvedByOwner(a.Owners, c.Approvals)
 	}
 	return false
+}
+
+// applyPRState settles items from PR state CI reports: the sign-off label
+// ticks review items no owner approved yet; auto-merge off ticks the
+// no-auto-merge item, and auto-merge on rewords it as a request.
+func applyPRState(a *types.Action, c Change) {
+	switch {
+	case reviewActions[a.ID] && !a.Done && c.SignedOff:
+		a.Done, a.Signal = true, "signed off with the "+SignOffLabel+" label"
+	case a.ID == "no-auto-merge" && c.AutoMerge == AutoMergeOff:
+		a.Done, a.Signal = true, "auto-merge is not enabled on this PR"
+	case a.ID == "no-auto-merge" && c.AutoMerge == AutoMergeOn:
+		a.Text, a.Signal = "Turn auto-merge off: it is enabled on this PR", "auto-merge is enabled on this PR"
+	}
 }
 
 // approvedByOwner matches GitHub logins against owner handles, ignoring

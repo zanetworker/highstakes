@@ -348,6 +348,8 @@ type PRRisk struct {
 	AutonomyReason   string `json:"autonomy_reason,omitempty"`
 	FailOn             Tier       `json:"fail_on,omitempty"`  // gate tier from --fail-on (or critical in shadow mode)
 	Decision           string     `json:"decision,omitempty"` // "pass" or "block" when a gate is set
+	DecisionReason     string     `json:"decision_reason,omitempty"` // why, e.g. "all before-merge items done"
+	OpenItems          int        `json:"open_items"`                // checklist items still open; the gate blocks while any are
 	Shadow             bool       `json:"shadow,omitempty"`   // decision logged, not enforced
 }
 

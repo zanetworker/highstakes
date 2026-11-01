@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/zanetworker/highstakes/internal/explain"
+	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -94,6 +95,12 @@ func writeChecklist(b *strings.Builder, risk *types.PRRisk) {
 		return
 	}
 	fmt.Fprintf(b, "### ✅ Do before merge (%s of %s done)\n\n", explain.Thousands(done), explain.Thousands(len(items)))
+	switch {
+	case risk.Decision == prscore.DecisionBlock:
+		fmt.Fprintf(b, "⛔ Merge blocked: %s%s\n\n", risk.DecisionReason, shadowNote(risk))
+	case risk.Decision == prscore.DecisionPass && risk.DecisionReason == prscore.ReasonAllDone:
+		b.WriteString("✅ All before-merge items done: ready to merge\n\n")
+	}
 	for i, a := range items {
 		line := checklistLine(a)
 		if !fits(b, line) {
@@ -475,12 +482,20 @@ func writeReviewersBacklogGate(b *strings.Builder, risk *types.PRRisk) {
 		b.WriteString("\n")
 	}
 	if risk.Decision != "" {
-		mode := ""
-		if risk.Shadow {
-			mode = " (shadow: not enforced)"
+		reason := ""
+		if risk.DecisionReason != "" {
+			reason = " (" + risk.DecisionReason + ")"
 		}
-		fmt.Fprintf(b, "Gate: %s at --fail-on %s%s.\n\n", risk.Decision, risk.FailOn, mode)
+		fmt.Fprintf(b, "Gate: %s at --fail-on %s%s%s.\n\n", risk.Decision, risk.FailOn, reason, shadowNote(risk))
 	}
+}
+
+// shadowNote marks a decision that is logged, not enforced.
+func shadowNote(risk *types.PRRisk) string {
+	if risk.Shadow {
+		return " (shadow: not enforced)"
+	}
+	return ""
 }
 
 func codeList(paths []string) string {

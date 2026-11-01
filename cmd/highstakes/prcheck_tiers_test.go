@@ -80,7 +80,8 @@ func TestPRCheck_EmptyDiffStillGates(t *testing.T) {
 		wantShade bool   // shadow log written
 	}{
 		{"invalid --fail-on lists valid values", []string{"--fail-on=invalid", "--shadow=false"}, 2, "low", "", false},
-		{"--fail-on low blocks a LOW result", []string{"--fail-on=low", "--shadow=false"}, exitBlocked, "tier low", "", false},
+		{"--fail-on low passes a LOW result with nothing open", []string{"--fail-on=low", "--shadow=false"}, 0, "", `"decision_reason": "all before-merge items done"`, false},
+		{"--strict --fail-on low blocks a LOW result", []string{"--fail-on=low", "--strict", "--shadow=false"}, exitBlocked, "tier low", "", false},
 		{"--fail-on critical passes", []string{"--fail-on=critical", "--shadow=false"}, 0, "", `"decision": "pass"`, false},
 		{"--shadow writes its decision record", []string{"--fail-on=", "--shadow=true"}, 0, "", `"tier": "low"`, true},
 	}
@@ -211,6 +212,67 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	var ee *exitError
 	if !errors.As(err, &ee) || ee.code != 2 || !strings.Contains(ee.msg, "text, markdown, json") {
 		t.Errorf("invalid --format: err = %v, want exit 2 listing valid values", err)
+	}
+}
+
+// TestPRCheck_GateUnblocksWhenItemsDone: --fail-on critical blocks a Harden
+// now PR while items are open and passes once the adjacent test lands and a
+// maintainer signs off with the label; --strict still blocks.
+func TestPRCheck_GateUnblocksWhenItemsDone(t *testing.T) {
+	dir, write := checklistRepo(t)
+	write("core/a.go", "package core\n\nfunc A() { _ = 1 }\n")
+	gitIn(t, dir, "commit", "-q", "-am", "change a")
+	base := []string{"pr", "check", "--base", "main", "--format", "markdown", "--shadow=false", "--fail-on=critical", "--author=t@x.com", "--reviewers=0"}
+
+	out, err := runCLI(t, dir, base...)
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != exitBlocked || !strings.Contains(ee.msg, "2 before-merge items open") {
+		t.Fatalf("all open: err = %v, want exit 5 with 2 items open", err)
+	}
+	for _, want := range []string{"### ✅ Do before merge (0 of 2 done)", "⛔ Merge blocked: 2 before-merge items open",
+		"- [ ] 👀 Get sign-off from @ana on `core/a.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	write("core/a_test.go", "package core\n")
+	gitIn(t, dir, "add", "core/a_test.go")
+	gitIn(t, dir, "commit", "-q", "-m", "test a")
+	_, err = runCLI(t, dir, base...)
+	if !errors.As(err, &ee) || ee.code != exitBlocked || !strings.Contains(ee.msg, "1 before-merge item open") {
+		t.Fatalf("one open: err = %v, want exit 5 with 1 item open", err)
+	}
+
+	out, err = runCLI(t, dir, append(base, "--signed-off")...)
+	if err != nil {
+		t.Fatalf("all done: %v\n%s", err, out)
+	}
+	for _, want := range []string{"### ✅ Do before merge (2 of 2 done)", "✅ All before-merge items done: ready to merge",
+		"- [x] 👀 Get sign-off from @ana on `core/a.go`\n", "signed off with the highstakes:signed-off label"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+
+	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--json", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off")
+	if err != nil || !strings.Contains(out, `"open_items": 0`) || !strings.Contains(out, `"decision_reason": "all before-merge items done"`) {
+		t.Errorf("JSON: err = %v, want open_items 0 and the reason:\n%s", err, out)
+	}
+
+	out, err = runCLI(t, dir, "pr", "check", "--base", "main", "--shadow=false", "--fail-on=critical", "--reviewers=0", "--signed-off")
+	if err != nil || !strings.Contains(out, "Decision: PASS (fail-on critical): all before-merge items done\n") {
+		t.Errorf("text: err = %v, want the decision with its reason:\n%s", err, out)
+	}
+
+	_, err = runCLI(t, dir, append(base, "--signed-off", "--strict")...)
+	if !errors.As(err, &ee) || ee.code != exitBlocked || !strings.Contains(ee.msg, "--strict") {
+		t.Errorf("--strict: err = %v, want exit 5 naming --strict", err)
+	}
+
+	_, err = runCLI(t, dir, append(base, "--auto-merge-enabled", "maybe")...)
+	if !errors.As(err, &ee) || ee.code != 2 {
+		t.Errorf("invalid --auto-merge-enabled: err = %v, want exit 2", err)
 	}
 }
 

@@ -272,14 +272,43 @@ const (
 	DecisionBlock = "block"
 )
 
+// ReasonAllDone is the decision reason when the PR is at or above the gate
+// and every before-merge item is done.
+const ReasonAllDone = "all before-merge items done"
+
 var tierRank = map[types.Tier]int{types.TierLow: 1, types.TierMedium: 2, types.TierHigh: 3, types.TierCritical: 4}
 
-// Decide returns DecisionBlock when tier is at or above failOn. An empty failOn never blocks.
-func Decide(tier, failOn types.Tier) string {
-	if failOn != "" && tierRank[tier] >= tierRank[failOn] {
-		return DecisionBlock
+// Decide gates a PR at failOn: a tier below it passes; at or above it the
+// PR blocks while open before-merge items remain, and passes once they are
+// done. strict blocks on the tier alone. reason says why; an empty failOn
+// never blocks and gives no reason.
+func Decide(tier, failOn types.Tier, open int, strict bool) (decision, reason string) {
+	switch {
+	case failOn == "":
+		return DecisionPass, ""
+	case tierRank[tier] < tierRank[failOn]:
+		return DecisionPass, fmt.Sprintf("tier %s is below --fail-on %s", tier, failOn)
+	case strict:
+		return DecisionBlock, fmt.Sprintf("tier %s is at or above --fail-on %s (--strict)", tier, failOn)
+	case open == 1:
+		return DecisionBlock, "1 before-merge item open"
+	case open > 1:
+		return DecisionBlock, fmt.Sprintf("%d before-merge items open", open)
 	}
-	return DecisionPass
+	return DecisionPass, ReasonAllDone
+}
+
+// OpenItems counts the checklist items still open. The smaller-PR ask is
+// left out: the comment raises it once as a one-click action, not as an
+// item anyone can tick.
+func OpenItems(checklist []types.Action) int {
+	n := 0
+	for _, a := range checklist {
+		if !a.Done && a.ID != "smaller-pr" {
+			n++
+		}
+	}
+	return n
 }
 
 // ChangeRiskLevel buckets a 0-100 change risk score.
