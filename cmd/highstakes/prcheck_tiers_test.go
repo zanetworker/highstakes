@@ -191,8 +191,8 @@ func TestPRCheck_MarkdownChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pr check --repo: %v\n%s", err, out)
 	}
-	if want := "- [👥 Add `/core/a.go @ana` to CODEOWNERS](https://github.com/acme/core/edit/main/.github/CODEOWNERS)"; !strings.Contains(out, want) {
-		t.Errorf("--repo should link the CODEOWNERS action; missing %q in:\n%s", want, out)
+	if want := "- [👥 Create CODEOWNERS with `/core/a.go @ana`](https://github.com/acme/core/new/main?filename=.github%2FCODEOWNERS&value=%2Fcore%2Fa.go+%40ana%0A)"; !strings.Contains(out, want) {
+		t.Errorf("--repo should link the CODEOWNERS action (no CODEOWNERS yet: a create link); missing %q in:\n%s", want, out)
 	}
 	_, err = runCLI(t, dir, append(base, "--repo", "acme")...)
 	if ee := (*exitError)(nil); !errors.As(err, &ee) || ee.code != 2 {

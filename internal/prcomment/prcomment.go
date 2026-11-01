@@ -111,7 +111,7 @@ func writeOneClick(b *strings.Builder, risk *types.PRRisk, issues []issueLink, l
 		}
 	}
 	for _, a := range risk.Backlog {
-		if a.ID == "codeowners" && a.Command != "" && len(lines) < maxLinks {
+		if a.ID == "codeowners" && a.Command != "" && !a.Done && len(lines) < maxLinks {
 			lines = append(lines, codeownersAction(a, links))
 		}
 	}

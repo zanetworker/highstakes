@@ -249,21 +249,27 @@ func TestIssueLinks(t *testing.T) {
 
 func TestCodeownersAction(t *testing.T) {
 	tests := []struct {
-		name, cmd, repo, base, want string
+		name, cmd, repo, base, codeowners, want string
 	}{
-		{"handles link to the edit page", "/core/p.go @ana @bo", "o/r", "main",
+		{"handles link to the edit page", "/core/p.go @ana @bo", "o/r", "main", ".github/CODEOWNERS",
 			"- [👥 Add `/core/p.go @ana @bo` to CODEOWNERS](https://github.com/o/r/edit/main/.github/CODEOWNERS)"},
-		{"noreply becomes a handle", "/core/p.go 1+bo@users.noreply.github.com", "o/r", "main",
+		{"noreply becomes a handle", "/core/p.go 1+bo@users.noreply.github.com", "o/r", "main", ".github/CODEOWNERS",
 			"- [👥 Add `/core/p.go @bo` to CODEOWNERS](https://github.com/o/r/edit/main/.github/CODEOWNERS)"},
-		{"private email: plain text", "/core/p.go ana@example.com", "o/r", "main",
+		{"private email: plain text", "/core/p.go ana@example.com", "o/r", "main", ".github/CODEOWNERS",
 			"- 👥 Add an `owners` alias in .heatmap/config.yaml, then a CODEOWNERS line for `core/p.go`"},
-		{"no repo: plain text", "/core/p.go @ana", "", "main", "- 👥 Add `/core/p.go @ana` to CODEOWNERS"},
-		{"no base branch: plain text", "/core/p.go @ana", "o/r", "", "- 👥 Add `/core/p.go @ana` to CODEOWNERS"},
+		{"no repo: plain text", "/core/p.go @ana", "", "main", ".github/CODEOWNERS", "- 👥 Add `/core/p.go @ana` to CODEOWNERS"},
+		{"no base branch: plain text", "/core/p.go @ana", "o/r", "", ".github/CODEOWNERS", "- 👥 Add `/core/p.go @ana` to CODEOWNERS"},
+		{"CODEOWNERS at the repo root", "/core/p.go @ana", "o/r", "main", "CODEOWNERS",
+			"- [👥 Add `/core/p.go @ana` to CODEOWNERS](https://github.com/o/r/edit/main/CODEOWNERS)"},
+		{"CODEOWNERS under docs", "/core/p.go @ana", "o/r", "main", "docs/CODEOWNERS",
+			"- [👥 Add `/core/p.go @ana` to CODEOWNERS](https://github.com/o/r/edit/main/docs/CODEOWNERS)"},
+		{"no CODEOWNERS yet: create it", "/core/p.go @ana", "o/r", "main", "",
+			"- [👥 Create CODEOWNERS with `/core/p.go @ana`](https://github.com/o/r/new/main?filename=.github%2FCODEOWNERS&value=%2Fcore%2Fp.go+%40ana%0A)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := types.Action{ID: "codeowners", Command: tt.cmd, Files: []string{"core/p.go"}}
-			if got := codeownersAction(a, Links{Repo: tt.repo, Base: tt.base}); got != tt.want {
+			if got := codeownersAction(a, Links{Repo: tt.repo, Base: tt.base, Codeowners: tt.codeowners}); got != tt.want {
 				t.Errorf("got  %q\nwant %q", got, tt.want)
 			}
 		})
@@ -329,4 +335,16 @@ func TestQuadrantChart(t *testing.T) {
 			t.Errorf("%d points, want %d", n, maxChartPoints)
 		}
 	})
+}
+
+func TestOneClick_SkipsDoneActions(t *testing.T) {
+	risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78,
+		FilesChanged: []types.FileChange{{Path: "a/x.go", Tier: types.TierMedium, Likelihood: 50, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch}},
+		WorthDoing: []types.Action{{ID: "regression-tests", Text: "Add regression tests", Files: []string{"a/x.go"}, Signal: "2 recent fixes", Done: true}},
+		Backlog:    []types.Action{{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"a/x.go"}, Command: "/a/x.go @ana", Done: true}},
+	}
+	out := Render(risk, &types.Heatmap{Files: map[string]*types.FileHeat{}}, Links{Repo: "o/r", Base: "main", Codeowners: ".github/CODEOWNERS"})
+	if strings.Contains(out, "Open issue: Add regression tests") || strings.Contains(out, "to CODEOWNERS](") {
+		t.Errorf("one-click offers work the PR already did:\n%s", out)
+	}
 }

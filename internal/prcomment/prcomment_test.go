@@ -341,7 +341,7 @@ func TestRender_Rules(t *testing.T) {
 		risk, hm := hardenPR()
 		risk.Backlog = append(risk.Backlog, types.Action{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"net/proxy.rs"},
 			Signal: "not covered", Command: "/net/proxy.rs @ana"})
-		out := Render(risk, hm, Links{Repo: "acme/net", Base: "main"})
+		out := Render(risk, hm, Links{Repo: "acme/net", Base: "main", Codeowners: ".github/CODEOWNERS"})
 		for _, want := range []string{
 			"| 👀 senior sign-off · [📝 open issue](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=",
 			"- [📝 Open issue: Split net/proxy.rs into smaller files](https://github.com/acme/net/issues/new?",

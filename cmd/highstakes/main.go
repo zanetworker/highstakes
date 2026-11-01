@@ -465,7 +465,7 @@ var prCheckCmd = &cobra.Command{
 
 		switch {
 		case format == "markdown":
-			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base)}))
+			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base), Codeowners: codeownersPath()}))
 			return gateErr
 		case format == "json" && len(changes) == 0:
 			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
@@ -1078,4 +1078,10 @@ func init() {
 
 	githubCmd.AddCommand(githubInstallCmd)
 	rootCmd.AddCommand(githubCmd)
+}
+
+// codeownersPath is the repo's CODEOWNERS file relative to the root, or "".
+func codeownersPath() string {
+	_, rel := policy.LoadCodeowners(".")
+	return rel
 }

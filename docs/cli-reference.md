@@ -326,7 +326,7 @@ highstakes pr check [flags]
 | `--base` | `main` | Base branch to compare against |
 | `--json` | `false` | Output as JSON (same as `--format json`) |
 | `--format` | `text` | `text`, `markdown` (the PR comment the triage workflow posts) or `json`; anything else exits 2 |
-| `--repo` | `$GITHUB_REPOSITORY`, then the origin remote | GitHub `owner/name` the markdown comment links to: prefilled new-issue links and a CODEOWNERS edit link (on the `--base` branch; a commit base leaves it plain text). Without a repo those actions are plain text; an invalid value exits 2 |
+| `--repo` | `$GITHUB_REPOSITORY`, then the origin remote | GitHub `owner/name` the markdown comment links to: prefilled new-issue links and a CODEOWNERS link on the `--base` branch (an edit link to the repo's CODEOWNERS at `.github/`, the root or `docs/`, or a link that creates `.github/CODEOWNERS` with the rule when none exists; a commit base leaves it plain text). Actions the PR already satisfies are never offered as links. Without a repo those actions are plain text; an invalid value exits 2 |
 | `--approvals` | (none) | Comma-separated GitHub logins that approved the PR; a suggested owner among them ticks `senior-review` and `owner-review` items. Only CI knows approvals: the shipped workflow fills it from the GitHub API |
 | `--fail-on` | (none) | Exit 5 when the PR tier is at or above this tier: `critical`, `high`, `medium`, `low` (`critical` blocks Harden now files) |
 | `--shadow` | `false` | Compute the `--fail-on` decision (default gate `critical`), append it to `.heatmap/shadow.jsonl`, always exit 0 |

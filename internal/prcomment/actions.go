@@ -17,6 +17,9 @@ import (
 type Links struct {
 	Repo string // owner/name; "" renders issue and CODEOWNERS actions as plain text
 	Base string // branch the CODEOWNERS edit link opens; "" leaves that action plain text
+	// Codeowners is the repo's CODEOWNERS path (.github/, root or docs/);
+	// "" means none exists yet, so the link creates .github/CODEOWNERS.
+	Codeowners string
 }
 
 // maxLinks caps the one-click links; maxURL keeps each under what browsers
@@ -229,7 +232,7 @@ func issueLinks(risk *types.PRRisk, files []types.FileChange, hm *types.Heatmap,
 		n := 0
 		for _, list := range [][]types.Action{risk.WorthDoing, risk.Backlog} {
 			for _, a := range list {
-				if !issueShaped[a.ID] || !contains(a.Files, fc.Path) {
+				if a.Done || !issueShaped[a.ID] || !contains(a.Files, fc.Path) {
 					continue
 				}
 				title, _ := explain.TaskTitle(a.ID, f)
@@ -264,7 +267,12 @@ func codeownersAction(a types.Action, links Links) string {
 	if links.Repo == "" || links.Base == "" {
 		return "- 👥 " + line
 	}
-	return fmt.Sprintf("- [👥 %s](https://github.com/%s/edit/%s/.github/CODEOWNERS)", line, links.Repo, url.PathEscape(links.Base))
+	if links.Codeowners == "" {
+		rule := ScrubEmails(a.Command)
+		q := url.Values{"filename": {".github/CODEOWNERS"}, "value": {rule + "\n"}}
+		return fmt.Sprintf("- [👥 Create CODEOWNERS with `%s`](https://github.com/%s/new/%s?%s)", rule, links.Repo, url.PathEscape(links.Base), q.Encode())
+	}
+	return fmt.Sprintf("- [👥 %s](https://github.com/%s/edit/%s/%s)", line, links.Repo, url.PathEscape(links.Base), links.Codeowners)
 }
 
 const unscoredPrefix = "Unscored new file(s), heat inherited from directory: "
