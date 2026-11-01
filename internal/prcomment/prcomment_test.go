@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -106,6 +107,86 @@ func TestRender_RoutineGolden(t *testing.T) {
 }
 
 func TestRender_Rules(t *testing.T) {
+	t.Run("details show each file's scores against the cutoffs", func(t *testing.T) {
+		risk, hm := hardenPR()
+		out := Render(risk, hm)
+		if !strings.Contains(out, "- Scores: Will it break? 50 (high, cutoff 33); How bad if it breaks? 92 (high, cutoff 78)") {
+			t.Errorf("per-file scores missing from details:\n%s", out)
+		}
+	})
+	t.Run("backlog commands with an unmapped email are replaced, not broken", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.Backlog = []types.Action{
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"core/p.go"}, Signal: "not covered", Command: "/core/p.go ana@example.com"},
+			{ID: "codeowners", Text: "Add a CODEOWNERS line", Files: []string{"core/q.go"}, Signal: "not covered", Command: "/core/q.go 1+bo@users.noreply.github.com"},
+		}
+		out := Render(risk, hm)
+		if strings.Contains(out, "/core/p.go a top owner") {
+			t.Errorf("redaction produced an invalid CODEOWNERS rule:\n%s", out)
+		}
+		if !strings.Contains(out, "add an `owners` alias in .heatmap/config.yaml to get a copyable CODEOWNERS line") {
+			t.Errorf("no instruction for the unmapped owner:\n%s", out)
+		}
+		if !strings.Contains(out, "`/core/q.go @bo`") {
+			t.Errorf("noreply owner should become a valid @handle rule:\n%s", out)
+		}
+	})
+	t.Run("table cells stay on one line and never understate risk", func(t *testing.T) {
+		hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+			"a/multi.go": {Path: "a/multi.go", Factors: types.Factors{BlastRadius: types.BlastRadius{Assessed: true, Summary: "line one\nline two"}}},
+		}}
+		risk := &types.PRRisk{Tier: types.TierHigh, Verdict: "Protect", LikelyCutoff: 33, ImpactThreshold: 78,
+			FilesChanged: []types.FileChange{
+				{Path: "a/multi.go", Tier: types.TierHigh, Impact: 85, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
+				{Path: "a/bare.go", Tier: types.TierHigh, Impact: 90, ImpactAssessed: true, Quadrant: types.QuadrantProtect},
+			}}
+		out := Render(risk, hm)
+		if !strings.Contains(out, "| `a/multi.go` | line one line two |") {
+			t.Errorf("multi-line summary not flattened:\n%s", out)
+		}
+		if strings.Contains(out, "| `a/bare.go` | limited damage") {
+			t.Errorf("a Protect file without a description reads as limited damage:\n%s", out)
+		}
+		if !strings.Contains(out, "| `a/bare.go` | costly (no description; run analyze again) |") {
+			t.Errorf("missing fallback for an undescribed costly file:\n%s", out)
+		}
+	})
+	t.Run("table says what breaks and how often, not scores", func(t *testing.T) {
+		risk, hm := hardenPR()
+		out := Render(risk, hm)
+		if !strings.Contains(out, "| File | If it breaks | Breaks often? | Do |") {
+			t.Errorf("table header not plain:\n%s", out)
+		}
+		// consequence from the LLM summary; frequency from the first likelihood reason
+		if !strings.Contains(out, "| `net/proxy.rs` | Core egress proxy that enforces network policy. | Yes: 55 commits in the last 90 days (top 1% of this repo) | Harden now |") {
+			t.Errorf("proxy row not in plain words:\n%s", out)
+		}
+		if !strings.Contains(out, "| `net/policy.rs` | security 80 | No, rarely changes | Protect |") {
+			t.Errorf("policy row not in plain words:\n%s", out)
+		}
+		table := out[strings.Index(out, "| File |"):strings.Index(out, "<details>")]
+		for _, bad := range []string{"50 high", "92 high", " low |"} {
+			if strings.Contains(table, bad) {
+				t.Errorf("table still shows scores (%q):\n%s", bad, table)
+			}
+		}
+	})
+	t.Run("no email address appears anywhere", func(t *testing.T) {
+		risk, hm := hardenPR()
+		risk.Checklist = append(risk.Checklist, types.Action{ID: "owner-review", Scope: types.ScopeBeforeMerge,
+			Text: "Get an owner's review (ana@example.com, 12345+bo@users.noreply.github.com)", Files: []string{"net/policy.rs"}})
+		risk.SuggestedReviewers = []types.Reviewer{{Handle: "ana@example.com"}, {Handle: "@carl"}}
+		out := Render(risk, hm)
+		if m := regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`).FindString(out); m != "" {
+			t.Errorf("email %q in comment:\n%s", m, out)
+		}
+		if !strings.Contains(out, "@bo") || !strings.Contains(out, "@carl") {
+			t.Errorf("GitHub handles should stay:\n%s", out)
+		}
+		if !strings.Contains(out, "Get an owner's review (a top owner, @bo)") {
+			t.Errorf("unmapped email not replaced readably:\n%s", out)
+		}
+	})
 	t.Run("routine summary leaves auto-merge to the autonomy line", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
 			AutoMergeAllowed: false, AutonomyLevel: 1, AutonomyReason: "touches files whose impact is not AI-assessed",
@@ -191,7 +272,7 @@ func TestRender_Rules(t *testing.T) {
 		if !strings.Contains(out, "| 2 more files need action |  |  | see details |") {
 			t.Errorf("overflow files not shown as their own row:\n%s", out)
 		}
-		if !strings.Contains(out, "| 1 other file | low | low | Routine |") {
+		if !strings.Contains(out, "| 1 other file | limited damage | rarely | Routine |") {
 			t.Errorf("routine row should hold only routine files:\n%s", out)
 		}
 		if !strings.Contains(out, "**`s0.go`** (Stabilize)") {
@@ -213,20 +294,20 @@ func TestRender_Rules(t *testing.T) {
 	t.Run("every score shows its repo cutoff once", func(t *testing.T) {
 		risk, hm := hardenPR()
 		out := Render(risk, hm)
-		if !strings.Contains(out, "Repo cutoffs: will it break 33, how bad 78") {
+		if !strings.Contains(out, "Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78") {
 			t.Errorf("cutoffs missing:\n%s", out)
 		}
 		if strings.Count(out, "not a probability") != 1 {
 			t.Error("the relative-signal note should appear exactly once")
 		}
-		if strings.Count(out, "How bad? is AI-assessed, not yet checked against maintainer ratings") != 1 {
+		if strings.Count(out, "How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings") != 1 {
 			t.Error("the evidence note for the two questions should appear exactly once")
 		}
 	})
 	t.Run("stabilize items are worth doing, not before merge", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierMedium, Verdict: "Stabilize", LikelyCutoff: 33, ImpactThreshold: 78,
 			FilesChanged: []types.FileChange{{Path: "s.go", Tier: types.TierMedium, Likelihood: 50, Impact: 10, ImpactAssessed: true, Quadrant: types.QuadrantWatch}},
-			WorthDoing: []types.Action{{ID: "refactor", Text: "Refactor the function you touch", Signal: "complexity in the top 5%", Files: []string{"s.go"}}}}
+			WorthDoing:   []types.Action{{ID: "refactor", Text: "Refactor the function you touch", Signal: "complexity in the top 5%", Files: []string{"s.go"}}}}
 		out := Render(risk, &types.Heatmap{})
 		if strings.Contains(out, "Do before merge") {
 			t.Errorf("no blocking items, so no before-merge checklist:\n%s", out)

@@ -197,10 +197,10 @@ HARDEN NOW
 Will it break?         50  HIGH  repo cutoff 35
 How bad if it breaks?  92  HIGH  repo cutoff 78
 Scores are a relative signal within this repo, not a probability.
-Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.
+Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings.
 
 Do before the next merge
-  [ ] Get sign-off from a senior owner (@johntmyers, rrhubenov@gmail.com)
+  [ ] Get sign-off from a senior owner (@johntmyers, @second-owner)
       why: Harden now: likely to break and costly when it does
   [ ] Add regression tests around the 4 recent fixes
       why: 4 recent fixes; latest: "fix(network): align destination checks for direct connections (#5004)" (2026-10-28)
@@ -214,7 +214,7 @@ Put on the backlog
       gh issue create --title 'Split crates/openshell-supervisor-network/src/proxy.rs' --body '...'
   [ ] Add a CODEOWNERS line
       why: not covered by CODEOWNERS
-      /crates/openshell-supervisor-network/src/proxy.rs @johntmyers rrhubenov@gmail.com
+      /crates/openshell-supervisor-network/src/proxy.rs @johntmyers @second-owner
   [ ] Document its invariants
       why: 28 authors change it (top 2%)
       gh issue create --title 'Document the invariants of crates/...' --body '...'
@@ -333,7 +333,7 @@ Tour: 27 stops across 27 product components, dependencies first
       Will it break? 23 LOW, cutoff 35 · How bad if it breaks? 90 HIGH, cutoff 78
       why: Core cryptographic security boundary
       break signals: no notable churn, complexity, importers or fixes
-      before merge: Get an owner's review (varshaprasad96@gmail.com)
+      before merge: Get an owner's review (@crypto-owner)
       backlog: Add a CODEOWNERS line
 
 2. crates/openshell-extension-core  [level 0, max how bad 85, Protect]
@@ -465,19 +465,19 @@ highstakes pr check --base origin/main --json | jq -r '.verdict, (.checklist[] |
 
 ### Do before merge
 
-- [ ] Get sign-off from a senior owner (@johntmyers, rrhubenov@gmail.com) (`crates/openshell-supervisor-network/src/proxy.rs`)
+- [ ] Get sign-off from a senior owner (@johntmyers, a top owner) (`crates/openshell-supervisor-network/src/proxy.rs`)
 - [x] Add regression tests around the 4 recent fixes (`crates/openshell-supervisor-network/src/proxy.rs`)
 - [x] Add contract tests for its public interface (`crates/openshell-supervisor-network/src/proxy.rs`)
 - [ ] Keep auto-merge off (`crates/openshell-supervisor-network/src/proxy.rs`)
 
-| File | Will it break? | How bad? | Action |
+| File | If it breaks | Breaks often? | Do |
 |---|---|---|---|
-| `crates/openshell-supervisor-network/src/proxy.rs` | 50 high | 92 high | Harden now |
-| `crates/openshell-supervisor-network/src/egress_audit.rs` | new file | inherited: harden now | Harden now |
-| 2 other files | low | low | Routine |
+| `crates/openshell-supervisor-network/src/proxy.rs` | Core sandbox egress proxy; bugs can block traffic or bypass network policy. | Yes: 55 commits in the last 90 days, 28 authors overall (top 1% of this repo) | Harden now |
+| `crates/openshell-supervisor-network/src/egress_audit.rs` | new file: treated like its directory (harden now) | new file | Harden now |
+| 2 other files | limited damage | rarely | Routine |
 
 <details><summary>Why these actions?</summary>
-(per-file reasons, repo cutoffs, suggested reviewers, backlog commands)
+(per-file reasons, scores and repo cutoffs, suggested reviewers, backlog commands)
 </details>
 ```
 

@@ -299,7 +299,7 @@ func Agents(hm *types.Heatmap, maxLevel int) AgentPolicy {
 			"1 (propose only) unless max_level is 0. " +
 			"Regenerate after analyze: levels follow the heatmap.",
 		CapRule: "Levels follow the file's posture: Routine 3, Stabilize 2, Protect 1, Harden now 0. " +
-			"How bad? is AI-assessed and not human-validated, so levels are conservative: a file whose impact is not LLM-assessed is capped at 1, " +
+			"How bad if it breaks? is AI-assessed and not human-validated, so levels are conservative: a file whose impact is not LLM-assessed is capped at 1, " +
 			"and autonomy.max_level in .heatmap/config.yaml (default 3) caps every file.",
 		MaxLevel:     maxLevel,
 		DefaultLevel: min(1, maxLevel),

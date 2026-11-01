@@ -36,7 +36,7 @@ func TestExplanationBlock(t *testing.T) {
 				"Will it break?         50  HIGH  repo cutoff 33\n" +
 				"How bad if it breaks?  92  HIGH  repo cutoff 78\n" +
 				"Scores are a relative signal within this repo, not a probability.\n" +
-				"Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.\n" +
+				"Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings.\n" +
 				"\n" +
 				"Do before the next merge\n" +
 				"  [ ] Get sign-off from a senior owner (@ana)\n" +
@@ -57,7 +57,7 @@ func TestExplanationBlock(t *testing.T) {
 				"Will it break?         10  LOW   repo cutoff 33\n" +
 				"How bad if it breaks?  ~20 estimate (run analyze with an LLM to assess)\n" +
 				"Scores are a relative signal within this repo, not a probability.\n" +
-				"Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings.\n"},
+				"Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings.\n"},
 		{"old heatmap without explanation", &types.FileHeat{}, ""},
 	}
 	for _, tt := range tests {

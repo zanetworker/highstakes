@@ -3,12 +3,12 @@
 
 No changed file is likely to break or costly if it does. Normal review.
 
-| File | Will it break? | How bad? | Action |
+| File | If it breaks | Breaks often? | Do |
 |---|---|---|---|
-| 2 files | low | low | Routine |
+| 2 files | limited damage | rarely | Routine |
 
 <details><summary>Why these actions?</summary>
 
-Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings. Repo cutoffs: will it break 33, how bad 78 (a score at or above its cutoff is high).
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings. Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78 (a score at or above its cutoff counts as high).
 
 </details>

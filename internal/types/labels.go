@@ -13,7 +13,7 @@ const AxisNote = "Scores are a relative signal within this repo, not a probabili
 // AxisEvidence says how far each question is backed (merged-PR calibration
 // on 7 repos): likelihood predicts bug-fix PRs; impact is an LLM judgement
 // with no human validation yet. Shown next to AxisNote.
-const AxisEvidence = "Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings."
+const AxisEvidence = "Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings."
 
 // Action scopes: what to do in this PR, and what to do about the file over time.
 const (

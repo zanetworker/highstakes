@@ -98,7 +98,7 @@ After every file is scored, two thresholds split the grid:
 
 Every output a person reads names the axes as questions: "Will it break?" (likelihood) and "How bad if it breaks?" (impact), and names each quadrant by its posture, what to do about it.
 
-The two questions are not equally backed, and `get`, the PR comment and the dashboard say so in one line ("Will it break? is validated on bug-fix history; How bad? is AI-assessed, not yet checked against maintainer ratings."). On a merged-PR calibration over 7 repos, "Will it break?" picked files that later got bug-fix PRs (top-10 precision 0.57 to 1.00, lift 2.2 to 4.4). "How bad if it breaks?" was positive but below plain PR activity in 5 of 7 repos; where repos use severity labels it reached a lift of about 2 to 2.8. It has not been checked against maintainer ratings yet.
+The two questions are not equally backed, and `get`, the PR comment and the dashboard say so in one line ("Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings."). On a merged-PR calibration over 7 repos, "Will it break?" picked files that later got bug-fix PRs (top-10 precision 0.57 to 1.00, lift 2.2 to 4.4). "How bad if it breaks?" was positive but below plain PR activity in 5 of 7 repos; where repos use severity labels it reached a lift of about 2 to 2.8. It has not been checked against maintainer ratings yet.
 
 
 

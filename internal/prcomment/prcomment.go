@@ -5,6 +5,7 @@ package prcomment
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -89,9 +90,37 @@ func Render(risk *types.PRRisk, hm *types.Heatmap) string {
 		b.WriteString("\n")
 	}
 
-	writeTable(&b, files, risk.LikelyCutoff, risk.ImpactThreshold)
+	writeTable(&b, files, hm, risk.LikelyCutoff)
 	writeDetails(&b, risk, files, hm)
-	return b.String()
+	return ScrubEmails(b.String())
+}
+
+var (
+	emailRe   = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`)
+	noreplyRe = regexp.MustCompile(`^(?:\d+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com$`)
+)
+
+// hasPrivateEmail reports an address that ScrubEmails would turn into prose
+// (anything but a GitHub noreply address).
+func hasPrivateEmail(s string) bool {
+	for _, e := range emailRe.FindAllString(s, -1) {
+		if !noreplyRe.MatchString(e) {
+			return true
+		}
+	}
+	return false
+}
+
+// ScrubEmails keeps email addresses out of public comments: GitHub noreply
+// addresses become @handles, any other address becomes "a top owner".
+// Owners with an @handle in the config owners map are shown by handle.
+func ScrubEmails(s string) string {
+	return emailRe.ReplaceAllStringFunc(s, func(e string) string {
+		if m := noreplyRe.FindStringSubmatch(e); m != nil {
+			return "@" + m[1]
+		}
+		return "a top owner"
+	})
 }
 
 // ranked orders files most severe first, then by impact and likelihood.
@@ -143,8 +172,8 @@ func summary(verdict string, files []types.FileChange, hm *types.Heatmap) string
 	return s + "."
 }
 
-func writeTable(b *strings.Builder, files []types.FileChange, likelyCutoff, impactCutoff int) {
-	b.WriteString("| File | Will it break? | How bad? | Action |\n|---|---|---|---|\n")
+func writeTable(b *strings.Builder, files []types.FileChange, hm *types.Heatmap, likelyCutoff int) {
+	b.WriteString("| File | If it breaks | Breaks often? | Do |\n|---|---|---|---|\n")
 	shown, more, rest := 0, 0, 0
 	for _, fc := range files {
 		switch {
@@ -154,7 +183,7 @@ func writeTable(b *strings.Builder, files []types.FileChange, likelyCutoff, impa
 			more++
 		default:
 			shown++
-			fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", cell(fc.Path), breaks(fc, likelyCutoff), howBad(fc, impactCutoff), posture(fc))
+			fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", cell(fc.Path), cell(ifBreaks(fc, hm)), cell(breaksOften(fc, hm, likelyCutoff)), posture(fc))
 		}
 	}
 	if more > 0 {
@@ -166,33 +195,63 @@ func writeTable(b *strings.Builder, files []types.FileChange, likelyCutoff, impa
 	}
 	switch {
 	case rest > 0 && shown > 0:
-		fmt.Fprintf(b, "| %d other %s | low | low | Routine |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| %d other %s | limited damage | rarely | Routine |\n", rest, plural(rest, "file"))
 	case rest > 0:
-		fmt.Fprintf(b, "| %d %s | low | low | Routine |\n", rest, plural(rest, "file"))
+		fmt.Fprintf(b, "| %d %s | limited damage | rarely | Routine |\n", rest, plural(rest, "file"))
 	}
 	b.WriteString("\n")
 }
 
-func breaks(fc types.FileChange, cutoff int) string {
+// maxCell keeps table cells to one readable line.
+const maxCell = 90
+
+func short(s string) string {
+	s = strings.Join(strings.Fields(s), " ") // one line: newlines would split the table row
+	s = strings.Trim(s, `"`)
+	if len(s) > maxCell {
+		s = s[:maxCell-3] + "..."
+	}
+	return s
+}
+
+// ifBreaks is what goes wrong if the file breaks, in words: the LLM's
+// summary, else its first impact reason.
+func ifBreaks(fc types.FileChange, hm *types.Heatmap) string {
+	if fc.Unscored {
+		return "new file: treated like its directory (" + strings.ToLower(posture(fc)) + ")"
+	}
+	f, ok := hm.Files[fc.Path]
+	switch {
+	case ok && f.Factors.BlastRadius.Assessed && f.Factors.BlastRadius.Summary != "":
+		return short(f.Factors.BlastRadius.Summary)
+	case !fc.ImpactAssessed:
+		return "not AI-assessed yet"
+	case ok && f.Explanation != nil && len(f.Explanation.ImpactReasons) > 0:
+		return short(f.Explanation.ImpactReasons[0])
+	case posture(fc) == "Harden now" || posture(fc) == "Protect":
+		return "costly (no description; run analyze again)"
+	}
+	return "limited damage"
+}
+
+// breaksOften answers "will it break?" in words: the strongest signal when
+// the file is above the repo cutoff.
+func breaksOften(fc types.FileChange, hm *types.Heatmap, cutoff int) string {
 	if fc.Unscored {
 		return "new file"
 	}
-	return fmt.Sprintf("%d %s", fc.Likelihood, strings.ToLower(types.AxisLevel(fc.Likelihood, cutoff)))
-}
-
-func howBad(fc types.FileChange, cutoff int) string {
-	switch {
-	case fc.Unscored:
-		return "inherited: " + strings.ToLower(posture(fc))
-	case !fc.ImpactAssessed:
-		return fmt.Sprintf("~%d estimate", fc.Impact)
+	if fc.Likelihood < cutoff {
+		return "No, rarely changes"
 	}
-	return fmt.Sprintf("%d %s", fc.Impact, strings.ToLower(types.AxisLevel(fc.Impact, cutoff)))
+	if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil && len(f.Explanation.LikelihoodReasons) > 0 {
+		return "Yes: " + short(f.Explanation.LikelihoodReasons[0])
+	}
+	return "Yes"
 }
 
 func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChange, hm *types.Heatmap) {
 	b.WriteString("<details><summary>Why these actions?</summary>\n\n")
-	fmt.Fprintf(b, "%s %s Repo cutoffs: will it break %d, how bad %d (a score at or above its cutoff is high).\n\n",
+	fmt.Fprintf(b, "%s %s Scores and repo cutoffs: Will it break? %d, How bad if it breaks? %d (a score at or above its cutoff counts as high).\n\n",
 		types.AxisNote, types.AxisEvidence, risk.LikelyCutoff, risk.ImpactThreshold)
 	omittedFiles := 0
 	for _, fc := range files {
@@ -217,6 +276,14 @@ func writeDetails(b *strings.Builder, risk *types.PRRisk, files []types.FileChan
 // writeFileReasons writes one non-routine file's reasons and checklist signals.
 func writeFileReasons(b *strings.Builder, risk *types.PRRisk, fc types.FileChange, hm *types.Heatmap) {
 	fmt.Fprintf(b, "**`%s`** (%s)\n", fc.Path, posture(fc))
+	if !fc.Unscored {
+		bad := fmt.Sprintf("%d (%s, cutoff %d)", fc.Impact, strings.ToLower(types.AxisLevel(fc.Impact, risk.ImpactThreshold)), risk.ImpactThreshold)
+		if !fc.ImpactAssessed {
+			bad = fmt.Sprintf("~%d (estimate, cutoff %d)", fc.Impact, risk.ImpactThreshold)
+		}
+		fmt.Fprintf(b, "- Scores: Will it break? %d (%s, cutoff %d); How bad if it breaks? %s\n",
+			fc.Likelihood, strings.ToLower(types.AxisLevel(fc.Likelihood, risk.LikelyCutoff)), risk.LikelyCutoff, bad)
+	}
 	if f, ok := hm.Files[fc.Path]; ok && f.Explanation != nil {
 		if r := f.Explanation.LikelihoodReasons; len(r) > 0 {
 			fmt.Fprintf(b, "- Break signals: %s\n", strings.Join(r, "; "))
@@ -260,7 +327,11 @@ func writeReviewersBacklogGate(b *strings.Builder, risk *types.PRRisk) {
 		b.WriteString("**Backlog** (the file over time, not this PR)\n")
 		for i, a := range risk.Backlog {
 			item := fmt.Sprintf("- %s (%s): %s\n", a.Text, codeList(a.Files), a.Signal)
-			if a.Command != "" {
+			switch {
+			case a.Command != "" && hasPrivateEmail(a.Command):
+				// Redacting the email would leave an invalid rule; say how to get one.
+				item += "  (add an `owners` alias in .heatmap/config.yaml to get a copyable CODEOWNERS line)\n"
+			case a.Command != "":
 				item += fmt.Sprintf("  `%s`\n", a.Command)
 			}
 			if !fits(b, item) {
