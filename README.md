@@ -225,7 +225,7 @@ Why
 Latest fix  2026-10-28  fix(network): align destination checks for direct connections (#5004)
 ```
 
-Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the rules. `pr check` turns the before-merge items of the files a PR touches into one checklist and ticks the ones the PR already satisfies; the dashboard and TUI detail panels show the same sections.
+Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the rules. `pr check` turns the before-merge items of the Harden now and Protect files a PR touches into one blocking checklist and ticks the ones the PR already satisfies; items for Stabilize files go into a folded "Worth doing (does not block)" section. Under the verdict, the comment says whether AI may auto-merge, with the reason (`AI may auto-merge: no (touches Protect files)`), from the [autonomy levels](docs/cli-reference.md#agent-autonomy). The dashboard and TUI detail panels show the same sections.
 
 </details>
 

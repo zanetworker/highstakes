@@ -37,9 +37,19 @@ func Tasks(hm *types.Heatmap, minLevel, maxLevel int) []Task {
 			if act.Scope != types.ScopeBacklog || act.ID == "assess-impact" {
 				continue
 			}
+			title, ok := taskTitle(act.ID, f)
+			if !ok || (a.Level == 0 && !assistOnly[act.ID]) {
+				continue
+			}
+			// Agents do the work itself, so issue-filing commands are dropped;
+			// only a CODEOWNERS line is a direct change worth handing over.
+			cmd := ""
+			if act.ID == "codeowners" {
+				cmd = act.Command
+			}
 			out = append(out, Task{
-				Title: act.Text + " (" + path + ")", File: path, ActionID: act.ID, Signal: act.Signal,
-				Command: act.Command, Acceptance: acceptance(act.ID, f), Level: a.Level, LevelLabel: a.Label,
+				Title: title, File: path, ActionID: act.ID, Signal: act.Signal,
+				Command: cmd, Acceptance: acceptance(act.ID, f), Level: a.Level, LevelLabel: a.Label,
 			})
 		}
 	}
@@ -50,6 +60,31 @@ func Tasks(hm *types.Heatmap, minLevel, maxLevel int) []Task {
 		return out[i].File < out[j].File
 	})
 	return out
+}
+
+// assistOnly are the tasks allowed at L0 ("assist only"): tests and
+// explanations, never changes to the code or its ownership.
+var assistOnly = map[string]bool{"test-gap": true, "document-invariants": true}
+
+// taskTitle phrases a backlog action as work an agent does on the file, so
+// the instruction matches its acceptance. ok is false for actions that need a
+// person rather than an agent (a second reviewer).
+func taskTitle(id string, f *types.FileHeat) (string, bool) {
+	switch id {
+	case "split":
+		return "Split " + f.Path + " into smaller files", true
+	case "complexity-issue":
+		return "Cut the cyclomatic complexity of " + f.Path, true
+	case "test-gap":
+		return "Add tests next to " + f.Path, true
+	case "document-invariants":
+		return "Document the invariants of " + f.Path + " next to the code", true
+	case "codeowners":
+		return "Add a CODEOWNERS line for " + f.Path, true
+	case "ownership-issue":
+		return "", false
+	}
+	return "Address the backlog item on " + f.Path, true
 }
 
 // acceptance is a checkable "done when" for a backlog action.

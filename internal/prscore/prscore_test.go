@@ -99,7 +99,8 @@ func TestCalculatePRRisk_UnscoredFiles(t *testing.T) {
 		{"java class inherits directory risk", "src/auth/X.class", 95, types.TierCritical, true, true},
 		{"extensionless file under bin is unscored", "bin/tool", 0, types.TierLow, true, true},
 		{"golden file is not scored", "src/auth/want.golden", 0, types.TierLow, false, false},
-		{"testdata is not scored", "src/auth/testdata/input.go", 0, types.TierLow, false, false},
+		{"testdata data file is not scored", "src/auth/testdata/input.json", 0, types.TierLow, false, false},
+		{"testdata source file inherits risk", "src/auth/testdata/input.go", 95, types.TierCritical, true, true},
 		{"tool config dot directory is not scored", ".impeccable/config.json", 0, types.TierLow, false, false},
 		{"tool config dotfile is not scored", ".golangci.yml", 0, types.TierLow, false, false},
 		{"ignore dotfile is not scored", ".gitignore", 0, types.TierLow, false, false},
@@ -310,7 +311,8 @@ func TestApplyAutonomy(t *testing.T) {
 		reason  string
 	}{
 		{"every file routine", []string{"ui/a.go"}, 3, 3, true, "every touched file is L3"},
-		{"docs and images ride along", []string{"ui/a.go", "README.md", "ui/logo.png"}, 3, 3, true, "every touched file is L3"},
+		{"markdown docs ride along", []string{"ui/a.go", "README.md", "docs/guide.rst"}, 3, 3, true, "every touched file is L3"},
+		{"an image is not assessed", []string{"ui/a.go", "README.md", "ui/logo.png"}, 3, 1, false, "touches files HighStakes has not assessed"},
 		{"new binary artifact is unknown code", []string{"ui/a.go", "ui/plugin.wasm"}, 3, 1, false, "touches files whose impact is not AI-assessed"},
 		{"new hook script is unknown code", []string{"ui/a.go", ".husky/pre-commit"}, 3, 1, false, "touches files whose impact is not AI-assessed"},
 		{"protect file", []string{"ui/a.go", "core/p.go"}, 3, 1, false, "touches Protect files"},
@@ -336,6 +338,63 @@ func TestApplyAutonomy(t *testing.T) {
 				if fc.Autonomy == nil || fc.Autonomy.Level < tt.level || fc.Autonomy.Label == "" {
 					t.Errorf("%s autonomy = %+v, want a labelled level >= L%d", fc.Path, fc.Autonomy, tt.level)
 				}
+			}
+		})
+	}
+}
+
+func TestApplyAutonomy_UnscoredNonCodeCapsAtL1(t *testing.T) {
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"web/static/logo.svg", 1},           // SVG can carry scripts
+		{"pkg/x/testdata/run.sh", 1},         // test harnesses execute fixtures
+		{"pkg/x/testdata/case.golden", 1},    // unknown content is not proven inert
+		{"assets/banner.png", 1},             // never assessed: propose only
+		{"docs/guide.mdx", 1},                // MDX can contain code
+		{"docs/guide.md", types.MaxAutonomy}, // plain-text docs cannot execute
+		{"CHANGELOG.rst", types.MaxAutonomy},
+		{"notes/todo.txt", 1},                // .txt can be a build input
+		{"CMakeLists.txt", 1},                // executes commands at configure time
+
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: tt.path, Tier: types.TierLow}}}
+			ApplyAutonomy(risk, &types.Heatmap{Files: map[string]*types.FileHeat{}}, types.MaxAutonomy)
+			if got := risk.FilesChanged[0].Autonomy.Level; got != tt.want {
+				t.Errorf("autonomy L%d, want L%d (%s)", got, tt.want, risk.FilesChanged[0].Autonomy.Reason)
+			}
+			if tt.want < types.MaxAutonomy && risk.AutoMergeAllowed {
+				t.Errorf("auto-merge allowed for unscored %s", tt.path)
+			}
+		})
+	}
+}
+
+func TestIsInert_ActiveContent(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"ui/logo.png", true},
+		{"ui/logo.svg", false}, // SVG can carry scripts
+		{"pkg/x/testdata/case.golden", true},
+		{"pkg/x/testdata/input.json", true},
+		{"pkg/x/testdata/run.sh", false},   // harnesses execute fixtures
+		{"pkg/x/testdata/main.go", false},  // compiled and run by tests
+		{"testdata/fixture.py", false},
+		{"pkg/x/testdata/plugin.so", false},    // unrecognised: not proven inert
+		{"pkg/x/testdata/app.jar", false},
+		{"pkg/x/testdata/component.tsx", false},
+		{"pkg/x/testdata/table.csv", true},
+		{"pkg/x/testdata/expected.yaml", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := isInert(tt.path); got != tt.want {
+				t.Errorf("isInert(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
 	}

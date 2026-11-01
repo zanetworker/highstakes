@@ -152,7 +152,7 @@ func TestListTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	for _, want := range []string{"L2 auto-fix, human merges  Open an issue to cut its complexity (ui/busy.go)", "done when: CODEOWNERS covers core/p.go", "$ /core/p.go @ana"} {
+	for _, want := range []string{"L2 auto-fix, human merges  Cut the cyclomatic complexity of ui/busy.go", "done when: CODEOWNERS covers core/p.go", "$ /core/p.go @ana"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text output missing %q:\n%s", want, out)
 		}

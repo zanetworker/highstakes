@@ -1,6 +1,7 @@
 package explain
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -34,8 +35,13 @@ func TestTasks(t *testing.T) {
 		}
 		task := got[0]
 		if task.File != "ui/busy.go" || task.ActionID != "complexity-issue" || task.Level != 2 || task.LevelLabel != "auto-fix, human merges" ||
-			task.Command != cut.Command || task.Signal != cut.Signal || !strings.Contains(task.Title, "ui/busy.go") {
+			task.Signal != cut.Signal {
 			t.Errorf("task = %+v", task)
+		}
+		// An agent does the work: the title says what to change and there is no
+		// issue-filing command, so the instruction matches the acceptance.
+		if task.Title != "Cut the cyclomatic complexity of ui/busy.go" || task.Command != "" {
+			t.Errorf("title/command = %q / %q, want implementation work without an issue command", task.Title, task.Command)
 		}
 		if task.Acceptance != "tests pass and cyclomatic complexity drops below 40" {
 			t.Errorf("acceptance = %q", task.Acceptance)
@@ -64,4 +70,64 @@ func TestTasks(t *testing.T) {
 			t.Errorf("tasks = %+v", got)
 		}
 	})
+}
+
+func TestTaskWork(t *testing.T) {
+	f := &types.FileHeat{Path: "a/b.go"}
+	f.Factors.Complexity.FunctionCount = 30
+	tests := []struct {
+		id, wantTitle string
+		agentWork     bool
+	}{
+		{"split", "Split a/b.go into smaller files", true},
+		{"complexity-issue", "Cut the cyclomatic complexity of a/b.go", true},
+		{"test-gap", "Add tests next to a/b.go", true},
+		{"document-invariants", "Document the invariants of a/b.go next to the code", true},
+		{"codeowners", "Add a CODEOWNERS line for a/b.go", true},
+		{"ownership-issue", "", false}, // needs a second person, not an agent
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			title, ok := taskTitle(tt.id, f)
+			if ok != tt.agentWork || title != tt.wantTitle {
+				t.Errorf("taskTitle(%q) = %q, %v; want %q, %v", tt.id, title, ok, tt.wantTitle, tt.agentWork)
+			}
+		})
+	}
+}
+
+func TestTasks_L0IsAssistOnly(t *testing.T) {
+	acts := []types.Action{
+		{ID: "split", Text: "Split it", Scope: types.ScopeBacklog},
+		{ID: "complexity-issue", Text: "Cut complexity", Scope: types.ScopeBacklog},
+		{ID: "codeowners", Text: "Add a CODEOWNERS line", Scope: types.ScopeBacklog, Command: "/h.go @a"},
+		{ID: "test-gap", Text: "Add tests", Scope: types.ScopeBacklog},
+		{ID: "document-invariants", Text: "Document invariants", Scope: types.ScopeBacklog},
+	}
+	harden := &types.FileHeat{Path: "core/h.go", ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical, Tier: types.TierCritical,
+		Explanation: &types.Explanation{Actions: acts}}
+	routine := &types.FileHeat{Path: "ui/r.go", ImpactAssessed: true, Quadrant: types.QuadrantLow, Tier: types.TierLow,
+		Explanation: &types.Explanation{Actions: acts}}
+	tests := []struct {
+		name     string
+		f        *types.FileHeat
+		maxLevel int
+		want     []string
+	}{
+		{"Harden now file (L0) gets only tests and docs", harden, 3, []string{"document-invariants", "test-gap"}},
+		{"max_level 0 caps every file to assist-only", routine, 0, []string{"document-invariants", "test-gap"}},
+		{"Routine file (L3) gets every task", routine, 3, []string{"codeowners", "complexity-issue", "document-invariants", "split", "test-gap"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, task := range Tasks(&types.Heatmap{Files: map[string]*types.FileHeat{tt.f.Path: tt.f}}, 0, tt.maxLevel) {
+				got = append(got, task.ActionID)
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("tasks = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

@@ -183,7 +183,7 @@ func isDocFile(path string) bool {
 // and other compiled artifacts are not inert: they run, so they inherit
 // directory risk like any unscored file.
 var inertExts = map[string]bool{
-	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".ico": true, ".webp": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".ico": true, ".webp": true,
 	".pdf": true, ".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".mp4": true, ".mov": true,
 }
 
@@ -211,8 +211,21 @@ func isNonCode(p string) bool { return isInert(p) || isConfigFile(p) }
 func isInert(p string) bool {
 	p = filepath.ToSlash(p)
 	base := filepath.Base(p)
+	inTestdata := strings.HasPrefix(p, "testdata/") || strings.Contains(p, "/testdata/")
 	return isDocFile(p) || inertExts[strings.ToLower(filepath.Ext(base))] || strings.HasSuffix(base, ".golden") ||
-		strings.HasPrefix(p, "testdata/") || strings.Contains(p, "/testdata/")
+		(inTestdata && isFixtureData(base))
+}
+
+// isFixtureData reports data formats a test reads but does not run. It is an
+// allowlist: test harnesses run or load anything else (scripts, sources,
+// libraries, archives), so unknown fixture formats are never inert.
+func isFixtureData(base string) bool {
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".json", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".txt", ".xml", ".golden", ".md",
+		".png", ".jpg", ".jpeg", ".gif":
+		return true
+	}
+	return false
 }
 
 // isConfigFile reports dependency manifests (still config changes in
@@ -466,8 +479,12 @@ func fileAutonomy(fc types.FileChange, scored bool) (types.Autonomy, string) {
 	switch {
 	case !scored && isConfigFile(fc.Path):
 		return types.Autonomy{Level: 1, Reason: "dependency or tool config: propose only"}, "touches dependency or tool config files"
+	case !scored && isPlainTextDoc(fc.Path):
+		return types.Autonomy{Level: types.MaxAutonomy, Reason: "plain-text docs: cannot execute"}, ""
 	case !scored:
-		return types.Autonomy{Level: types.MaxAutonomy, Reason: "not code: no runtime impact"}, ""
+		// Never assessed: an SVG can carry scripts and test fixtures can be
+		// executed, so unknown content gets no autonomy beyond proposing.
+		return types.Autonomy{Level: 1, Reason: "not assessed: propose only"}, "touches files HighStakes has not assessed"
 	}
 	q := fc.Quadrant
 	if q == "" {
@@ -482,4 +499,15 @@ func fileAutonomy(fc types.FileChange, scored bool) (types.Autonomy, string) {
 		return a, "touches files whose impact is not AI-assessed"
 	}
 	return a, "touches " + q.Label() + " files"
+}
+
+// isPlainTextDoc reports docs that cannot execute: Markdown and
+// reStructuredText. MDX can embed code and .txt can be a build input
+// (CMakeLists.txt, requirements.txt), so neither qualifies.
+func isPlainTextDoc(p string) bool {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".md", ".rst":
+		return true
+	}
+	return false
 }
