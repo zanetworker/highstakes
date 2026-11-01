@@ -76,39 +76,42 @@ jobs:
           PUSHED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           signed=false
-          # Removing the label withdraws the sign-off: a newer failing status
-          # on the head means an older success no longer counts.
+          has_label=false
+          case ",$LABELS," in *,highstakes:signed-off,*) has_label=true ;; esac
+          # 1. Removing the label withdraws the sign-off: a newer failing status
+          #    on the head means an older success no longer counts.
           if [ "$ACTION" = "unlabeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
             gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=failure -f context=highstakes/signed-off \
               -f description="Sign-off withdrawn" >/dev/null || true
           fi
-          case ",$LABELS," in
-            *,highstakes:signed-off,*)
-              if [ "$ACTION" = "synchronize" ]; then
-                # Remove the label only if it predates this push: a maintainer may
-                # already have signed off on the new head while this run waited.
-                labeled_at=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
-                  --jq '.[] | select(.event == "labeled" and .label.name == "highstakes:signed-off") | .created_at' | tail -n1)
-                if [ -z "$labeled_at" ] || [[ "$labeled_at" < "$PUSHED_AT" ]]; then
-                  gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
-                  echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
-                fi
-              elif [ "$ACTION" = "labeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
-                perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
-                case "$perm" in
-                  admin|maintain|write)
-                    gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=success -f context=highstakes/signed-off \
-                      -f description="Signed off by $SENDER" >/dev/null && signed=true ;;
-                  *) echo "Sign-off label added by $SENDER (permission: $perm) does not count: write access is required." ;;
-                esac
-              else
-                # Statuses come newest first: only the latest for the context counts.
-                latest=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" \
-                  --jq 'first(.[] | select(.context == "highstakes/signed-off")) | "\(.state) \(.creator.login)"')
-                if [ "$latest" = "success github-actions[bot]" ]; then signed=true; else echo "No current sign-off for this commit; review again and re-add the label."; fi
-              fi
-              ;;
-          esac
+          # 2. A push removes a label added before it (a sign-off given on the
+          #    new head while this run waited is kept).
+          if [ "$ACTION" = "synchronize" ] && [ "$has_label" = true ]; then
+            labeled_at=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+              --jq '.[] | select(.event == "labeled" and .label.name == "highstakes:signed-off") | .created_at' | tail -n1)
+            if [ -z "$labeled_at" ] || [[ "$labeled_at" < "$PUSHED_AT" ]]; then
+              gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
+              has_label=false
+              echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
+            fi
+          fi
+          # 3. Someone with write access adding the label signs off this head.
+          if [ "$ACTION" = "labeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write)
+                gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=success -f context=highstakes/signed-off \
+                  -f description="Signed off by $SENDER" >/dev/null || true ;;
+              *) echo "Sign-off label added by $SENDER (permission: $perm) does not count: write access is required." ;;
+            esac
+          fi
+          # 4. The label counts only while the head's latest sign-off status
+          #    (newest first, across all pages) is a success set by this bot.
+          if [ "$has_label" = true ]; then
+            latest=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
+              --jq 'first(.[] | select(.context == "highstakes/signed-off")) | "\(.state) \(.creator.login)"' | head -n1)
+            if [ "$latest" = "success github-actions[bot]" ]; then signed=true; else echo "No current sign-off for this commit; review again and re-add the label."; fi
+          fi
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
 
       # Exit 5 means the PR changes a Harden now file (--fail-on critical) and

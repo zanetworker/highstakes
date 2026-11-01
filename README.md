@@ -423,7 +423,7 @@ Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.y
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
-          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # Verify sign-off step: never the label alone
           AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e
@@ -441,7 +441,7 @@ A small `github-script` step posts `pr-comment.md`, updating its earlier comment
 
 `--fail-on critical` exits 5 while a PR that changes a Harden now file (tier `critical`) has open **Do before merge** items; once every item is ticked it passes (`✅ All before-merge items done: ready to merge`). The shipped workflow turns exit 5 into a failed `triage` job. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to also gate Protect files, `--strict` to block on the tier alone whatever is done. Start with `--shadow` to log decisions without failing.
 
-GitHub does not let authors approve their own PRs, so a sole maintainer could never tick a sign-off item. A maintainer with write access adds the label `highstakes:signed-off` after reviewing instead; the workflow passes `--signed-off` while it is on.
+GitHub does not let authors approve their own PRs, so a sole maintainer could never tick a sign-off item. A maintainer with write access adds the label `highstakes:signed-off` after reviewing instead. The workflow's **Verify sign-off** step passes `--signed-off` only when someone with write access added it, for the commit they reviewed (recorded as a `highstakes/signed-off` commit status): a new push or removing the label withdraws it. Copy that step from `highstakes github install` rather than checking for the label yourself; see [CI integration](docs/ci-integration.md#sign-off-label).
 
 </details>
 
