@@ -233,3 +233,73 @@ func TestTOMLStrings_QuoteStyles(t *testing.T) {
 		})
 	}
 }
+
+func TestUniqueNames(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []Entry
+		want []string
+	}{
+		{
+			name: "no collision keeps names",
+			in:   []Entry{{Name: "b", Entry: "b/main.go"}, {Name: "a", Entry: "a/main.go"}},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "same name in different dirs gets the dir",
+			in:   []Entry{{Name: "server", Entry: "a/server/main.go"}, {Name: "server", Entry: "b/server/main.go"}},
+			want: []string{"server (a/server)", "server (b/server)"},
+		},
+		{
+			name: "same name and dir gets the entry path",
+			in: []Entry{
+				{Name: "foo", Kind: KindPythonScript, Entry: "foo/__init__.py"},
+				{Name: "foo", Kind: KindPythonMain, Entry: "foo/__main__.py"},
+			},
+			want: []string{"foo (foo/__init__.py)", "foo (foo/__main__.py)"},
+		},
+		{
+			name: "a disambiguated name clashing with a literal one: both get the entry path",
+			in: []Entry{
+				{Name: "x", Entry: "d/a.go"},
+				{Name: "x", Entry: "e/b.go"},
+				{Name: "x (d)", Entry: "f/c.go"},
+			},
+			want: []string{"x (d) (f/c.go)", "x (d/a.go)", "x (e)"},
+		},
+		{
+			name: "same name and entry gets a numeric suffix",
+			in: []Entry{
+				{Name: "foo", Kind: KindPythonScript, Entry: "foo.py"},
+				{Name: "foo", Kind: KindPythonScript, Entry: "foo.py"},
+			},
+			want: []string{"foo (foo.py)", "foo (foo.py) #2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := []string{}
+			for _, e := range uniqueNames(tt.in) {
+				got = append(got, e.Name)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("names = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetect_PythonScriptAndMainSameDirAreDistinct(t *testing.T) {
+	fs := fstest.MapFS{
+		"pyproject.toml":  file("[project.scripts]\nfoo = \"foo:main\"\n"),
+		"foo/__init__.py": file(""),
+		"foo/__main__.py": file(""),
+	}
+	got, err := Detect(fs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name == got[1].Name {
+		t.Errorf("Detect = %+v, want two entries with distinct names", got)
+	}
+}

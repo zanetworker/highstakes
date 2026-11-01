@@ -44,6 +44,15 @@ type Entry struct {
 // file should not hide every other unit. Entries are sorted by name; names
 // shared by several entries get their directory appended.
 func Detect(fsys fs.FS, skipDirs []string) ([]Entry, error) {
+	out, err := detect(fsys, skipDirs)
+	if err != nil {
+		return nil, err
+	}
+	return uniqueNames(out), nil
+}
+
+// detect is Detect before names are made unique.
+func detect(fsys fs.FS, skipDirs []string) ([]Entry, error) {
 	files, err := walk(fsys, skipDirs)
 	if err != nil {
 		return nil, err
@@ -85,7 +94,7 @@ func Detect(fsys fs.FS, skipDirs []string) ([]Entry, error) {
 	for _, e := range goMains {
 		out = append(out, e)
 	}
-	return uniqueNames(out), nil
+	return out, nil
 }
 
 // walk lists the files under fsys, skipping directories named in skipDirs
@@ -115,24 +124,56 @@ func walk(fsys fs.FS, skipDirs []string) ([]string, error) {
 	return files, nil
 }
 
-// uniqueNames sorts entries by name and appends the entry directory to
-// names used more than once.
+// uniqueNames sorts entries by name and makes every name unique, because
+// names are unit identities and diagram node IDs. A shared name gets the
+// entry directory appended; names still shared get the entry path instead;
+// any left (the same name and entry twice) get a numeric suffix.
 func uniqueNames(es []Entry) []Entry {
-	count := map[string]int{}
-	for _, e := range es {
-		count[e.Name]++
+	labels := []func(Entry) string{
+		func(e Entry) string { return e.Name + " (" + path.Dir(e.Entry) + ")" },
+		func(e Entry) string { return e.Name + " (" + e.Entry + ")" },
 	}
+	names := make([]string, len(es))
 	for i, e := range es {
-		if count[e.Name] > 1 {
-			es[i].Name = e.Name + " (" + path.Dir(e.Entry) + ")"
+		names[i] = e.Name
+	}
+	for _, label := range labels {
+		count := map[string]int{}
+		for _, n := range names {
+			count[n]++
+		}
+		for i := range es {
+			if count[names[i]] > 1 {
+				names[i] = label(es[i])
+			}
 		}
 	}
-	sort.Slice(es, func(i, j int) bool {
+	for i := range es {
+		es[i].Name = names[i]
+	}
+	sort.SliceStable(es, func(i, j int) bool {
 		if es[i].Name != es[j].Name {
 			return es[i].Name < es[j].Name
 		}
 		return es[i].Entry < es[j].Entry
 	})
+	taken := map[string]bool{}
+	for _, e := range es {
+		taken[e.Name] = true
+	}
+	seen := map[string]bool{}
+	for i, e := range es {
+		if !seen[e.Name] {
+			seen[e.Name] = true
+			continue
+		}
+		for n := 2; ; n++ {
+			if c := fmt.Sprintf("%s #%d", e.Name, n); !taken[c] {
+				es[i].Name, taken[c] = c, true
+				break
+			}
+		}
+	}
 	if es == nil {
 		es = []Entry{}
 	}

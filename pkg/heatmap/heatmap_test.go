@@ -619,3 +619,43 @@ func TestLLMInputs_SkipsSensitiveFiles(t *testing.T) {
 		t.Errorf("sensitive = %v, want %v", sensitive, wantSensitive)
 	}
 }
+
+func TestGenerate_UnitsSkipExcludedAndIgnoredEntries(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	files := map[string]string{
+		".gitignore":                "local/\n",
+		"app/__main__.py":           "print('app')\n",
+		"envtools/tool/__main__.py": "print('excluded by the env* pattern')\n",
+		"local/tool/__main__.py":    "print('gitignored checkout')\n",
+	}
+	for p, body := range files {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := New(dir, GenerateOptions{NoLLM: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hm, err := g.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	got := []string{}
+	for _, u := range hm.Metadata.Units {
+		got = append(got, u.Entry)
+	}
+	if !reflect.DeepEqual(got, []string{"app/__main__.py"}) {
+		t.Errorf("unit entries = %v, want only app/__main__.py", got)
+	}
+}

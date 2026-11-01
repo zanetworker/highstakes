@@ -2,11 +2,26 @@ package units
 
 import (
 	"path"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
+
+// separator is the path separator in heatmap keys (native, from the
+// analyzer). Tests set it to '\\' to simulate Windows.
+var separator = filepath.Separator
+
+// toSlash turns a heatmap key into the forward-slash form Detect reports and
+// the path package groups with. It is a no-op on Unix.
+func toSlash(p string) string {
+	if separator == '/' {
+		return p
+	}
+	return strings.ReplaceAll(p, string(separator), "/")
+}
 
 // Imports returns the forward file import graph (importer -> imported files)
 // built from ImportedBy, without test files or files missing from the heatmap.
@@ -33,12 +48,12 @@ func Imports(hm *types.Heatmap) map[string][]string {
 // bin seeds only its entry; it reaches its crate's library through imports
 // (use <crate>::... or <crate>::item paths), so a bin that never uses the
 // library does not inherit it.
-func seeds(hm *types.Heatmap, e Entry) []string {
+func seeds(files map[string]*types.FileHeat, e Entry) []string {
 	out := []string{e.Entry}
 	switch e.Kind {
 	case KindGoMain:
 		dir := path.Dir(e.Entry)
-		for p := range hm.Files {
+		for p := range files {
 			if p != e.Entry && path.Dir(p) == dir && path.Ext(p) == ".go" && !tour.IsTestFile(p) {
 				out = append(out, p)
 			}
@@ -55,11 +70,17 @@ func seeds(hm *types.Heatmap, e Entry) []string {
 // to helper bins): a binary crate that another binary also links stays with
 // its own unit.
 func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.Unit {
-	for p, f := range hm.Files {
+	files := slashFiles(hm)
+	for p, f := range files {
 		f.Component = tour.Component(p, markers)
 		f.Units = nil
 	}
-	graph := Imports(hm)
+	graph := map[string][]string{}
+	for from, tos := range Imports(hm) {
+		for _, to := range tos {
+			graph[toSlash(from)] = append(graph[toSlash(from)], toSlash(to))
+		}
+	}
 
 	reach := make([]map[string]bool, len(entries))
 	linkedBy := map[string]map[int]bool{} // component -> unit indexes
@@ -71,8 +92,8 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 	for i, e := range entries {
 		seen := map[string]bool{}
 		var stack []string
-		for _, s := range seeds(hm, e) {
-			if _, ok := hm.Files[s]; ok && !seen[s] {
+		for _, s := range seeds(files, e) {
+			if _, ok := files[s]; ok && !seen[s] {
 				seen[s] = true
 				stack = append(stack, s)
 			}
@@ -89,7 +110,7 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 		}
 		reach[i] = seen
 		for p := range seen {
-			c := hm.Files[p].Component
+			c := files[p].Component
 			if linkedBy[c] == nil {
 				linkedBy[c] = map[int]bool{}
 			}
@@ -103,7 +124,7 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 			Home: tour.Component(e.Entry, markers), Shared: []string{}}
 		comps := map[string]bool{u.Home: true}
 		for p := range reach[i] {
-			f := hm.Files[p]
+			f := files[p]
 			f.Units = append(f.Units, e.Name)
 			comps[f.Component] = true
 			u.Files++
@@ -132,6 +153,16 @@ func Link(hm *types.Heatmap, entries []Entry, markers map[string]bool) []types.U
 	}
 	for _, f := range hm.Files {
 		sort.Strings(f.Units)
+	}
+	return out
+}
+
+// slashFiles returns hm.Files keyed by forward-slash paths, so they match
+// Detect's entries (from fs.WalkDir) on every OS.
+func slashFiles(hm *types.Heatmap) map[string]*types.FileHeat {
+	out := make(map[string]*types.FileHeat, len(hm.Files))
+	for p, f := range hm.Files {
+		out[toSlash(p)] = f
 	}
 	return out
 }

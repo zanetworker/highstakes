@@ -11,14 +11,24 @@ import (
 // through hm's import graph, attaches deployment hints and stores the units
 // in hm.Metadata.Units. It also sets every file's Component and Units, and
 // marks supporting units (see MarkSupporting; supporting holds the
-// tour.supporting globs from config).
+// tour.supporting globs from config). Entries whose file is not in hm are
+// dropped: the analyzer left them out (excluded or gitignored), so they are
+// not part of the analyzed repo.
 func Apply(hm *types.Heatmap, fsys fs.FS, skipDirs, supporting []string) error {
-	entries, err := Detect(fsys, skipDirs)
+	found, err := detect(fsys, skipDirs)
 	if err != nil {
 		return err
 	}
-	paths := make([]string, 0, len(hm.Files))
-	for p := range hm.Files {
+	files := slashFiles(hm)
+	var entries []Entry
+	for _, e := range found {
+		if _, ok := files[e.Entry]; ok {
+			entries = append(entries, e)
+		}
+	}
+	entries = uniqueNames(entries)
+	paths := make([]string, 0, len(files))
+	for p := range files {
 		paths = append(paths, p)
 	}
 	markers := tour.Markers(paths, func(p string) bool {

@@ -69,3 +69,50 @@ func TestApply_MarksSupporting(t *testing.T) {
 		}
 	}
 }
+
+func TestApply_WindowsPaths(t *testing.T) {
+	fs := fstest.MapFS{
+		"crates/sbx/Cargo.toml":  file("[package]\nname = \"sbx\"\n"),
+		"crates/sbx/src/main.rs": file("fn main() {}\n"),
+		"crates/core/Cargo.toml": file("[package]\nname = \"core\"\n"),
+		"crates/core/src/lib.rs": file(""),
+	}
+	hm := windowsRepo(t, fixture(map[string][]string{"crates/sbx/src/main.rs": {"crates/core/src/lib.rs"}},
+		fh("crates/sbx/src/main.rs", 10, ""), fh("crates/core/src/lib.rs", 80, "")))
+	if err := Apply(hm, fs, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	us := hm.Metadata.Units
+	if len(us) != 1 || us[0].Home != "crates/sbx" || us[0].Files != 2 {
+		t.Fatalf("units = %+v, want sbx homed in crates/sbx linking 2 files", us)
+	}
+	if c := hm.Files[`crates\core\src\lib.rs`].Component; c != "crates/core" {
+		t.Errorf("component = %q, want crates/core (from the Cargo.toml marker)", c)
+	}
+}
+
+func TestApply_DropsEntriesOutsideTheHeatmap(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string // entry file on disk the analyzer left out
+	}{
+		{"excluded dir (env* pattern)", "envtools/tool/__main__.py"},
+		{"gitignored dir", "local-checkout/tool/__main__.py"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := fstest.MapFS{"app/__main__.py": file(""), tt.extra: file("")}
+			hm := fixture(nil, fh("app/__main__.py", 10, ""))
+			if err := Apply(hm, fs, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			got := []string{}
+			for _, u := range hm.Metadata.Units {
+				got = append(got, u.Entry)
+			}
+			if len(got) != 1 || got[0] != "app/__main__.py" {
+				t.Errorf("unit entries = %v, want only app/__main__.py", got)
+			}
+		})
+	}
+}

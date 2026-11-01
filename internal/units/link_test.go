@@ -2,6 +2,7 @@ package units
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/types"
@@ -197,6 +198,56 @@ func TestLink_MaxImpactAssessedFollowsTheMaxFile(t *testing.T) {
 			u := Link(hm, []Entry{{Name: "srv", Kind: KindGoMain, Entry: "cmd/srv/main.go"}}, nil)[0]
 			if u.MaxImpact != tt.wantImpact || u.ImpactAssessed != tt.wantAssessed {
 				t.Errorf("max impact %d assessed %v, want %d %v", u.MaxImpact, u.ImpactAssessed, tt.wantImpact, tt.wantAssessed)
+			}
+		})
+	}
+}
+
+// windowsRepo rebuilds a slash-keyed fixture with backslash keys and import
+// paths, as the analyzer produces them on Windows, and switches the package
+// separator to match for the test.
+func windowsRepo(t *testing.T, hm *types.Heatmap) *types.Heatmap {
+	t.Helper()
+	old := separator
+	separator = '\\'
+	t.Cleanup(func() { separator = old })
+	win := func(p string) string { return strings.ReplaceAll(p, "/", `\`) }
+	out := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	for p, f := range hm.Files {
+		f.Path = win(p)
+		for i := range f.Dependencies.ImportedBy {
+			f.Dependencies.ImportedBy[i].Path = win(f.Dependencies.ImportedBy[i].Path)
+		}
+		out.Files[win(p)] = f
+	}
+	return out
+}
+
+func TestLink_WindowsPaths(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       string
+		entry      string
+		files      int
+		components []string
+	}{
+		{"go main seeds its whole package", KindGoMain, "cmd/srv/main.go", 3, []string{"cmd/srv", "internal/core"}},
+		{"rust bin follows imports", KindRustBin, "cmd/srv/flags.go", 2, []string{"cmd/srv", "internal/core"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hm := windowsRepo(t, fixture(map[string][]string{"cmd/srv/flags.go": {"internal/core/core.go"}},
+				fh("cmd/srv/main.go", 10, ""), fh("cmd/srv/flags.go", 10, ""),
+				fh("internal/core/core.go", 60, types.QuadrantProtect)))
+			got := Link(hm, []Entry{{Name: "srv", Kind: tt.kind, Entry: tt.entry}}, nil)
+			if len(got) != 1 {
+				t.Fatalf("units = %+v", got)
+			}
+			if u := got[0]; u.Files != tt.files || !reflect.DeepEqual(u.Components, tt.components) {
+				t.Errorf("files=%d components=%v, want %d %v", u.Files, u.Components, tt.files, tt.components)
+			}
+			if f := hm.Files[`internal\core\core.go`]; f.Component != "internal/core" || !reflect.DeepEqual(f.Units, []string{"srv"}) {
+				t.Errorf("core component=%q units=%v, want internal/core [srv]", f.Component, f.Units)
 			}
 		})
 	}
