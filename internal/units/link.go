@@ -50,8 +50,7 @@ func Imports(hm *types.Heatmap) map[string][]string {
 // library does not inherit it.
 func seeds(files map[string]*types.FileHeat, e Entry) []string {
 	out := []string{e.Entry}
-	switch e.Kind {
-	case KindGoMain:
+	if e.Kind == KindGoMain {
 		dir := path.Dir(e.Entry)
 		for p := range files {
 			if p != e.Entry && path.Dir(p) == dir && path.Ext(p) == ".go" && !tour.IsTestFile(p) {

@@ -456,7 +456,8 @@ func buildEdges(hm *types.Heatmap, decl types.DeclaredArchitecture, fileNode, no
 		}
 		return a.To < b.To
 	})
-	all = append(declared, imports...)
+	all = append(all, declared...)
+	all = append(all, imports...)
 	if all == nil {
 		all = []Edge{}
 	}

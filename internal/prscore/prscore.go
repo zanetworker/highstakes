@@ -33,13 +33,14 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 			IsNew:        change.IsNew,
 		}
 
-		if ok {
+		switch {
+		case ok:
 			fc.HeatScore = heat.HeatScore
 			fc.Tier = heat.Tier
-		} else if isDocFile(change.Path) {
+		case isDocFile(change.Path):
 			fc.HeatScore = 0
 			fc.Tier = types.TierLow
-		} else {
+		default:
 			// Unknown files must not silently pass: inherit the nearest scored
 			// directory's heat and tier (the tier may come from a quadrant).
 			fc.HeatScore, fc.Tier = inheritedHeat(change.Path, hm, thresholds)

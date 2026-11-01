@@ -236,9 +236,10 @@ func rustBins(dir string, data []byte, exists map[string]bool, read func(string)
 		case e.section == "[[bin]]" && e.key == "":
 			bins = append(bins, bin{header: e.line})
 		case e.section == "[[bin]]" && len(bins) > 0 && e.header == bins[len(bins)-1].header:
-			if e.key == "name" {
+			switch e.key {
+			case "name":
 				bins[len(bins)-1].name = e.value
-			} else if e.key == "path" {
+			case "path":
 				bins[len(bins)-1].path = e.value
 			}
 		}

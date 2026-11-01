@@ -43,21 +43,21 @@ func fixtureHeatmap() *types.Heatmap {
 	add("crates/sup/src/vm.rs", "crates/sup", 60, 10, types.QuadrantLow, []string{"sup"}, "crates/drv-vm/src/main.rs")
 	add("crates/cli/src/main.rs", "crates/cli", 50, 30, types.QuadrantLow, []string{"cli"}, "crates/core/src/lib.rs")
 
-	unit := func(name, entry, home string, impact, fc int, shared ...string) types.Unit {
-		return types.Unit{Name: name, Kind: "rust-bin", Entry: entry, Home: home, MaxImpact: impact, ImpactAssessed: true,
+	unit := func(name, entry, home string, fc int, shared ...string) types.Unit {
+		return types.Unit{Name: name, Kind: "rust-bin", Entry: entry, Home: home, MaxImpact: 95, ImpactAssessed: true,
 			FragileCritical: fc, Components: append([]string{home}, shared...), Shared: shared}
 	}
-	gw := unit("gw", "crates/gw/src/main.rs", "crates/gw", 95, 2, "crates/core")
+	gw := unit("gw", "crates/gw/src/main.rs", "crates/gw", 2, "crates/core")
 	gw.InferredPlacement = []types.Placement{{Kind: "dockerfile", Detail: "ENTRYPOINT of deploy/Dockerfile.gateway", Evidence: "deploy/Dockerfile.gateway:23"}}
-	sbx := unit("sbx", "crates/sbx/src/main.rs", "crates/sbx", 95, 2, "crates/core")
+	sbx := unit("sbx", "crates/sbx/src/main.rs", "crates/sbx", 2, "crates/core")
 	sbx.InferredPlacement = []types.Placement{{Kind: "dockerfile", Detail: "ENTRYPOINT of deploy/Dockerfile.sandbox", Evidence: "deploy/Dockerfile.sandbox:22"}}
-	perf := unit("perf", "crates/sbx/src/bin/perf.rs", "crates/sbx", 95, 2, "crates/core")
+	perf := unit("perf", "crates/sbx/src/bin/perf.rs", "crates/sbx", 2, "crates/core")
 	perf.Supporting = true
 	hm.Metadata.Units = []types.Unit{
-		gw, unit("sup", "crates/sup/src/main.rs", "crates/sup", 95, 3, "crates/core"), sbx, perf,
-		unit("drv-k8s", "crates/drv-k8s/src/main.rs", "crates/drv-k8s", 95, 1, "crates/core"),
-		unit("drv-vm", "crates/drv-vm/src/main.rs", "crates/drv-vm", 95, 1, "crates/core"),
-		unit("cli", "crates/cli/src/main.rs", "crates/cli", 95, 1, "crates/core"),
+		gw, unit("sup", "crates/sup/src/main.rs", "crates/sup", 3, "crates/core"), sbx, perf,
+		unit("drv-k8s", "crates/drv-k8s/src/main.rs", "crates/drv-k8s", 1, "crates/core"),
+		unit("drv-vm", "crates/drv-vm/src/main.rs", "crates/drv-vm", 1, "crates/core"),
+		unit("cli", "crates/cli/src/main.rs", "crates/cli", 1, "crates/core"),
 	}
 	return hm
 }

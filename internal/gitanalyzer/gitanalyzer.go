@@ -175,15 +175,6 @@ func detectBugFix(message string) bool {
 	return bugFixWords.MatchString(message)
 }
 
-// firstLine returns the first line of a multi-line string
-func firstLine(s string) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(lines[0])
-}
-
 // IsBugFix reports whether a commit message looks like a bug fix.
 func IsBugFix(message string) bool {
 	return detectBugFix(message)

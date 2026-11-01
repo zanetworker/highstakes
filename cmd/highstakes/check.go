@@ -73,7 +73,7 @@ maintainer ratings from a sheet made by "highstakes create labels".`,
 
 		now := time.Now()
 		opts := calibration.Options{K: top, To: now, SurpriseLimit: limit, Events: events}
-		walkFrom := time.Time{}
+		var walkFrom time.Time
 		if holdoutStr != "" {
 			cutoff, err := parseCutoff(holdoutStr, now)
 			if err != nil {

@@ -567,7 +567,7 @@ func jsImports(n *ts.Node, src []byte, l *ts.Language, r *parseResult) {
 		spec = stringLiteral(childOfType(n, l, "string"), src, l)
 	case "call_expression":
 		fn := n.ChildByFieldName("function", l)
-		if fn == nil || !(fn.Type(l) == "import" || (fn.Type(l) == "identifier" && fn.Text(src) == "require")) {
+		if fn == nil || (fn.Type(l) != "import" && (fn.Type(l) != "identifier" || fn.Text(src) != "require")) {
 			return
 		}
 		if args := n.ChildByFieldName("arguments", l); args != nil && args.NamedChildCount() > 0 {
