@@ -76,6 +76,12 @@ jobs:
           PUSHED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           signed=false
+          # Removing the label withdraws the sign-off: a newer failing status
+          # on the head means an older success no longer counts.
+          if [ "$ACTION" = "unlabeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
+            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=failure -f context=highstakes/signed-off \
+              -f description="Sign-off withdrawn" >/dev/null || true
+          fi
           case ",$LABELS," in
             *,highstakes:signed-off,*)
               if [ "$ACTION" = "synchronize" ]; then
@@ -96,10 +102,10 @@ jobs:
                   *) echo "Sign-off label added by $SENDER (permission: $perm) does not count: write access is required." ;;
                 esac
               else
-                n=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
-                  --jq '[.[] | select(.context == "highstakes/signed-off" and .state == "success" and .creator.login == "github-actions[bot]")] | length' \
-                  | awk '{s += $1} END {print s + 0}')
-                if [ "$n" -gt 0 ]; then signed=true; else echo "No sign-off recorded for this commit; review again and re-add the label."; fi
+                # Statuses come newest first: only the latest for the context counts.
+                latest=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" \
+                  --jq 'first(.[] | select(.context == "highstakes/signed-off")) | "\(.state) \(.creator.login)"')
+                if [ "$latest" = "success github-actions[bot]" ]; then signed=true; else echo "No current sign-off for this commit; review again and re-add the label."; fi
               fi
               ;;
           esac

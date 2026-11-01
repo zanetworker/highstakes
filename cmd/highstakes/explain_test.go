@@ -260,3 +260,20 @@ func TestUnscoredReview_KeepsAutoMergeOff(t *testing.T) {
 		t.Errorf("checklist = %v: auto-merge on must keep a new Harden now file blocked", got)
 	}
 }
+
+func TestAttachPRActions_MissingExplanationStillBlocks(t *testing.T) {
+	// An older heatmap: a scored Harden now file without action data.
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"core/h.go": {Path: "core/h.go", ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical},
+	}}
+	risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/h.go", Tier: types.TierCritical, Quadrant: types.QuadrantFragileCritical, ImpactAssessed: true}}}
+	c := buildChange([]prscore.FileChange{{Path: "core/h.go", LinesAdded: 5}}, hm, nil, nil)
+	attachPRActions(risk, hm, c)
+	var got []string
+	for _, a := range risk.Checklist {
+		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+	}
+	if strings.Join(got, ",") != "senior-review=open,no-auto-merge=open" {
+		t.Errorf("checklist = %v: missing action data must not read as all done", got)
+	}
+}

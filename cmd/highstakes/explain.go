@@ -144,12 +144,16 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 	for _, i := range order {
 		fc := &risk.FilesChanged[i]
 		f, ok := hm.Files[fc.Path]
-		if !ok {
+		switch {
+		case !ok:
 			// A new file that inherits a blocking tier was never assessed, so it
 			// still needs a review; without one the gate would read "all done".
 			if !fc.Unscored || !types.Blocking(fc.Posture()) || tour.IsTestFile(fc.Path) {
 				continue
 			}
+			f = unscoredReview(fc, directoryOwners(hm, fc.Path))
+		case f.Explanation == nil && types.Blocking(fc.Posture()) && !tour.IsTestFile(fc.Path):
+			// A heatmap from before actions existed: no data is not "done".
 			f = unscoredReview(fc, directoryOwners(hm, fc.Path))
 		}
 		acts := explain.ForPR(f, c)
@@ -170,6 +174,10 @@ var tierOrder = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.
 // inherits Harden now or Protect: one review item that approvals and the
 // sign-off label can satisfy like any other.
 func unscoredReview(fc *types.FileChange, owners []string) *types.FileHeat {
+	kind, signal := "the new file", "new file: not scored yet, treated like its directory ("+fc.Posture()+")"
+	if !fc.Unscored {
+		kind, signal = "the file", fc.Posture()+" file without action data: run analyze again"
+	}
 	id, who := "owner-review", "someone who knows its directory"
 	if fc.Posture() == "Harden now" {
 		id, who = "senior-review", "a senior owner of its directory"
@@ -180,8 +188,8 @@ func unscoredReview(fc *types.FileChange, owners []string) *types.FileHeat {
 	}
 	return &types.FileHeat{Path: fc.Path, Explanation: &types.Explanation{Actions: []types.Action{{
 		ID: id, Scope: types.ScopeBeforeMerge, Owners: owners,
-		Text:   "Review the new file `" + fc.Path + "` with " + who,
-		Signal: "new file: not scored yet, treated like its directory (" + fc.Posture() + ")",
+		Text:   "Review " + kind + " `" + fc.Path + "` with " + who,
+		Signal: signal,
 	}, noAuto}}}
 }
 

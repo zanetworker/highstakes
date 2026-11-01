@@ -77,8 +77,11 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 			"statuses: write",                              // sign-off recorded as a commit status
 			"statuses/$HEAD_SHA",                           // ... on the reviewed head commit
 			"commits/$HEAD_SHA/statuses",                   // ... read back for that commit only
-			`.creator.login == "github-actions[bot]"`,      // ... only the workflow's own status counts
+			`"success github-actions[bot]"`,                 // ... only the workflow's own, latest status counts
 			"PUSHED_AT",                                    // keep a label added after the push
+			`"$ACTION" = "unlabeled"`,                      // removing the label withdraws the sign-off
+			"state=failure",                                // ... as a newer, failing status
+			"first(",                                       // only the latest status for the context counts
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)
