@@ -81,6 +81,18 @@ func printTour(w io.Writer, tr *tour.Tour) {
 		for _, st := range s.Stops {
 			fmt.Fprintf(w, "   %d. %s  %s %s  %s\n", st.Order, st.Anchor, tierEmoji(st.Tier), st.Tier, axesLabel(st.Impact, st.Likelihood, st.ImpactAssessed, st.Quadrant))
 			fmt.Fprintf(w, "      why: %s\n", st.Why)
+			if e := st.Explanation; e != nil {
+				if len(e.LikelihoodReasons) > 0 {
+					fmt.Fprintf(w, "      likely because: %s\n", e.LikelihoodReasons[0])
+				}
+				if n := min(2, len(e.Actions)); n > 0 {
+					texts := make([]string, n)
+					for i := range texts {
+						texts[i] = e.Actions[i].Text
+					}
+					fmt.Fprintf(w, "      do: %s\n", strings.Join(texts, "; "))
+				}
+			}
 			if len(st.DependsOn) > 0 {
 				fmt.Fprintf(w, "      depends on: %s%s\n", strings.Join(st.DependsOn, ", "), more(st.DependsOnCount, len(st.DependsOn)))
 			}

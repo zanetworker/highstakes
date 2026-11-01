@@ -213,3 +213,45 @@ func TestGetTour_PerComponent(t *testing.T) {
 		})
 	}
 }
+
+func TestPrintTour_ShowsExplanation(t *testing.T) {
+	exp := &types.Explanation{
+		LikelihoodReasons: []string{"40 commits in the last 90 days (top 3% of this repo)", "2 recent fixes"},
+		Actions: []types.Action{
+			{ID: "owner-review", Text: "Every PR: owner review (@alice)"},
+			{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"},
+			{ID: "stable-interface", Text: "Keep its public interface stable"},
+		},
+	}
+	tr, err := tour.Build(&types.Heatmap{Files: map[string]*types.FileHeat{
+		"core/a.go": {Path: "core/a.go", Tier: types.TierHigh, Impact: 80, ImpactAssessed: true, Explanation: exp},
+		"core/b.go": {Path: "core/b.go", Tier: types.TierLow},
+	}}, tour.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range tr.Sections {
+		for _, st := range s.Stops {
+			if st.Path == "core/a.go" && st.Explanation != exp {
+				t.Errorf("stop explanation = %v, want the file's explanation", st.Explanation)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	printTour(&buf, tr)
+	out := buf.String()
+	for _, want := range []string{
+		"likely because: 40 commits in the last 90 days (top 3% of this repo)",
+		"do: Every PR: owner review (@alice); Add to CODEOWNERS; never auto-merge",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Keep its public interface stable") {
+		t.Errorf("tour should show only the top two actions:\n%s", out)
+	}
+	if strings.Count(out, "do:") != 1 {
+		t.Errorf("files without an explanation should print no actions:\n%s", out)
+	}
+}

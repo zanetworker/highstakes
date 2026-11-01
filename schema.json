@@ -240,6 +240,10 @@
                 },
                 "has_integration_tests": {
                   "type": "boolean"
+                },
+                "has_test_file": {
+                  "type": "boolean",
+                  "description": "A test sits next to the file by its language's convention; omitted for languages without one"
                 }
               }
             },
@@ -348,6 +352,24 @@
             "estimated_review_time_minutes": {
               "type": "integer",
               "description": "Estimated review time in minutes"
+            }
+          }
+        },
+        "explanation": {
+          "type": "object",
+          "description": "Why the file is impactful and likely to break, and what to do (deterministic rules, see docs/how-it-works.md)",
+          "properties": {
+            "headline": {"type": "string"},
+            "impact_high": {"type": "boolean"},
+            "likely": {"type": "boolean"},
+            "impact_reasons": {"type": "array", "items": {"type": "string"}},
+            "likelihood_reasons": {"type": "array", "items": {"type": "string"}},
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "text": {"type": "string"}}
+              }
             }
           }
         }

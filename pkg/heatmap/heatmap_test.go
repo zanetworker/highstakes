@@ -12,6 +12,7 @@ import (
 
 	"github.com/zanetworker/highstakes/internal/analyzer"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
+	"github.com/zanetworker/highstakes/internal/ownership"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -334,6 +335,9 @@ func TestGenerate_GitHistoryStatus(t *testing.T) {
 			if got := f.Factors.ChangeFrequency.CommitCount; got != tt.wantCommits {
 				t.Errorf("CommitCount = %d, want %d", got, tt.wantCommits)
 			}
+			if f.Explanation == nil || len(f.Explanation.Actions) == 0 {
+				t.Errorf("Explanation = %+v, want headline and actions", f.Explanation)
+			}
 		})
 	}
 }
@@ -444,4 +448,49 @@ func TestApplyAxes_SetsQuadrantsAndMetadata(t *testing.T) {
 	if hm.Metadata.LikelyCutoff != 80 || hm.Metadata.ImpactThreshold != th.High {
 		t.Errorf("metadata cutoff=%d threshold=%d, want 80 %d", hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold, th.High)
 	}
+}
+
+func TestApplyExplanations(t *testing.T) {
+	th := DefaultConfig().Tiers
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"a.go":      {Path: "a.go", Likelihood: 80, Impact: 70, ImpactAssessed: true},
+		"b.go":      {Path: "b.go", Likelihood: 10, Impact: 10},
+		"a_test.go": {Path: "a_test.go", Likelihood: 20, Impact: 10, ImpactAssessed: true},
+	}}
+	hm.Files["a.go"].Factors.ChangeFrequency.CommitCount = 9
+	applyAxes(hm, th)
+	applyExplanations(hm, map[string][]ownership.Owner{"a.go": {{Handle: "@ana", Share: 0.9}}})
+
+	tests := []struct {
+		path         string
+		wantHeadline string
+		wantAction   string
+	}{
+		{"a.go", "FRAGILE AND CRITICAL (impact 70, likelihood 80", "single-owner"},
+		{"b.go", "IMPACT NOT ASSESSED", "assess-impact"},
+		{"a_test.go", "LOW STAKES", "light-review"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			e := hm.Files[tt.path].Explanation
+			if e == nil {
+				t.Fatal("no explanation")
+			}
+			if !strings.HasPrefix(e.Headline, tt.wantHeadline) {
+				t.Errorf("headline = %q, want prefix %q", e.Headline, tt.wantHeadline)
+			}
+			found := false
+			for _, a := range e.Actions {
+				found = found || a.ID == tt.wantAction
+			}
+			if !found {
+				t.Errorf("actions %v lack %s", e.Actions, tt.wantAction)
+			}
+		})
+	}
+}
+
+func TestApplyExplanations_EmptyHeatmap(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	applyExplanations(hm, nil) // must not panic
 }

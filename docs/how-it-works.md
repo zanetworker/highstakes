@@ -112,6 +112,49 @@ The quadrant and its tier apply only to files whose impact was assessed. Other f
 
 Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`) are capped just below the MEDIUM threshold on both axes and on heat, and they are never counted as likely. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
 
+## Reasons and Actions
+
+After quadrants are set, `analyze` attaches an `explanation` to every file: a headline, why its impact is high (or low), why it is likely (or not) to break, and what to do. It is computed by rules in `internal/explain` from numbers already in the heatmap, with no extra LLM call, so the same heatmap always gives the same text.
+
+Percentiles are repo-relative: "top 5%" means at most 5% of the repo's non-test files have a value at least as high (rounded up, so the repo maximum in 1,000 files is "top 1%"). A signal becomes a reason only when it is in the top 20% and above zero.
+
+**Why impact.** With an LLM assessment: the impact dimensions at 60 or above, highest first (`security 92 · availability 85`), then the LLM's summary and critical reason. Without one: impact is an estimate from centrality and path keywords, and the reason says to run `analyze` with an LLM.
+
+**Why likely.** Each reason quotes the number and its percentile:
+
+| Signal | Reason when notable (top 20%) |
+|---|---|
+| Churn | commits in the last 90 days and authors overall (authors alone when churn is not notable) |
+| Complexity | functions and cyclomatic complexity in the file, at the better of the two percentiles; line count instead when complexity is not notable |
+| Importers | how many files import it |
+| Recent fixes | fix commits among the last 10 changes (whole-word match on fix, bug, hotfix, patch, repair, correct, resolve), newest quoted with its date |
+| Incidents | recorded incidents and the last date (any count) |
+| No tests | no test file next to it by the language's convention (any file in a language with a convention) |
+
+A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.py`, `foo_test.py` or `tests/test_foo.py`; `foo.test.ts` or `foo.spec.ts` beside it or in `__tests__/` (also for `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`); `FooTest.java` or `FooTests.java` beside it or in the Maven `src/test/` mirror (also `.kt`, `.cs`); `foo_spec.rb` or `foo_test.rb`; for Rust, a `#[cfg(test)]` module in the file. Other languages have no convention, so `has_test_file` is left out and no reason is given. The test coverage score itself is unchanged.
+
+**What to do.** Actions come from a rule table, most important first. `pr check` shows the first three.
+
+| Action | Quadrants | When |
+|---|---|---|
+| `assess-impact` | not assessed | always |
+| `senior-review` | fragile-critical | always; names the top two owners when known |
+| `owner-review` | protect | always; names the top two owners when known |
+| `codeowners` | fragile-critical, protect | always |
+| `change-carefully` | protect | always |
+| `ai-review` | watch | always |
+| `light-review` | low, and every test file | always (the only action) |
+| `split` | fragile-critical, not assessed | functions or cyclomatic in the top 5% |
+| `refactor` | watch | complexity in the top 20% |
+| `regression-tests` | fragile-critical, protect, not assessed | at least one recent fix |
+| `add-tests` | watch | two or more recent fixes |
+| `stable-interface` | fragile-critical, protect | importers in the top 10% |
+| `no-tests` | all but low | no test found and no fix-driven test action already asks for tests |
+| `single-owner` | all but low | top owner holds 80% or more of the file and it has 5 or more commits |
+| `knowledge-spread` | all but low | 5 or more authors and authors in the top 10% |
+
+Owners come from the same history pass as [Ownership](#ownership), run once during `analyze`. If git fails, actions stay generic and `analyze` prints a warning.
+
 ## Static Analysis by Language
 
 Go is parsed with `go/ast`. Rust, TypeScript, JavaScript, Java, Kotlin, C#, C, C++ and Ruby are parsed with [gotreesitter](https://github.com/odvcencio/gotreesitter), a pure-Go tree-sitter runtime, so `go install` needs no C toolchain. Each file is parsed once, in parallel. Python still uses line heuristics, as do files over 1 MB or files the parser rejects.

@@ -162,7 +162,7 @@ heatmap                                              # Terminal TUI
 ### Query
 
 ```sh
-highstakes get <file>                                   # Both axes, quadrant + reasoning
+highstakes get <file>                                   # Why impact, why likely, what to do
 highstakes list --tier high --limit 10                  # Filter files
 highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
 highstakes report                                       # Distribution report
@@ -170,29 +170,36 @@ highstakes report                                       # Distribution report
 
 All commands support `--json` for machine-readable output.
 
-<details><summary><b>Example: heatmap get</b></summary>
+<details open><summary><b>Example: highstakes get</b></summary>
+
+`get` says why a file is impactful, why it is likely to break and what to do, quoting the file's numbers and where they rank in the repo:
 
 ```
-$ highstakes get src/middleware/jwt/jwt.ts        # hono
+$ highstakes get crates/openshell-supervisor-network/src/proxy.rs        # NVIDIA/OpenShell
 
-src/middleware/jwt/jwt.ts  🔥🔥🔥 CRITICAL  (score: 90)
+crates/openshell-supervisor-network/src/proxy.rs  🔥🔥🔥 CRITICAL  (score: 92)
 
-Impact:     90  (damage if it breaks: LLM blast radius)
-Likelihood: 35  (chance it needs fixes: churn, complexity, centrality, incidents)
-Quadrant:   fragile-critical  (likely to break and costly when it does: senior review, add tests first)
-
-Blast Radius (LLM-assessed):
-  JWT authentication failures can block protected routes or allow unauthorized access.
-  Reason: Security boundary for token verification
-  Security: 90  Data: 45  Availability: 65  User: 70
-
-Risk Factors:
-  Dependency Centrality:  1 (1 imports)
-  Change Frequency:       1 (2 commits/90d)
-  Complexity:             95 (cyclomatic: 20)
+FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)
+Why impact is high: security 92 · availability 85 · user 85 · data 70
+  "Core sandbox egress proxy; bugs can block traffic or bypass network policy."
+  "Enforces sandbox network access and identity-bound policy"
+Why it's likely to break:
+  55 commits in the last 90 days, 28 authors overall (top 1% of this repo)
+  479 functions, cyclomatic 1092 in one file (top 1%)
+  11 files import it (top 5%)
+  4 recent fixes; latest: "fix(network): align destination checks for direct connections (#5004)" (2026-10-28)
+What to do:
+  • Every PR: senior review and sign-off from a top owner (@johntmyers, rrhubenov@gmail.com)
+  • Add to CODEOWNERS; never auto-merge
+  • Split it: 479 functions in one file
+  • Add regression tests around the 4 recent fixes
+  • Keep its public interface stable: 11 importers; add contract tests
+  • Spread knowledge: 28 authors change it; document its invariants and keep an owner on review
 
 Review: 2 reviewers (senior), security scan, ~60 min, auto-merge blocked
 ```
+
+Reasons and actions are deterministic (no extra LLM call); see [How It Works](docs/how-it-works.md#reasons-and-actions) for the thresholds. `pr check` lists the top three actions under each HIGH or CRITICAL file it touches, and the dashboard and TUI detail panels show the same three sections.
 
 </details>
 

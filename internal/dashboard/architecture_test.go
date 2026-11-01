@@ -214,3 +214,37 @@ func TestGenerate_EmbedsQuadrantView(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerate_EmbedsExplanation(t *testing.T) {
+	hm := archHeatmap()
+	f := hm.Files["api/a.go"]
+	f.ImpactAssessed = true
+	f.Explanation = &types.Explanation{
+		Headline: "PROTECT (impact 90, likelihood 10)", ImpactHigh: true,
+		ImpactReasons:     []string{"security 90"},
+		LikelihoodReasons: []string{`recent fix: "<b>x</b>"`},
+		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
+	}
+	out := filepath.Join(t.TempDir(), "d.html")
+	if err := Generate(hm, out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{
+		`"impact_title":"Why impact is high"`,
+		`"likely_title":"Likelihood signals (below the likely cutoff)"`,
+		`"text":"Add to CODEOWNERS; never auto-merge"`,
+		`What to do`, `function htmlEsc`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+	if strings.Contains(html, `"<b>x</b>"`) {
+		t.Error("reason text must stay JSON-escaped, not raw HTML")
+	}
+}

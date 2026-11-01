@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -34,6 +35,10 @@ type fileEntry struct {
 	Assessed     bool   `json:"impact_assessed"`
 	Quadrant     string `json:"quadrant"`
 	Test         bool   `json:"test"`
+
+	Explanation *types.Explanation `json:"explanation,omitempty"`
+	ImpactTitle string             `json:"impact_title,omitempty"`
+	LikelyTitle string             `json:"likely_title,omitempty"`
 }
 
 func Generate(hm *types.Heatmap, outputPath string) error {
@@ -63,6 +68,10 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 			lines = 10
 		}
 
+		impactTitle, likelyTitle := "", ""
+		if f.Explanation != nil {
+			impactTitle, likelyTitle = explain.Titles(*f.Explanation, f.ImpactAssessed)
+		}
 		files = append(files, fileEntry{
 			Path: f.Path, Dir: dir, Name: name,
 			HeatScore: f.HeatScore, Tier: string(f.Tier),
@@ -75,6 +84,7 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 			ImportedBy: len(f.Dependencies.ImportedBy),
 			Likelihood: f.Likelihood, Impact: f.Impact, Assessed: f.ImpactAssessed,
 			Quadrant: string(f.Quadrant), Test: tour.IsTestFile(f.Path),
+			Explanation: f.Explanation, ImpactTitle: impactTitle, LikelyTitle: likelyTitle,
 		})
 	}
 
@@ -338,6 +348,7 @@ let currentPath=null;
 let searchQ='';
 
 function esc(s){return s.replace(/'/g,"\\'")}
+function htmlEsc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c])}
 
 function setView(tier,btn){
   currentFilter=tier;
@@ -546,7 +557,23 @@ function selectFile(path){
   if(f.quadrant)h+='<div class="reason"><strong>'+QUAD[f.quadrant].label+'</strong>: '+QUAD[f.quadrant].guide+'</div>';
   h+='</div>';
 
-  if(f.reason){
+  const x=f.explanation;
+  if(x){
+    h+='<div class="reason" style="font-size:11px;color:var(--muted)">'+htmlEsc(x.headline)+'</div>';
+    [{t:f.impact_title,r:x.impact_reasons},{t:f.likely_title,r:x.likelihood_reasons}].forEach(sec=>{
+      if(!sec.r||!sec.r.length)return;
+      h+='<div class="sec"><div class="sec-title">'+htmlEsc(sec.t)+'</div>';
+      sec.r.forEach(r=>{h+='<div class="reason">'+htmlEsc(r)+'</div>'});
+      h+='</div>';
+    });
+    if(x.actions&&x.actions.length){
+      h+='<div class="sec"><div class="sec-title">What to do</div>';
+      x.actions.forEach(a=>{h+='<div class="reason">&#8226; '+htmlEsc(a.text)+'</div>'});
+      h+='</div>';
+    }
+  }
+
+  if(f.reason&&!x){
     h+='<div class="sec"><div class="sec-title">Blast Radius</div>';
     h+='<div class="reason">'+f.reason+'</div>';
     if(f.crit_reason)h+='<div class="crit">'+f.crit_reason+'</div>';

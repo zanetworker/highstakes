@@ -36,6 +36,7 @@ type FileInfo struct {
 	Cyclomatic      int
 	Cognitive       int
 	FunctionCount   int
+	HasTestFile     *bool // nil when the language has no test-file convention
 
 	// parsed holds the tree-sitter result until imports are resolved.
 	parsed *parseResult
@@ -200,6 +201,9 @@ func (a *Analyzer) discoverFiles() error {
 func (a *Analyzer) analyzeFile(relPath string) error {
 	info := a.files[relPath]
 	absPath := filepath.Join(a.repoPath, relPath)
+	if found, known := HasTestFile(a.repoPath, relPath); known {
+		info.HasTestFile = &found
+	}
 
 	switch info.Language {
 	case "Go":

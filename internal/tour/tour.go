@@ -109,6 +109,8 @@ type Stop struct {
 	UsedByCount    int            `json:"used_by_count"`
 	Owners         []string       `json:"owners"`
 	Notes          string         `json:"notes,omitempty"`
+	// Explanation is the file's why-impact, why-likely and what-to-do.
+	Explanation *types.Explanation `json:"explanation,omitempty"`
 }
 
 // Dir returns the directory of a slash-separated repo path ("." for root files).
@@ -519,6 +521,7 @@ func newStop(hm *types.Heatmap, f *types.FileHeat, deps []*types.FileHeat, sourc
 		UsedByCount:    len(users),
 		Owners:         owners(f, ann.Owner),
 		Notes:          ann.Notes,
+		Explanation:    f.Explanation,
 	}
 	if st.Owners == nil {
 		st.Owners = []string{}

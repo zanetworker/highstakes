@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -471,6 +472,33 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 	fmt.Fprintf(&b, "  Likelihood  %d  chance it needs fixes\n", heat.Likelihood)
 	if heat.Quadrant != "" {
 		fmt.Fprintf(&b, "  Quadrant    %s\n", heat.Quadrant)
+	}
+
+	// Why impact, why likely, what to do (shared with get and the dashboard)
+	if e := heat.Explanation; e != nil {
+		impactTitle, likelyTitle := explain.Titles(*e, heat.ImpactAssessed)
+		for _, sec := range []struct {
+			title string
+			lines []string
+		}{{impactTitle, e.ImpactReasons}, {likelyTitle, e.LikelihoodReasons}} {
+			if len(sec.lines) == 0 {
+				continue
+			}
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render(strings.ToUpper(sec.title)))
+			b.WriteString("\n")
+			for _, l := range sec.lines {
+				fmt.Fprintf(&b, "  %s\n", l)
+			}
+		}
+		if len(e.Actions) > 0 {
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("WHAT TO DO"))
+			b.WriteString("\n")
+			for _, a := range e.Actions {
+				fmt.Fprintf(&b, "  • %s\n", a.Text)
+			}
+		}
 	}
 
 	// Blast radius (the key insight, matches dashboard)

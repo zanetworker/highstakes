@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/zanetworker/highstakes/internal/analyzer"
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/llm"
+	"github.com/zanetworker/highstakes/internal/ownership"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
@@ -172,6 +174,13 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	}
 	applyAxes(heatmap, g.config.Tiers)
 
+	// Owners name reviewers in the actions; without them actions stay generic.
+	owners, err := ownership.FileOwners(g.repoPath, nil, ownership.Options{Aliases: g.config.Owners})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: no owners in explanations: %v\n", err)
+	}
+	applyExplanations(heatmap, owners)
+
 	// Load existing incidents if any
 	incidents, err := LoadIncidents(filepath.Join(g.repoPath, ".heatmap", "incidents.json"))
 	if err == nil {
@@ -244,6 +253,7 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		CoveragePercent: 50.0,
 		TestCount:       0,
 		HasIntegrationTests: false,
+		HasTestFile:         fileInfo.HasTestFile,
 	}
 
 	// Complexity
@@ -307,6 +317,16 @@ func scoreFile(heat *types.FileHeat, isTest bool, tiers types.TierThresholds) {
 func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
 	hm.Metadata.LikelyCutoff = scorer.ApplyQuadrants(hm.Files, tiers, tour.IsTestFile)
 	hm.Metadata.ImpactThreshold = tiers.High
+}
+
+// applyExplanations attaches reasons and actions to every file. It runs
+// after applyAxes because reasons cite the likely cutoff and quadrant.
+func applyExplanations(hm *types.Heatmap, owners map[string][]ownership.Owner) {
+	stats := explain.BuildRepoStats(hm, tour.IsTestFile)
+	for path, f := range hm.Files {
+		e := explain.Explain(f, stats, owners[path])
+		f.Explanation = &e
+	}
 }
 
 // getFileIncidents returns incidents for a file

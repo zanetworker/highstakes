@@ -47,6 +47,25 @@ type FileHeat struct {
 	Dependencies       Dependencies       `json:"dependencies,omitempty"`
 	RecentChanges      []Change           `json:"recent_changes,omitempty"`
 	ReviewRequirements ReviewRequirements `json:"review_requirements"`
+	Explanation        *Explanation       `json:"explanation,omitempty"` // why it scores as it does and what to do
+}
+
+// Explanation says why a file is impactful and likely to break, and what to
+// do about it. Every reason quotes the file's numbers; it is deterministic
+// (no LLM) and computed after quadrants are applied.
+type Explanation struct {
+	Headline          string   `json:"headline"`    // e.g. "FRAGILE AND CRITICAL (impact 92, likelihood 50; likely starts at 33 in this repo)"
+	ImpactHigh        bool     `json:"impact_high"` // impact at or above the repo impact threshold
+	Likely            bool     `json:"likely"`      // likelihood at or above the repo likely cutoff
+	ImpactReasons     []string `json:"impact_reasons,omitempty"`
+	LikelihoodReasons []string `json:"likelihood_reasons,omitempty"`
+	Actions           []Action `json:"actions,omitempty"` // most important first
+}
+
+// Action is one recommended step; ID is stable for tooling.
+type Action struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // Tier represents risk tier
@@ -145,6 +164,10 @@ type TestCoverage struct {
 	CoveragePercent       float64 `json:"coverage_percent"`
 	TestCount             int     `json:"test_count"`
 	HasIntegrationTests   bool    `json:"has_integration_tests"`
+	// HasTestFile is whether a test sits next to the file by its language's
+	// convention (foo_test.go, foo.test.ts, test_foo.py, FooTest.java, a
+	// #[cfg(test)] module in Rust); nil when the language has no convention.
+	HasTestFile *bool `json:"has_test_file,omitempty"`
 }
 
 // Complexity measures code complexity
@@ -247,6 +270,7 @@ type FileChange struct {
 	LinesDeleted int `json:"lines_deleted"`
 	IsNew     bool   `json:"is_new"`
 	Unscored  bool   `json:"unscored,omitempty"` // Not in heatmap; heat inherited from nearest scored directory
+	Actions   []Action `json:"actions,omitempty"` // top actions for HIGH and CRITICAL files
 }
 
 // Config represents heatmap configuration

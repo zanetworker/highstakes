@@ -188,6 +188,12 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Printf("%s  %s %s  (score: %d)\n\n",
 		file.Path, tierEmoji(file.Tier), strings.ToUpper(string(file.Tier)), file.HeatScore)
 
+	if block := explanationBlock(file); block != "" {
+		fmt.Println(block)
+		printReview(file.ReviewRequirements)
+		return
+	}
+
 	fmt.Println(axesLines(file))
 
 	// Blast radius reasoning (the key insight)
@@ -220,9 +226,13 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Printf("  Complexity:             %d (cyclomatic: %d)\n",
 		file.Factors.Complexity.Score,
 		file.Factors.Complexity.Cyclomatic)
+	fmt.Println()
+	printReview(file.ReviewRequirements)
+}
 
-	req := file.ReviewRequirements
-	fmt.Printf("\nReview: %d reviewers", req.MinReviewers)
+// printReview prints the tier's review requirements on one line.
+func printReview(req types.ReviewRequirements) {
+	fmt.Printf("Review: %d reviewers", req.MinReviewers)
 	if req.RequiresSenior {
 		fmt.Print(" (senior)")
 	}
@@ -416,6 +426,7 @@ var prCheckCmd = &cobra.Command{
 
 		risk := prscore.CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
 		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
+		attachActions(&risk, hm)
 		gateErr := applyGate(&risk, failOn, shadow)
 		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
 			return gateErr
@@ -454,6 +465,9 @@ var prCheckCmd = &cobra.Command{
 			fmt.Printf(" %s %s %3d %-45s +%d/-%d%s\n",
 				icon, tierEmoji(fc.Tier), fc.HeatScore, fc.Path,
 				fc.LinesAdded, fc.LinesDeleted, reason)
+			for _, a := range fc.Actions {
+				fmt.Printf("       • %s\n", a.Text)
+			}
 		}
 
 		if len(risk.CircuitBreakerSignals) > 0 {

@@ -42,3 +42,22 @@ func TestRenderFileDetail_ShowsAxes(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderFileDetail_ShowsExplanation(t *testing.T) {
+	heat := &types.FileHeat{Path: "a.go", ImpactAssessed: true, Explanation: &types.Explanation{
+		ImpactHigh: true, Likely: true,
+		ImpactReasons:     []string{"security 92"},
+		LikelihoodReasons: []string{"11 files import it (top 1% of this repo)"},
+		Actions:           []types.Action{{ID: "codeowners", Text: "Add to CODEOWNERS; never auto-merge"}},
+	}}
+	out := Model{}.renderFileDetail(heat, 80)
+	for _, w := range []string{"WHY IMPACT IS HIGH", "security 92", "WHY IT'S LIKELY TO BREAK", "11 files import it", "WHAT TO DO", "• Add to CODEOWNERS"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in:\n%s", w, out)
+		}
+	}
+	plain := Model{}.renderFileDetail(&types.FileHeat{Path: "b.go"}, 80)
+	if strings.Contains(plain, "WHAT TO DO") {
+		t.Error("file without explanation shows a WHAT TO DO section")
+	}
+}

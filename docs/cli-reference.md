@@ -40,13 +40,13 @@ highstakes analyze [flags]
 
 ## heatmap get
 
-Get both axes, the quadrant and the blast radius reasoning for a specific file.
+Get why a file is impactful, why it is likely to break, and what to do about it.
 
 ```sh
 highstakes get <file> [--json]
 ```
 
-Text output starts with one line per axis: `Impact` (damage if it breaks; `~N (estimate)` without an LLM assessment), `Likelihood` (chance it needs fixes) and, when impact is assessed, `Quadrant` with its review guidance. `--json` returns the file record, including the fields in [File fields](#file-fields).
+Text output is a headline with the quadrant, both axes and the repo's likely cutoff, then three sections: why impact is high (or low), why it is likely to break (or the likelihood signals when it is below the cutoff), and what to do. Reasons quote the file's numbers and their repo percentile. A review requirements line follows. `--json` returns the file record, including `explanation` (see [File fields](#file-fields)). Heatmaps written before explanations existed fall back to the per-axis lines and blast radius reasoning; run `analyze` again to get the sections. See [How It Works](how-it-works.md#reasons-and-actions) for the rules.
 
 If the file is not found, suggests similar paths from the heatmap.
 
@@ -160,6 +160,7 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 | `stops[].top_impact` | Highest LLM impact dimension: `security`, `data`, `availability` or `user`; omitted when not assessed |
 | `stops[].depends_on` / `used_by` | Up to 5 files, hottest first; `*_count` is the full number |
 | `stops[].owners` | Annotation owner first, then recent commit authors by commit count; up to 3 |
+| `stops[].explanation` | The file's explanation (headline, impact and likelihood reasons, actions); see `get`. The text tour prints the first likelihood reason as `likely because:` and the top two actions as `do:` |
 
 ## highstakes list
 
@@ -192,6 +193,8 @@ Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axe
 | `quadrant` | `fragile-critical`, `protect`, `watch` or `low`; omitted when impact is not assessed |
 | `heat_score` | `max(likelihood, impact)` when assessed, else likelihood (kept for compatibility) |
 | `tier` | From the quadrant when assessed, else from `heat_score` |
+| `explanation` | `headline`, `impact_high`, `likely`, `impact_reasons`, `likelihood_reasons` and `actions` (each `{id, text}`, most important first) |
+| `factors.test_coverage.has_test_file` | `true` or `false` when a test sits next to the file by its language's convention; omitted for languages without one |
 
 The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (impact counted as impactful: `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
 
@@ -215,6 +218,8 @@ highstakes pr check [flags]
 Uses `git diff --numstat` to identify changed files, then looks up their heat scores. The PR inherits the tier of its highest-scoring file.
 
 A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score of scored files in its directory, or the nearest parent directory that has any, is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Docs (`.md`, `.mdx`, `.rst`, `.txt`) are exempt and stay LOW.
+
+Each HIGH or CRITICAL changed file is followed by its top three actions (from its `explanation`); in `--json` they are under `files_changed[].actions`.
 
 **Exit code 3** if git diff fails (error includes valid base examples).
 
