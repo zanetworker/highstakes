@@ -71,9 +71,10 @@ func TestBuildArchitecture_Nodes(t *testing.T) {
 func TestBuildArchitecture_Edges(t *testing.T) {
 	arch := buildArchitecture(archHeatmap())
 	want := []archEdge{
-		{From: "api", To: "types", Count: 2},
-		{From: "cmd", To: "api", Count: 1},
-		{From: "cmd", To: "types", Count: 1},
+		{From: "api", To: "types", Count: 2, Links: [][2]string{{"api/a.go", "types/t.go"}, {"api/b.go", "types/t.go"}}, LinksTotal: 2},
+		// one importing file, two file links: the arrow's panel lists both
+		{From: "cmd", To: "api", Count: 1, Links: [][2]string{{"cmd/main.go", "api/a.go"}, {"cmd/main.go", "api/b.go"}}, LinksTotal: 2},
+		{From: "cmd", To: "types", Count: 1, Links: [][2]string{{"cmd/main.go", "types/t.go"}}, LinksTotal: 1},
 	}
 	if !reflect.DeepEqual(arch.Edges, want) {
 		t.Errorf("edges = %+v, want %+v", arch.Edges, want)

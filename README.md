@@ -97,7 +97,9 @@ Four views, one detail panel. Click any file to see its impact and likelihood, q
 
 All views respond to tier filters (Critical / High / Medium / Low) and search; the treemap also has the size toggle (Lines vs Heat).
 
-**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Packages outside the current tier filter or search are dimmed.
+**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Click an arrow to see the file-level imports behind it (for example `supervisor-network/src/host.rs -> core/src/policy.rs`). Packages outside the current tier filter or search are dimmed. Wide layers wrap into extra rows; the zoom buttons, **Fit** (whole graph on screen), mouse wheel, trackpad pinch and drag-to-pan handle large repos.
+
+**Group by: Unit** switches the Architecture view from packages to runtime units: one box per deployable entry point (a Rust binary, a Go `main` package, a `package.json` bin or start script, a Python script), holding the components only that unit links, with shared libraries in a band below. Boxes are colored by max impact, carry the fragility marker, and show placement inferred from Dockerfiles, Helm values and Kubernetes manifests. On NVIDIA/OpenShell this shows `openshell-sandbox` and `openshell-supervisor` as separate binaries (separate pods), `openshell-supervisor-network` inside the supervisor and `openshell-server` inside the gateway. Click a unit for its entry point, placement evidence, components and files (impact, likelihood, quadrant). Units come from imports and manifests, not from a running system; see [How It Works](docs/how-it-works.md#runtime-units).
 
 **Quadrant**: every file as a dot, likelihood on x and impact on y, with the two thresholds drawn and each quadrant labelled with its review guidance. Click a dot to open the file in the detail panel.
 
@@ -165,6 +167,7 @@ heatmap                                              # Terminal TUI
 highstakes get <file>                                   # Why impact, why likely, what to do
 highstakes list --tier high --limit 10                  # Filter files
 highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
+highstakes list units                                   # Binaries and scripts, what each links, where it is packaged
 highstakes report                                       # Distribution report
 ```
 
@@ -216,6 +219,31 @@ $ highstakes list --sort impact --limit 5        # hono
 ```
 
 Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the LLM). The last row is stable (likelihood 2) but impactful, so it is HIGH (protect), not CRITICAL.
+
+</details>
+
+<details><summary><b>Example: highstakes list units</b></summary>
+
+```
+$ highstakes list units        # NVIDIA/OpenShell, trimmed
+
+openshell-supervisor  [rust-bin]  crates/openshell-supervisor/src/main.rs (crates/openshell-supervisor/Cargo.toml:13)
+  impact 95  61 fragile-critical  242 files
+  own: crates/openshell-supervisor, crates/openshell-otel-test-support, crates/openshell-supervisor-network, crates/openshell-supervisor-process
+  links units: openshell-driver-vm (crates/openshell-driver-vm)
+  shared: crates/openshell-core, crates/openshell-policy, crates/openshell-sandbox-backend, ...
+  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.supervisor [deploy/docker/Dockerfile.supervisor:18]
+  inferred placement: helm chart deploy/helm/openshell: supervisor image openshell/supervisor [deploy/helm/openshell/values.yaml:63]
+
+openshell-sandbox  [rust-bin]  crates/openshell-sandbox/src/main.rs (crates/openshell-sandbox/Cargo.toml:13)
+  impact 95  29 fragile-critical  177 files
+  own: crates/openshell-sandbox
+  shared: crates/openshell-core, crates/openshell-sandbox-backend, ...
+  inferred placement: ENTRYPOINT of deploy/docker/Dockerfile.sandbox [deploy/docker/Dockerfile.sandbox:22]
+  inferred placement: helm chart deploy/helm/openshell: sandboxRuntime image openshell/sandbox [deploy/helm/openshell/values.yaml:49]
+```
+
+`own` is code only this unit links, `links units` is another binary's crate it links in-process, `shared` is linked by two or more units. Units are sorted by max impact.
 
 </details>
 

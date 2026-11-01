@@ -26,6 +26,40 @@ type Metadata struct {
 	// non-test files); ImpactThreshold is the impact counted as "impactful".
 	LikelyCutoff    int `json:"likely_cutoff,omitempty"`
 	ImpactThreshold int `json:"impact_threshold,omitempty"`
+	// Units are the deployable entry points (binaries, scripts) found in the
+	// repo, with the components each links through the import graph.
+	Units []Unit `json:"units,omitempty"`
+}
+
+// Unit is a deployable entry point (a Rust binary, a Go main package, a
+// package.json bin or start script, a Python script) and what it links. It
+// comes from imports and manifests, not from observing what runs.
+type Unit struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`     // rust-bin, go-main, node-bin, node-start, python-script, python-main
+	Entry    string `json:"entry"`    // entry file
+	Evidence string `json:"evidence"` // file:line that declares the entry point
+	Home     string `json:"home"`     // component holding the entry file
+	// Components lists every component the unit links transitively (home
+	// first, then by name); Shared is the subset linked by other units too.
+	Components      []string `json:"components"`
+	Shared          []string `json:"shared"`
+	Files           int      `json:"files"`      // non-test files linked
+	Lines           int      `json:"lines"`      // their total lines
+	MaxImpact       int      `json:"max_impact"` // highest impact among linked files
+	ImpactAssessed  bool     `json:"impact_assessed"`
+	FragileCritical int      `json:"fragile_critical"` // linked files in the fragile-critical quadrant
+	// InferredPlacement lists deployment hints (Dockerfile entrypoints,
+	// Helm or Kubernetes images) that name this unit. Best effort: a hint
+	// says where the binary is packaged, not that it runs there.
+	InferredPlacement []Placement `json:"inferred_placement,omitempty"`
+}
+
+// Placement is one deployment hint for a unit.
+type Placement struct {
+	Kind     string `json:"kind"`     // dockerfile, helm, k8s
+	Detail   string `json:"detail"`   // e.g. "ENTRYPOINT of deploy/docker/Dockerfile.sandbox"
+	Evidence string `json:"evidence"` // file:line
 }
 
 // FileHeat represents heat data for a single file
@@ -48,6 +82,10 @@ type FileHeat struct {
 	RecentChanges      []Change           `json:"recent_changes,omitempty"`
 	ReviewRequirements ReviewRequirements `json:"review_requirements"`
 	Explanation        *Explanation       `json:"explanation,omitempty"` // why it scores as it does and what to do
+	// Component is the top-level unit of code the file belongs to (crate,
+	// package, module); Units names the runtime units that link the file.
+	Component string   `json:"component,omitempty"`
+	Units     []string `json:"units,omitempty"`
 }
 
 // Explanation says why a file is impactful and likely to break, and what to

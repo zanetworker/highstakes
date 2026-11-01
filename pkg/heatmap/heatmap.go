@@ -16,6 +16,7 @@ import (
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
+	"github.com/zanetworker/highstakes/internal/units"
 )
 
 const Version = "1.0.0"
@@ -180,6 +181,13 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 		fmt.Fprintf(os.Stderr, "  Warning: no owners in explanations: %v\n", err)
 	}
 	applyExplanations(heatmap, owners)
+
+	// Units need quadrants (fragile-critical counts); they are optional, so a
+	// failure leaves the heatmap without them.
+	fmt.Println("  - Finding runtime units...")
+	if err := units.Apply(heatmap, os.DirFS(g.repoPath), g.config.Exclude.Dirs); err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: no runtime units: %v\n", err)
+	}
 
 	// Load existing incidents if any
 	incidents, err := LoadIncidents(filepath.Join(g.repoPath, ".heatmap", "incidents.json"))

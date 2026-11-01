@@ -35,6 +35,7 @@ type fileEntry struct {
 	Assessed     bool   `json:"impact_assessed"`
 	Quadrant     string `json:"quadrant"`
 	Test         bool   `json:"test"`
+	UnitNode     string `json:"unit_node,omitempty"` // node id in the Architecture view grouped by unit
 
 	Explanation *types.Explanation `json:"explanation,omitempty"`
 	ImpactTitle string             `json:"impact_title,omitempty"`
@@ -42,6 +43,7 @@ type fileEntry struct {
 }
 
 func Generate(hm *types.Heatmap, outputPath string) error {
+	unitView, fileNode := buildUnitView(hm)
 	var files []fileEntry
 	for _, f := range hm.Files {
 		reason, critReason := "", ""
@@ -85,6 +87,7 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 			Likelihood: f.Likelihood, Impact: f.Impact, Assessed: f.ImpactAssessed,
 			Quadrant: string(f.Quadrant), Test: tour.IsTestFile(f.Path),
 			Explanation: f.Explanation, ImpactTitle: impactTitle, LikelyTitle: likelyTitle,
+			UnitNode: fileNode[f.Path],
 		})
 	}
 
@@ -119,9 +122,13 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 	})
 
 	archJSON, _ := json.Marshal(buildArchitecture(hm))
+	unitsJSON, _ := json.Marshal(map[string]interface{}{
+		"nodes": unitView.Nodes, "edges": unitView.Edges, "unlinked": unitView.Unlinked, "units": hm.Metadata.Units,
+	})
 
 	html := strings.ReplaceAll(tmpl, "/*__FILES__*/[]", string(filesJSON))
 	html = strings.ReplaceAll(html, "/*__ARCH__*/{}", string(archJSON))
+	html = strings.ReplaceAll(html, "/*__UNITS__*/{}", string(unitsJSON))
 	html = strings.ReplaceAll(html, "/*__STATS__*/{}", string(statsJSON))
 	html = strings.ReplaceAll(html, "/*__ACTIONS__*/[]", string(actionsJSON))
 
@@ -223,8 +230,16 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .view-toggle{display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-left:8px}
 .view-toggle button{padding:3px 10px;border:none;background:var(--panel);color:var(--muted);cursor:pointer;font:11px var(--font-d)}
 .view-toggle button.on{background:var(--accent);color:#fff}
-.arch{flex:1;overflow:auto;display:none;position:relative}
-.arch-hint{position:sticky;top:0;left:0;padding:6px 12px;font:11px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
+.arch{flex:1;overflow:hidden;display:none;flex-direction:column;position:relative;min-width:0}
+.arch-hint{padding:6px 12px;font:11px var(--font-t);color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border);z-index:2}
+.arch-bar{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.arch-bar label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.arch-bar .fbtn:disabled{opacity:.4;cursor:not-allowed}
+.arch-zoom{font:11px var(--font-m);color:var(--dim);margin-left:4px}
+.arch-vp{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab}
+.arch-vp.panning{cursor:grabbing}
+.arch .band{fill:#ffffff08;stroke:var(--border);stroke-dasharray:4 4}
+.arch .band-label{font:600 10px var(--font-d);fill:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .arch svg{display:block}
 .arch .an{cursor:pointer}
 .arch .an rect{stroke-width:1.5}
@@ -238,6 +253,16 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .arch .ae.hl path{stroke:var(--text)}
 .arch .ae text{font:10px var(--font-m);fill:var(--muted)}
 .arch .ae.hl text{fill:var(--text)}
+.arch .ae{cursor:pointer}
+.arch .ae:hover path{stroke:var(--muted)}
+.arch .ae.esel path{stroke:var(--accent)}
+.arch .ae path.ae-hit{stroke:transparent;stroke-width:12}
+.elink{font:11px var(--font-m);padding:4px 0;border-bottom:1px solid var(--border);word-break:break-all}
+.elink-file{cursor:pointer;color:var(--text)}
+.elink-file:hover{color:#fff}
+.elink-file .ftier{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
+.earrow{color:var(--dim);margin:0 6px}
+.fmeta{margin-left:auto;font:11px var(--font-m);color:var(--muted);white-space:nowrap;padding-left:8px}
 .arch .arrow{fill:var(--dim)}
 .arch .an-frag{fill:none;stroke:var(--medium);stroke-width:1.5;stroke-dasharray:4 3}
 .arch .an-likely{font:600 10px var(--font-m);fill:var(--medium)}
@@ -300,7 +325,18 @@ input:focus{outline:none;border-color:var(--accent)}
 <div class="treemap" id="treemap"></div>
 </div>
 <div class="explorer" id="explorer"></div>
-<div class="arch" id="arch"></div>
+<div class="arch" id="arch">
+<div class="arch-hint"><div class="arch-bar"><label>Group by:</label>
+<button class="fbtn on" data-g="package" onclick="setGroup('package',this)">Package</button>
+<button class="fbtn" data-g="unit" onclick="setGroup('unit',this)">Unit</button>
+<label style="margin-left:12px">Zoom:</label>
+<button class="fbtn" onclick="archZoomBy(1/1.25)" title="Zoom out">&#8722;</button>
+<button class="fbtn" onclick="archZoomBy(1.25)" title="Zoom in">+</button>
+<button class="fbtn" onclick="archFit()" title="Fit the whole graph on screen">Fit</button>
+<button class="fbtn" onclick="archReset()" title="Actual size">1:1</button>
+<span class="arch-zoom" id="arch-zoom"></span></div><div id="arch-text"></div></div>
+<div class="arch-vp" id="archvp"></div>
+</div>
 <div class="quad" id="quadrant"></div>
 <div class="detail" id="detail"><div class="empty">Click a file to see its blast radius</div></div>
 </div>
@@ -309,6 +345,7 @@ const FILES=/*__FILES__*/[];
 const STATS=/*__STATS__*/{};
 const ACTIONS=/*__ACTIONS__*/[];
 const ARCH=/*__ARCH__*/{};
+const UNITS=/*__UNITS__*/{};
 const C={critical:'#EE0000',high:'#E85D75',medium:'#D4874D',low:'#2D8A2D'};
 const QUAD={
   'fragile-critical':{label:'Fragile and critical',guide:'likely to break and costly when it does: senior review, add tests first'},
@@ -614,7 +651,7 @@ function setMode(mode,btn){
   btn.classList.add('on');
   document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
   document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
-  document.getElementById('arch').style.display=mode==='arch'?'block':'none';
+  document.getElementById('arch').style.display=mode==='arch'?'flex':'none';
   document.getElementById('quadrant').style.display=mode==='quadrant'?'block':'none';
   rerender();
 }
@@ -713,19 +750,24 @@ function rerender(){
   else renderExplorer();
 }
 
-// Architecture view: directory nodes in dependency layers. Entry points on
-// top, foundations at the bottom; arrows point from importer to dependency.
-let archSel=null;
-function archLayout(){
-  const NODE_H=50,GAP_X=28,GAP_Y=84,PAD=24;
-  const maxLines=Math.max(1,...ARCH.nodes.map(n=>n.lines));
-  const width=n=>Math.round(130+110*Math.sqrt(n.lines/maxLines));
-  const maxLevel=Math.max(0,...ARCH.nodes.map(n=>n.level));
+// Architecture view: nodes in dependency layers. Entry points on top,
+// foundations at the bottom; arrows point from importer to dependency.
+// Grouped by package (directory) or by runtime unit (binaries and scripts,
+// with shared libraries as a band below). Wheel or pinch zooms, drag pans.
+let archSel=null,archEdgeSel=null,archGroup='package',archLast=null,archDragged=false;
+const archView={k:1,tx:0,ty:0,fit:true};
+function archData(){return archGroup==='unit'?UNITS:ARCH}
+function archLabel(n){return n.label||(n.id==='.'?'(root)':n.id)}
+function archLayout(G){
+  const NODE_H=50,GAP_X=28,GAP_Y=84,GAP_SUB=30,PAD=28;
+  const maxLines=Math.max(1,...G.nodes.map(n=>n.lines));
+  const width=n=>Math.round(Math.max(130+110*Math.sqrt(n.lines/maxLines),Math.min(300,archLabel(n).length*7.4+56)));
+  const maxLevel=Math.max(0,...G.nodes.map(n=>n.level));
   const layers=[];
-  for(let l=0;l<=maxLevel;l++)layers.push(ARCH.nodes.filter(n=>n.level===l));
+  for(let l=0;l<=maxLevel;l++)layers.push(G.nodes.filter(n=>n.level===l));
   const nbrs={};
-  ARCH.nodes.forEach(n=>nbrs[n.id]=[]);
-  ARCH.edges.forEach(e=>{if(nbrs[e.from]&&nbrs[e.to]){nbrs[e.from].push(e.to);nbrs[e.to].push(e.from)}});
+  G.nodes.forEach(n=>nbrs[n.id]=[]);
+  G.edges.forEach(e=>{if(nbrs[e.from]&&nbrs[e.to]){nbrs[e.from].push(e.to);nbrs[e.to].push(e.from)}});
   // Barycenter sweeps to reduce crossings; nodes arrive hottest-first.
   const pos={};
   layers.forEach(L=>L.forEach((n,i)=>pos[n.id]=i));
@@ -741,31 +783,66 @@ function archLayout(){
     }
   }
   const rowW=L=>L.reduce((s,n)=>s+width(n),0)+GAP_X*Math.max(0,L.length-1);
-  const W=Math.max(...layers.map(rowW),300)+PAD*2;
+  // Wrap wide layers into several rows so the graph stays near screen shape.
+  const MAX_W=Math.max(1500,...G.nodes.map(width));
+  const rows=[];
+  for(let li=maxLevel;li>=0;li--){
+    let row=[];
+    for(const n of layers[li]){
+      if(row.length&&rowW(row.concat([n]))>MAX_W){rows.push({li,row});row=[]}
+      row.push(n);
+    }
+    rows.push({li,row});
+  }
+  const W=Math.max(...rows.map(r=>rowW(r.row)),300)+PAD*2;
   const boxes={};
-  layers.forEach((L,li)=>{
-    let x=PAD+(W-PAD*2-rowW(L))/2;
-    const y=PAD+(maxLevel-li)*(NODE_H+GAP_Y);
-    L.forEach(n=>{boxes[n.id]={n,x,y,w:width(n),h:NODE_H};x+=width(n)+GAP_X});
+  let y=PAD;
+  rows.forEach((r,i)=>{
+    if(i>0)y+=NODE_H+(rows[i-1].li===r.li?GAP_SUB:GAP_Y);
+    let x=PAD+(W-PAD*2-rowW(r.row))/2;
+    r.row.forEach(n=>{boxes[n.id]={n,x,y,w:width(n),h:NODE_H};x+=width(n)+GAP_X});
   });
-  return {boxes,W,H:PAD*2+(maxLevel+1)*NODE_H+maxLevel*GAP_Y};
+  return {boxes,W,H:y+NODE_H+PAD};
+}
+
+function setGroup(g,btn){
+  archGroup=g;archSel=null;archEdgeSel=null;archView.fit=true;renderArch();
 }
 
 function renderArch(){
-  const el=document.getElementById('arch');
-  if(!ARCH.nodes||!ARCH.nodes.length){el.innerHTML='<div class="empty">No files in heatmap</div>';return}
-  const {boxes,W,H}=archLayout();
-  const visible=new Set(getFiltered().map(f=>f.dir));
+  const G=archData(),unit=archGroup==='unit';
+  const vp=document.getElementById('archvp'),txt=document.getElementById('arch-text');
+  document.querySelectorAll('.arch-bar [data-g]').forEach(b=>b.classList.toggle('on',b.dataset.g===archGroup));
+  if(!G.nodes||!G.nodes.length){
+    archLast=null;txt.innerHTML='';
+    vp.innerHTML='<div class="empty">'+(unit?'No runtime units: no Rust bins, Go main packages, package.json bin or start scripts, or Python scripts were found (or the heatmap predates units: re-run highstakes analyze).':'No files in heatmap')+'</div>';
+    return;
+  }
+  archLast=archLayout(G);
+  const {boxes,W,H}=archLast;
+  const visible=new Set(getFiltered().map(f=>unit?f.unit_node:f.dir));
   const linked=new Set();
-  if(archSel){linked.add(archSel);ARCH.edges.forEach(e=>{if(e.from===archSel)linked.add(e.to);if(e.to===archSel)linked.add(e.from)})}
-  let s='<svg width="'+W+'" height="'+H+'" xmlns="http://www.w3.org/2000/svg">';
-  s+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0L10,5L0,10z"/></marker></defs>';
-  for(const e of ARCH.edges){
+  const [eFrom,eTo]=archEdgeSel?archEdgeSel.split('\n'):[null,null];
+  if(archSel){linked.add(archSel);G.edges.forEach(e=>{if(e.from===archSel)linked.add(e.to);if(e.to===archSel)linked.add(e.from)})}
+  if(archEdgeSel){linked.add(eFrom);linked.add(eTo)}
+  const focus=archSel||archEdgeSel;
+  let s='<svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">';
+  s+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,0L10,5L0,10z"/></marker></defs><g id="archg">';
+  if(unit){
+    const sh=Object.values(boxes).filter(b=>b.n.kind==='shared');
+    if(sh.length){
+      const y0=Math.min(...sh.map(b=>b.y))-26,y1=Math.max(...sh.map(b=>b.y+b.h))+12;
+      s+='<rect class="band" x="8" y="'+y0+'" width="'+(W-16)+'" height="'+(y1-y0)+'" rx="8"/>';
+      s+='<text class="band-label" x="18" y="'+(y0+15)+'">Shared libraries: linked by two or more units</text>';
+    }
+    s+='<text class="band-label" x="18" y="16">Runtime units: entry points and the code only they link</text>';
+  }
+  for(const e of G.edges){
     const a=boxes[e.from],b=boxes[e.to];
     if(!a||!b)continue;
     const x1=a.x+a.w/2,x2=b.x+b.w/2;
     let y1,y2,d;
-    if(a.y===b.y){ // same layer (import cycle): arc above
+    if(a.y===b.y){ // same layer (import cycle, or a unit linking another unit): arc above
       y1=a.y;y2=b.y;const lift=Math.min(60,20+Math.abs(x2-x1)/6);
       d='M'+x1+','+y1+' C'+x1+','+(y1-lift)+' '+x2+','+(y2-lift)+' '+x2+','+y2;
     }else{
@@ -775,34 +852,94 @@ function renderArch(){
       d='M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2;
     }
     const sw=(1+Math.log2(e.count)).toFixed(2);
-    const hl=archSel&&(e.from===archSel||e.to===archSel);
-    const dim=archSel&&!hl;
-    s+='<g class="ae'+(hl?' hl':'')+(dim?' dim':'')+'"><path d="'+d+'" stroke-width="'+sw+'" marker-end="url(#ah)"/>';
+    const esel=archEdgeSel===e.from+'\n'+e.to;
+    const hl=esel||(archSel&&(e.from===archSel||e.to===archSel));
+    const dim=focus&&!hl;
+    s+='<g class="ae'+(hl?' hl':'')+(esel?' esel':'')+(dim?' dim':'')+'" data-from="'+attr(e.from)+'" data-to="'+attr(e.to)+'"><path d="'+d+'" stroke-width="'+sw+'" marker-end="url(#ah)"/><path class="ae-hit" d="'+d+'"/>';
     s+='<text x="'+((x1+x2)/2+4)+'" y="'+((y1+y2)/2-(a.y===b.y?30:0))+'">'+e.count+'</text>';
-    s+='<title>'+e.count+' file(s) in '+e.from+' import '+e.to+'</title></g>';
+    s+='<title>'+e.count+' file(s) in '+html(archLabel(a.n))+' import '+html(archLabel(b.n))+' ('+e.links_total+' file links). Click for the links.</title></g>';
   }
   for(const id in boxes){
     const {n,x,y,w,h}=boxes[id];
     const c=C[n.impact_tier||n.tier]||C.low;
-    const dim=(!visible.has(n.id))||(archSel&&!linked.has(n.id));
-    const hot=n.hottest.split('/').pop();
-    const score=n.max_impact?n.max_impact:n.max_heat;
+    const dim=(!visible.has(n.id))||(focus&&!linked.has(n.id));
+    const score=n.max_impact?n.max_impact:Math.max(0,n.max_heat);
+    let meta;
+    if(unit)meta=n.kind==='unit'?(n.placement?'inferred: '+n.placement:n.files+' own files · no placement found'):n.files+' files';
+    else meta=(n.hottest||'').split('/').pop()+' · '+n.files+' files'+(n.likely>0?'':' · '+n.lines+' lines');
     s+='<g class="an'+(archSel===n.id?' sel':'')+(dim?' dim':'')+'" data-dir="'+attr(n.id)+'">';
     if(n.likely>0)s+='<rect class="an-frag" x="'+(x-4)+'" y="'+(y-4)+'" width="'+(w+8)+'" height="'+(h+8)+'" rx="9"/>';
     s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" fill="'+c+'2E" stroke="'+c+'"/>';
-    s+='<text class="an-dir" x="'+(x+10)+'" y="'+(y+20)+'">'+html(clip(n.id==='.'?'(root)':n.id,w-50,7.2))+'</text>';
+    s+='<text class="an-dir" x="'+(x+10)+'" y="'+(y+20)+'">'+html(clip(archLabel(n),w-50,7.2))+'</text>';
     s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+20)+'" text-anchor="end" fill="'+c+'">'+score+'</text>';
-    const meta=n.files+' files'+(n.likely>0?'':' · '+n.lines+' lines');
-    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(hot+' · '+meta,w-(n.likely>0?70:20),6))+'</text>';
+    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(meta,w-(n.likely>0?70:20),6))+'</text>';
     if(n.likely>0)s+='<text class="an-likely" x="'+(x+w-10)+'" y="'+(y+38)+'" text-anchor="end">'+n.likely+' likely</text>';
-    s+='<title>'+html(n.id)+'\nmax impact: '+(n.max_impact||'not assessed')+'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')\n'+n.likely+' file(s) likely to need fixes\n'+n.files+' files, '+n.lines+' lines</title></g>';
+    const members=unit&&n.members?'\ncomponents: '+n.members.join(', '):'';
+    const place=unit&&n.placement?'\ninferred placement: '+n.placement:'';
+    s+='<title>'+html(archLabel(n))+members+place+'\nmax impact: '+(n.max_impact||'not assessed')+(n.hottest?'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')':'')+'\n'+n.likely+' file(s) likely to need fixes\n'+n.files+' files, '+n.lines+' lines</title></g>';
   }
-  s+='</svg>';
+  s+='</g></svg>';
   const legend='<div class="arch-legend">'+['critical','high','medium','low'].map(t=>'<span><i style="border-color:'+C[t]+';background:'+C[t]+'2E"></i>'+t+' impact</span>').join('')+
     '<span><i class="frag"></i>contains files likely to need fixes</span></div>';
-  el.innerHTML='<div class="arch-hint">Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines; color = max impact if a file breaks (heat tier when not assessed); number = max impact. A dashed outline marks packages with files likely to need fixes. Click a package to list its files.'+legend+'</div>'+s;
-  el.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>selectDir(g.dataset.dir)));
+  const nav=' Click an arrow for the file links behind it. Wheel or pinch to zoom, drag to pan.';
+  txt.innerHTML=(unit?
+    'Boxes on top are runtime units: entry points found from manifests and main files, holding the components only they link. The band below holds shared libraries linked by two or more units. Placement labels are inferred from Dockerfiles, Helm values and Kubernetes manifests, not observed. Arrows point from importer to dependency (label = importing files); color = max impact; number = max impact.'+(UNITS.unlinked?' '+UNITS.unlinked+' non-test file(s) are linked by no unit.':''):
+    'Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines; color = max impact if a file breaks (heat tier when not assessed); number = max impact. A dashed outline marks packages with files likely to need fixes. Click a package to list its files.')+nav+legend;
+  vp.innerHTML=s;
+  vp.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectDir(g.dataset.dir)}));
+  vp.querySelectorAll('.ae').forEach(g=>g.addEventListener('click',()=>{if(!archDragged)selectEdge(g.dataset.from,g.dataset.to)}));
+  if(archView.fit)archFit();else archApply();
 }
+
+function archApply(){
+  const g=document.getElementById('archg');
+  if(g)g.setAttribute('transform','translate('+archView.tx.toFixed(1)+','+archView.ty.toFixed(1)+') scale('+archView.k.toFixed(4)+')');
+  const z=document.getElementById('arch-zoom');
+  if(z)z.textContent=Math.round(archView.k*100)+'%';
+}
+// archFit scales the whole graph into the visible part of the viewport
+// (never above 100%).
+function archFit(){
+  const r=document.getElementById('archvp').getBoundingClientRect();
+  const h=Math.min(r.height,window.innerHeight-Math.max(0,r.top));
+  if(!archLast||!r.width||h<=0){archView.fit=true;return}
+  const k=Math.min(r.width/archLast.W,h/archLast.H,1);
+  archView.k=k;archView.tx=(r.width-archLast.W*k)/2;archView.ty=Math.max(0,(h-archLast.H*k)/2);
+  archView.fit=false;archApply();
+}
+function archReset(){archView.k=1;archView.tx=0;archView.ty=0;archView.fit=false;archApply()}
+function archZoomAt(f,px,py){
+  const k2=Math.min(4,Math.max(0.03,archView.k*f));
+  archView.tx=px-(px-archView.tx)*k2/archView.k;archView.ty=py-(py-archView.ty)*k2/archView.k;
+  archView.k=k2;archView.fit=false;archApply();
+}
+function archZoomBy(f){const r=document.getElementById('archvp').getBoundingClientRect();archZoomAt(f,r.width/2,r.height/2)}
+(function(){
+  const vp=document.getElementById('archvp');
+  const pts=new Map();let start=null,pinch=null;
+  vp.addEventListener('wheel',e=>{e.preventDefault();const r=vp.getBoundingClientRect();archZoomAt(Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015)),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+  vp.addEventListener('pointerdown',e=>{
+    pts.set(e.pointerId,{x:e.clientX,y:e.clientY});archDragged=false;
+    if(pts.size===1)start={x:e.clientX,y:e.clientY,tx:archView.tx,ty:archView.ty};
+    if(pts.size===2){const [a,b]=[...pts.values()];pinch={d:Math.hypot(a.x-b.x,a.y-b.y)||1,k:archView.k};start=null}
+  });
+  vp.addEventListener('pointermove',e=>{
+    if(!pts.has(e.pointerId))return;
+    pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size===2&&pinch){
+      const [a,b]=[...pts.values()],r=vp.getBoundingClientRect();
+      archZoomAt(pinch.k*Math.hypot(a.x-b.x,a.y-b.y)/pinch.d/archView.k,(a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top);
+      archDragged=true;return;
+    }
+    if(!start)return;
+    const dx=e.clientX-start.x,dy=e.clientY-start.y;
+    if(Math.abs(dx)+Math.abs(dy)>4){archDragged=true;vp.classList.add('panning')}
+    if(archDragged){archView.tx=start.tx+dx;archView.ty=start.ty+dy;archView.fit=false;archApply()}
+  });
+  const end=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size){start=null;vp.classList.remove('panning')}};
+  ['pointerup','pointercancel','pointerleave'].forEach(t=>vp.addEventListener(t,end));
+  if(!(UNITS.nodes||[]).length){const b=document.querySelector('.arch-bar [data-g="unit"]');b.disabled=true;b.title='No runtime units in this heatmap'}
+})();
 
 // Quadrant view: x = likelihood of needing fixes, y = impact if it breaks.
 let quadSel=null;
@@ -853,25 +990,67 @@ function clip(t,px,charW){const n=Math.max(4,Math.floor(px/charW));return t.leng
 function html(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function attr(t){return html(t).replace(/"/g,'&quot;')}
 
+// fileRow renders a clickable file; with axes it adds impact, likelihood and quadrant.
+function fileRow(f,label,axes){
+  const fc=C[f.tier]||C.low;
+  const meta=axes?'<span class="fmeta">I '+f.impact+(f.impact_assessed?'':'~')+' · L '+f.likelihood+(f.quadrant?' · '+QUAD[f.quadrant].label:'')+'</span>':'<span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span>';
+  return '<div class="ex-row ex-file" data-path="'+attr(f.path)+'"><span class="ftier" style="background:'+fc+'"></span><span class="fname">'+html(label)+'</span>'+meta+'</div>';
+}
+
 function selectDir(dir){
-  archSel=archSel===dir?null:dir;
+  archSel=archSel===dir?null:dir;archEdgeSel=null;
   renderArch();
   if(!archSel)return;
-  const n=ARCH.nodes.find(x=>x.id===dir);
-  const c=C[n.tier]||C.low;
-  const files=FILES.filter(f=>f.dir===dir).sort((a,b)=>b.heat_score-a.heat_score);
-  const deps=ARCH.edges.filter(e=>e.from===dir).map(e=>e.to);
-  const users=ARCH.edges.filter(e=>e.to===dir).map(e=>e.from);
-  let h='<h3>'+html(dir==='.'?'(root)':dir)+'/</h3>';
-  h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+n.tier+' '+n.max_heat+'</span>';
-  h+='<div class="sec"><div class="sec-title">Files, hottest first</div><div class="flist">';
-  for(const f of files){
-    const fc=C[f.tier]||C.low;
-    h+='<div class="ex-row ex-file" data-path="'+attr(f.path)+'"><span class="ftier" style="background:'+fc+'"></span><span class="fname">'+html(f.name)+'</span><span class="fheat" style="color:'+fc+'">'+f.heat_score+'</span></div>';
+  const G=archData(),unit=archGroup==='unit';
+  const n=G.nodes.find(x=>x.id===dir);
+  const c=C[unit?(n.impact_tier||n.tier):n.tier]||C.low;
+  const files=FILES.filter(f=>!f.test&&(unit?f.unit_node===dir:f.dir===dir));
+  if(unit)files.sort((a,b)=>b.impact-a.impact||b.likelihood-a.likelihood||a.path.localeCompare(b.path));
+  else files.sort((a,b)=>b.heat_score-a.heat_score);
+  const name=id=>{const m=G.nodes.find(x=>x.id===id);return m?archLabel(m):id};
+  const deps=G.edges.filter(e=>e.from===dir).map(e=>name(e.to));
+  const users=G.edges.filter(e=>e.to===dir).map(e=>name(e.from));
+  const sec=(t,b)=>'<div class="sec"><div class="sec-title">'+t+'</div>'+b+'</div>';
+  const list=xs=>'<div class="reason">'+(xs&&xs.length?xs.map(html).join(', '):'none')+'</div>';
+  let h='<h3>'+html(archLabel(n))+(unit?'':'/')+'</h3>';
+  if(!unit){
+    h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+n.tier+' '+n.max_heat+'</span>';
+  }else{
+    h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+(n.kind==='unit'?'runtime unit':'shared library')+' · impact '+(n.max_impact||'n/a')+'</span>';
+    const u=(UNITS.units||[]).find(x=>'u:'+x.name===dir);
+    if(u){
+      h+=sec('Entry point','<div class="reason">'+html(u.entry)+' ('+u.kind+', '+html(u.evidence)+')</div>');
+      h+=sec('Inferred placement',(u.inferred_placement||[]).length?u.inferred_placement.map(p=>'<div class="reason">'+html(p.detail)+' <span class="fmeta">'+html(p.evidence)+'</span></div>').join(''):'<div class="reason">none found in Dockerfiles, Helm values or Kubernetes manifests</div>');
+      h+=sec('Links in total','<div class="reason">'+u.files+' files across '+u.components.length+' components; max impact '+u.max_impact+(u.impact_assessed?'':' (estimate)')+', '+u.fragile_critical+' fragile-critical</div>');
+      h+=sec('Own components',list(n.members));
+      h+=sec('Shared libraries it links',list(u.shared));
+    }else{
+      h+=sec('Linked by',list((UNITS.units||[]).filter(x=>(x.shared||[]).includes(n.label)).map(x=>x.name)));
+    }
   }
-  h+='</div></div>';
-  h+='<div class="sec"><div class="sec-title">Imports</div><div class="reason">'+(deps.length?deps.map(html).join(', '):'none')+'</div></div>';
-  h+='<div class="sec"><div class="sec-title">Imported by</div><div class="reason">'+(users.length?users.map(html).join(', '):'none')+'</div></div>';
+  h+=sec(unit?'Files, most impactful first':'Files, hottest first','<div class="flist">'+files.map(f=>fileRow(f,unit?f.path:f.name,unit)).join('')+'</div>');
+  h+=sec('Imports',list(deps));
+  h+=sec('Imported by',list(users));
+  const d=document.getElementById('detail');
+  d.innerHTML=h;
+  d.querySelectorAll('[data-path]').forEach(r=>r.addEventListener('click',()=>selectFile(r.dataset.path)));
+}
+
+// selectEdge lists the file-level imports behind an arrow.
+function selectEdge(from,to){
+  const G=archData();
+  const e=G.edges.find(x=>x.from===from&&x.to===to);
+  if(!e)return;
+  const key=from+'\n'+to;
+  archEdgeSel=archEdgeSel===key?null:key;archSel=null;
+  renderArch();
+  if(!archEdgeSel)return;
+  const name=id=>{const m=G.nodes.find(x=>x.id===id);return m?archLabel(m):id};
+  const byPath={};FILES.forEach(f=>byPath[f.path]=f);
+  const side=p=>{const f=byPath[p],fc=f?(C[f.tier]||C.low):C.low;return '<span class="elink-file" data-path="'+attr(p)+'"><span class="ftier" style="background:'+fc+'"></span>'+html(p)+(f?' <span class="fmeta">I '+f.impact+'</span>':'')+'</span>'};
+  let h='<h3>'+html(name(from))+' &#8594; '+html(name(to))+'</h3>';
+  h+='<div class="reason">'+e.count+' importing file(s), '+e.links_total+' file link(s)'+(e.links_total>e.links.length?', showing the first '+e.links.length:'')+'.</div>';
+  h+='<div class="sec"><div class="sec-title">File links: importer &#8594; imported</div>'+e.links.map(([a,b])=>'<div class="elink">'+side(a)+'<span class="earrow">&#8594;</span>'+side(b)+'</div>').join('')+'</div>';
   const d=document.getElementById('detail');
   d.innerHTML=h;
   d.querySelectorAll('[data-path]').forEach(r=>r.addEventListener('click',()=>selectFile(r.dataset.path)));

@@ -35,7 +35,8 @@ highstakes analyze
         ├── Likelihood: churn, complexity, centrality, path keywords, incidents
         ├── Impact: LLM blast radius (an estimate without the LLM)
         ├── Tier from the likelihood x impact quadrant (from heat without the LLM)
-        └── Calculate review requirements per tier
+        ├── Calculate review requirements per tier
+        └── Runtime units: entry points, what each links, inferred placement
 ```
 
 ## LLM Assessment
@@ -154,6 +155,30 @@ A test sits "next to" a file when one of these exists: `foo_test.go`; `test_foo.
 | `knowledge-spread` | all but low | 5 or more authors and authors in the top 10% |
 
 Owners come from the same history pass as [Ownership](#ownership), run once during `analyze`. If git fails, actions stay generic and `analyze` prints a warning.
+
+## Runtime Units
+
+Imports say which code calls which; they do not say which code runs together. Two crates can share a library and still run in separate pods. Runtime units add that missing layer: `analyze` finds every deployable entry point and records what each one links.
+
+Entry points, per language (test files and excluded directories are skipped):
+
+| Language | Entry point | Name |
+|----------|-------------|------|
+| Rust | `[[bin]]` tables in `Cargo.toml`, else `src/main.rs` and `src/bin/*.rs` | the bin name |
+| Go | a directory whose files declare `package main` and `func main()` | the directory (the module for a root `main`) |
+| JS/TS | `package.json` `bin` (string or object), else the file a `start` script runs; `dist/x.js` maps to `src/x.ts` when only the source exists | the bin key or package name |
+| Python | `[project.scripts]` or `[tool.poetry.scripts]` in `pyproject.toml`, and `__main__.py` | the script name or directory |
+
+Each unit links every non-test file reachable from its entry file through the import graph. A Go unit starts from its whole `main` package (Go builds directories) and a Rust bin from its crate's `src/lib.rs` too (a bin links its own library). Files are grouped into components (crate, package, Python package, Go module, or the `cmd/`, `internal/`, `pkg/` package roots). A component linked by two or more units is **shared**, unless a unit owns it: a unit owns its home component when it is the only unit there or the one named after it, so a crate's main binary keeps its crate even when a helper bin or another binary links it.
+
+Placement is inferred, best effort, and tagged with `file:line` evidence:
+
+- a Dockerfile or Containerfile whose `ENTRYPOINT` or `CMD` runs a program named like the unit (shell wrappers such as `sh -c` are skipped);
+- a Helm values file (any YAML under a directory with `Chart.yaml`) or Kubernetes manifest whose `image:` or `repository:` names the unit: the image name equals the unit name or the unit name ends with `-<image name>` (`openshell/sandbox` matches `openshell-sandbox`). Templated values (`{{ ... }}`) and files under `tests/` are skipped.
+
+Units are stored in the heatmap `metadata.units`; every file gets `component` and `units` (the units that link it).
+
+**Limits.** Units come from entry points and imports, not from runtime truth. A unit lists what a binary can execute, not what a deployment actually starts: feature flags, `cfg` gates, dynamic loading, plugins, RPC between processes and configuration-selected drivers are invisible, and an import the resolver misses drops the code it leads to. Placement says where a binary is packaged, not where or how many copies run; a Helm chart that picks images at install time, or a Dockerfile that runs a script, yields no hint. Examples and helper binaries are units too when they declare an entry point. Treat units as a map to check against the deployment, not as the deployment.
 
 ## Static Analysis by Language
 

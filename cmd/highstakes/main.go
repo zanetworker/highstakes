@@ -734,6 +734,12 @@ var agentContextCmd = &cobra.Command{
 						"--tier":  flagDef("enum", "", "Filter by tier. Values: critical, high, medium, low"),
 						"--limit": flagDef("int", 0, "Max files to return (0 = all)"),
 					},
+					"subcommands": map[string]interface{}{
+						"units": map[string]interface{}{
+							"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
+							"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+						},
+					},
 				},
 				"pr": map[string]interface{}{
 					"description": "Assess pull request risk",
@@ -1016,6 +1022,8 @@ func init() {
 	listCmd.Flags().String("tier", "", "Filter by tier: critical, high, medium, low")
 	listCmd.Flags().Int("limit", 0, "Max files to return (0 = all)")
 	listCmd.Flags().String("sort", "heat", "Sort by: heat, likelihood, impact")
+	listUnitsCmd.Flags().Bool("json", false, "Output as JSON")
+	listCmd.AddCommand(listUnitsCmd)
 	rootCmd.AddCommand(listCmd)
 
 	prCheckCmd.Flags().String("base", "main", "Base branch to compare against")

@@ -210,8 +210,28 @@ Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axe
 | `tier` | From the quadrant when assessed, else from `heat_score` |
 | `explanation` | `headline`, `impact_high`, `likely`, `impact_reasons`, `likelihood_reasons` and `actions` (each `{id, text}`, most important first) |
 | `factors.test_coverage.has_test_file` | `true` or `false` when a test sits next to the file by its language's convention; omitted for languages without one |
+| `component` | The crate, package or module the file belongs to |
+| `units` | Runtime units that link the file (see `list units`); omitted when none does |
 
 The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (impact counted as impactful: `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
+
+## highstakes list units
+
+List runtime units: the deployable entry points `analyze` found (Rust bins, Go `main` packages, `package.json` bin and start scripts, Python scripts and `__main__.py`) and what each links through the import graph. Sorted by max impact, then name.
+
+```sh
+highstakes list units [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | `false` | Output as JSON |
+
+Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when estimated), fragile-critical file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), and each inferred placement with its evidence (`none found` when there is none).
+
+JSON: `{"units": [...], "count": N}`. Each unit has `name`, `kind` (`rust-bin`, `go-main`, `node-bin`, `node-start`, `python-script`, `python-main`), `entry`, `evidence`, `home` (the entry's component), `components` (home first), `shared`, `files`, `lines`, `max_impact`, `impact_assessed`, `fragile_critical` and `inferred_placement` (each `{kind, detail, evidence}`, kind `dockerfile`, `helm` or `k8s`). The same list is stored in the heatmap `metadata.units`.
+
+A repo with no entry points (a library) prints a note and exits 0; so does a heatmap written before units existed (run `analyze` again). **Exit code 4** if there is no heatmap. See [How It Works](how-it-works.md#runtime-units) for detection rules and limits.
 
 ## highstakes pr check
 
@@ -380,7 +400,9 @@ highstakes dashboard [--output <path>] [--no-open]
 
 The dashboard has four views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support tier filtering, search, and a detail panel with both axes, the quadrant guidance and the blast radius reasoning.
 
-The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. The layout is computed in the page (layered, with barycenter ordering to reduce crossings), so the HTML stays self-contained.
+The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. Clicking an arrow lists the file-level imports behind it (importer -> imported, with each file's impact; at most 200 per arrow). The layout is computed in the page (layered, with barycenter ordering to reduce crossings; layers wider than about 1500px wrap into extra rows), so the HTML stays self-contained. The `-`, `+`, **Fit** and **1:1** buttons, the mouse wheel and trackpad or touch pinch zoom; drag to pan. The view fits the screen when first opened.
+
+**Group by: Unit** redraws the view by runtime unit (see `list units`): a top row of unit boxes, each holding the components only that unit links, and a band below with the shared libraries, layered by their own imports. Unit boxes are coloured by the max impact of their own files, carry the same fragility marker, and show the inferred placement (Dockerfile name, Helm values key, Kubernetes manifest). Clicking a unit shows its entry point and evidence, placement evidence, totals across everything it links, own components, shared libraries and files with impact, likelihood and quadrant; clicking a shared library shows the units that link it. The hint line counts non-test files no unit links. The toggle is disabled when the heatmap has no units.
 
 The quadrant view plots every non-test file with likelihood on x and impact on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its review guidance. Faded dots have an estimated impact. Click a dot to open the file in the detail panel.
 
