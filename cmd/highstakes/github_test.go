@@ -74,6 +74,9 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 			"labels/highstakes:signed-off",               // ... by deleting the label
 			"collaborators/$actor/permission",            // only write access signs off
 			"admin|maintain|write",
+			"highstakes-signed-off-sha",            // sign-off bound to the reviewed commit
+			"github.event.pull_request.head.sha",   // ... compared with the current head
+			"steps.signoff.outputs.sha",            // ... and recorded in the comment
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)

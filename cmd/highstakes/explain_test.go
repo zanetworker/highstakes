@@ -104,7 +104,7 @@ func TestAttachPRActions(t *testing.T) {
 	for _, a := range risk.Checklist {
 		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
 	}
-	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open" {
+	if strings.Join(got, ",") != "senior-review=done,regression-tests=done,no-auto-merge=open,owner-review=open" {
 		t.Errorf("checklist = %v", got)
 	}
 	if len(risk.WorthDoing) != 1 || risk.WorthDoing[0].ID != "refactor" {
@@ -123,9 +123,13 @@ func TestAttachPRActions(t *testing.T) {
 			if len(fc.Actions) != 1 {
 				t.Errorf("busy.go carries %d before-merge actions, want 1", len(fc.Actions))
 			}
+		case "net/new.rs": // unscored, inherits Protect: needs a review
+			if len(fc.Actions) != 1 || fc.Actions[0].ID != "owner-review" {
+				t.Errorf("new.rs actions = %+v, want one owner review", fc.Actions)
+			}
 		default:
 			if len(fc.Actions) != 0 {
-				t.Errorf("%s: routine and unscored files carry no actions: %+v", fc.Path, fc.Actions)
+				t.Errorf("%s: routine files and tests carry no actions: %+v", fc.Path, fc.Actions)
 			}
 		}
 	}
@@ -182,5 +186,34 @@ func TestGet_LegacyHeatmapShowsActions(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestAttachPRActions_UnscoredCriticalFileBlocks(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	for _, tt := range []struct {
+		name      string
+		tier      types.Tier
+		signedOff bool
+		want      string
+	}{
+		{"new file inheriting Harden now needs a senior review", types.TierCritical, false, "senior-review=open"},
+		{"new file inheriting Protect needs an owner review", types.TierHigh, false, "owner-review=open"},
+		{"the sign-off label satisfies it", types.TierCritical, true, "senior-review=done"},
+		{"a routine new file adds nothing", types.TierLow, false, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/new.go", Tier: tt.tier, Unscored: true, IsNew: true}}}
+			c := buildChange([]prscore.FileChange{{Path: "core/new.go", LinesAdded: 5, IsNew: true}}, hm, nil, nil)
+			c.SignedOff = tt.signedOff
+			attachPRActions(risk, hm, c)
+			var got []string
+			for _, a := range risk.Checklist {
+				got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+			}
+			if strings.Join(got, ",") != tt.want {
+				t.Errorf("checklist = %v, want %q", got, tt.want)
+			}
+		})
 	}
 }

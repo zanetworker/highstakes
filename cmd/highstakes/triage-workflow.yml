@@ -56,8 +56,10 @@ jobs:
           echo "logins=$logins" >> "$GITHUB_OUTPUT"
 
       # The highstakes:signed-off label counts only when someone with write
-      # access added it, and a new push clears it: new commits need a fresh
-      # review before the sign-off ticks the checklist again.
+      # access added it, and only for the commit it was given on: the run that
+      # sees the label added records the head SHA in the comment, and later
+      # runs trust the label only while the head is still that SHA. A new push
+      # also removes the label, so new commits need a fresh review.
       - name: Verify sign-off
         id: signoff
         env:
@@ -65,26 +67,42 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           ACTION: ${{ github.event.action }}
+          ADDED: ${{ github.event.label.name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
-          signed=false
+          signed=false; sha=
           case ",$LABELS," in
             *,highstakes:signed-off,*)
               if [ "$ACTION" = "synchronize" ]; then
                 gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
-                echo "New commits pushed: the sign-off label was removed; review again and re-add it."
+                echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
               else
                 actor=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
                   --jq '.[] | select(.event == "labeled" and .label.name == "highstakes:signed-off") | .actor.login' | tail -n1)
                 perm=$(gh api "repos/$REPO/collaborators/$actor/permission" --jq .permission 2>/dev/null || echo none)
                 case "$perm" in
-                  admin|maintain|write) signed=true ;;
+                  admin|maintain|write)
+                    if [ "$ACTION" = "labeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
+                      signed=true; sha=$HEAD_SHA
+                    else
+                      recorded=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                        --jq '.[] | select(.body | contains("<!-- highstakes-triage -->")) | .body' \
+                        | sed -n 's/.*<!-- highstakes-signed-off-sha: \([0-9a-f]*\) -->.*/\1/p' | tail -n1)
+                      if [ -n "$recorded" ] && [ "$recorded" = "$HEAD_SHA" ]; then
+                        signed=true; sha=$HEAD_SHA
+                      else
+                        echo "The sign-off was given on another commit; review again and re-add the label."
+                      fi
+                    fi
+                    ;;
                   *) echo "Sign-off label added by $actor (permission: $perm) does not count: write access is required." ;;
                 esac
               fi
               ;;
           esac
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       # Exit 5 means the PR changes a Harden now file (--fail-on critical) and
       # before-merge items are still open. A maintainer with write access adds
@@ -108,12 +126,16 @@ jobs:
       - name: Post PR comment
         uses: actions/github-script@v9
         if: always()
+        env:
+          SIGNED_SHA: ${{ steps.signoff.outputs.sha }}
         with:
           script: |
             const fs = require('fs');
             if (!fs.existsSync('pr-comment.md')) return;
-            const body = fs.readFileSync('pr-comment.md', 'utf8');
+            let body = fs.readFileSync('pr-comment.md', 'utf8');
             if (!body.trim()) return;
+            // Bind the sign-off to the reviewed commit (read back by "Verify sign-off").
+            if (process.env.SIGNED_SHA) body += `\n<!-- highstakes-signed-off-sha: ${process.env.SIGNED_SHA} -->\n`;
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });

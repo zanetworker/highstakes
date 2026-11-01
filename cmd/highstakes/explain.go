@@ -145,7 +145,12 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 		fc := &risk.FilesChanged[i]
 		f, ok := hm.Files[fc.Path]
 		if !ok {
-			continue
+			// A new file that inherits a blocking tier was never assessed, so it
+			// still needs a review; without one the gate would read "all done".
+			if !fc.Unscored || !types.Blocking(fc.Posture()) || tour.IsTestFile(fc.Path) {
+				continue
+			}
+			f = unscoredReview(fc)
 		}
 		acts := explain.ForPR(f, c)
 		fc.Actions = nil
@@ -160,3 +165,18 @@ func attachPRActions(risk *types.PRRisk, hm *types.Heatmap, c explain.Change) {
 }
 
 var tierOrder = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}
+
+// unscoredReview is a stand-in record for a new, unassessed file that
+// inherits Harden now or Protect: one review item that approvals and the
+// sign-off label can satisfy like any other.
+func unscoredReview(fc *types.FileChange) *types.FileHeat {
+	id, who := "owner-review", "someone who knows its directory"
+	if fc.Posture() == "Harden now" {
+		id, who = "senior-review", "a senior owner of its directory"
+	}
+	return &types.FileHeat{Path: fc.Path, Explanation: &types.Explanation{Actions: []types.Action{{
+		ID: id, Scope: types.ScopeBeforeMerge,
+		Text:   "Review the new file `" + fc.Path + "` with " + who,
+		Signal: "new file: not scored yet, treated like its directory (" + fc.Posture() + ")",
+	}}}}
+}
