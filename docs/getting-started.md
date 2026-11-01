@@ -71,7 +71,7 @@ Every file gets a posture from two questions, "Will it break?" and "How bad if i
 
 **Stabilize** (tier medium): regression tests when fixes recur, refactor what you touch. Never blocks.
 
-**Routine** (tier low): normal review; auto-merge allowed by policy. Don't spend senior engineer time here.
+**Routine** (tier low): normal review; agents may auto-merge here (autonomy L3) once the impact is AI-assessed. Don't spend senior engineer time here.
 
 ## Next Steps
 

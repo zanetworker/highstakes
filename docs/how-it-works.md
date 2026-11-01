@@ -107,7 +107,7 @@ The two questions are not equally backed, and `get`, the PR comment and the dash
 | Likely and impactful | Harden now | `fragile-critical` | CRITICAL | Senior owner sign-off, regression and contract tests, smaller PRs, auto-merge off |
 | Impactful, stable | Protect | `protect` | HIGH | Owner review, block auto-merge, tests before merge when none sit next to the file |
 | Likely, low impact | Stabilize | `watch` | MEDIUM | Regression tests when fixes recur, refactor what you touch; never blocks |
-| Neither | Routine | `low` | LOW | Normal review; auto-merge allowed by policy |
+| Neither | Routine | `low` | LOW | Normal review; agents may auto-merge (autonomy L3) |
 
 JSON keeps the `quadrant` values as stable machine IDs and adds `quadrant_label`; tier names stay as metadata and filters (`--tier`, `--fail-on`). The quadrant and its tier apply only to files whose impact was assessed. Other files keep the tier from their heat score, and `quadrant` is left out of the JSON.
 

@@ -122,7 +122,7 @@ func summary(verdict string, files []types.FileChange, hm *types.Heatmap) string
 		}
 	}
 	if verdict == "Routine" || len(top) == 0 {
-		return "No changed file is likely to break or costly if it does. Normal review; auto-merge allowed by policy."
+		return "No changed file is likely to break or costly if it does. Normal review."
 	}
 	names := "`" + top[0] + "` is"
 	switch {

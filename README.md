@@ -39,7 +39,7 @@ Each score is shown with its repo cutoff (top 20% of the repo; for "How bad", at
 |  | Will it break? low | Will it break? high |
 |---|---|---|
 | **How bad? high** | **Protect**: owner review, block auto-merge, tests before merge when none sit next to the file | **Harden now**: senior owner sign-off, regression and contract tests, smaller PRs, auto-merge off |
-| **How bad? low** | **Routine**: normal review, auto-merge allowed by policy | **Stabilize**: regression tests when fixes recur, refactor what you touch, a second reviewer for single-owner files; never blocks |
+| **How bad? low** | **Routine**: normal review; agents may auto-merge (autonomy L3) | **Stabilize**: regression tests when fixes recur, refactor what you touch, a second reviewer for single-owner files; never blocks |
 
 ## Quick Start
 

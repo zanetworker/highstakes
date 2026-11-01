@@ -77,7 +77,7 @@ var rules = []rule{
 		return fired{text: "Block auto-merge", signal: "Protect files never auto-merge"}, true
 	}},
 	{"light-review", beforeMerge, []types.Quadrant{routine}, func(signals) (fired, bool) {
-		return fired{text: "Normal review; auto-merge allowed by policy", signal: "Routine: neither likely to break nor costly"}, true
+		return fired{text: "Normal review", signal: "Routine: neither likely to break nor costly"}, true
 	}},
 
 	// Backlog: what to do about the file over time.

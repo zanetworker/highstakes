@@ -174,14 +174,14 @@ func TestActions_Rules(t *testing.T) {
 			hasnt:  []string{"single-owner"}},
 		{name: "routine stays quiet",
 			edit:  func(f *types.FileHeat) { f.Quadrant = types.QuadrantLow },
-			texts: map[string]string{"light-review": "Normal review; auto-merge allowed by policy"}},
+			texts: map[string]string{"light-review": "Normal review"}},
 		{name: "not assessed asks for an LLM run first",
 			edit:  func(f *types.FileHeat) { f.ImpactAssessed = false; f.Quadrant = "" },
 			has:   []string{"assess-impact", "split", "regression-tests"},
 			hasnt: []string{"senior-review", "codeowners", "no-auto-merge"}},
 		{name: "test file is routine",
 			edit:  func(f *types.FileHeat) { f.Path = "net/proxy_test.go" },
-			texts: map[string]string{"light-review": "Normal review; auto-merge allowed by policy"}},
+			texts: map[string]string{"light-review": "Normal review"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

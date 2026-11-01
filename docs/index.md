@@ -35,7 +35,7 @@ highstakes dashboard
 | Harden now (CRITICAL) | Likely and impactful | Senior owner sign-off, regression and contract tests, a smaller PR when the change is large, auto-merge off | Split oversized files, add a CODEOWNERS line, document invariants |
 | Protect (HIGH) | Impactful, stable | Owner review, tests when none sit next to the file, contract tests, block auto-merge | Add a CODEOWNERS line, open a test-gap issue |
 | Stabilize (MEDIUM) | Likely, low impact | Regression tests when fixes recur, refactor what you touch, a second reviewer for single-owner files; never blocks | Issues to cut complexity or spread ownership |
-| Routine (LOW) | Neither | Normal review; auto-merge allowed by policy | Nothing |
+| Routine (LOW) | Neither | Normal review; agents may auto-merge (autonomy L3) | Nothing |
 
 Likely means the top 20% of the repo by likelihood; impactful means impact in the top 20% of the repo's assessed files, and never below 61. Without an LLM, tiers come from the heat score (86, 61 and 31 thresholds).
 

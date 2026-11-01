@@ -106,6 +106,18 @@ func TestRender_RoutineGolden(t *testing.T) {
 }
 
 func TestRender_Rules(t *testing.T) {
+	t.Run("routine summary leaves auto-merge to the autonomy line", func(t *testing.T) {
+		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", LikelyCutoff: 33, ImpactThreshold: 78,
+			AutoMergeAllowed: false, AutonomyLevel: 1, AutonomyReason: "touches files whose impact is not AI-assessed",
+			FilesChanged: []types.FileChange{{Path: "a.go", Tier: types.TierLow}}}
+		out := Render(risk, &types.Heatmap{})
+		if strings.Contains(out, "auto-merge allowed") {
+			t.Errorf("summary claims auto-merge while the autonomy line forbids it:\n%s", out)
+		}
+		if !strings.Contains(out, "AI may auto-merge: no") {
+			t.Errorf("autonomy line missing:\n%s", out)
+		}
+	})
 	t.Run("huge PRs stay under GitHub's comment limit", func(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierCritical, Verdict: "Harden now", LikelyCutoff: 33, ImpactThreshold: 78}
 		hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
@@ -231,7 +243,7 @@ func TestRender_Rules(t *testing.T) {
 		risk := &types.PRRisk{Tier: types.TierLow, Verdict: "Routine", AutonomyLevel: 3, AutoMergeAllowed: true,
 			AutonomyReason: "every touched file is L3"}
 		out := Render(risk, &types.Heatmap{})
-		want := "Normal review; auto-merge allowed by policy.\n\nAI may auto-merge: yes (every touched file is L3)\n\n"
+		want := "Normal review.\n\nAI may auto-merge: yes (every touched file is L3)\n\n"
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q right after the summary:\n%s", want, out)
 		}
