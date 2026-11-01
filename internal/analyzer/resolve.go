@@ -150,25 +150,41 @@ func crateName(cargoToml string) string {
 	return strings.ReplaceAll(pkgName, "-", "_")
 }
 
-// rustSrcRoot returns the src dir of the crate whose module tree contains file.
-func (r *resolver) rustSrcRoot(file string) (string, bool) {
-	for dir := filepath.Dir(file); ; dir = filepath.Dir(dir) {
-		if r.exists(filepath.Join(dir, "Cargo.toml")) {
-			src := filepath.Join(dir, "src")
+// rustCrateRoot returns the module directory of the crate whose module tree
+// contains file, and the crate root file when it is not dir/lib.rs or
+// dir/main.rs. Each binary under src/bin/ is its own crate: src/bin/<name>.rs
+// is its root with modules beside it, src/bin/<name>/main.rs keeps its
+// modules in src/bin/<name>/. tests/, examples/ and benches/ are not resolved.
+func (r *resolver) rustCrateRoot(file string) (dir, root string, ok bool) {
+	for d := filepath.Dir(file); ; d = filepath.Dir(d) {
+		if r.exists(filepath.Join(d, "Cargo.toml")) {
+			src := filepath.Join(d, "src")
 			rel, err := filepath.Rel(src, file)
-			if err != nil || strings.HasPrefix(rel, "..") || strings.HasPrefix(rel, "bin"+string(filepath.Separator)) {
-				return "", false // tests/, examples/, benches/ and src/bin/ are their own crate roots
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return "", "", false
 			}
-			return src, true
+			binRel, isBin := strings.CutPrefix(filepath.ToSlash(rel), "bin/")
+			if !isBin {
+				return src, "", true
+			}
+			bin := filepath.Join(src, "bin")
+			name, _, nested := strings.Cut(binRel, "/")
+			if !nested {
+				return bin, file, true
+			}
+			return filepath.Join(bin, name), filepath.Join(bin, name, "main.rs"), true
 		}
-		if dir == "." || dir == string(filepath.Separator) {
-			return "", false
+		if d == "." || d == string(filepath.Separator) {
+			return "", "", false
 		}
 	}
 }
 
-// rustModule returns the module path of file relative to its crate src root.
-func rustModule(src, file string) []string {
+// rustModule returns the module path of file relative to its crate module dir.
+func rustModule(src, root, file string) []string {
+	if file == root {
+		return nil
+	}
 	rel, _ := filepath.Rel(src, file)
 	segs := strings.Split(strings.TrimSuffix(filepath.ToSlash(rel), ".rs"), "/")
 	last := segs[len(segs)-1]
@@ -179,13 +195,17 @@ func rustModule(src, file string) []string {
 }
 
 // rustModuleFile finds the file defining the longest module prefix of segs; later
-// segments are items inside it. With no matching module, the crate root is the target.
-func (r *resolver) rustModuleFile(src string, segs []string) []string {
+// segments are items inside it. With no matching module, the crate root is the
+// target: root when set, else src/lib.rs or src/main.rs.
+func (r *resolver) rustModuleFile(src, root string, segs []string) []string {
 	for k := len(segs); k >= 1; k-- {
 		base := filepath.Join(append([]string{src}, segs[:k]...)...)
 		if hit := r.first(base+".rs", filepath.Join(base, "mod.rs")); hit != nil {
 			return hit
 		}
+	}
+	if root != "" {
+		return r.first(root)
 	}
 	return r.first(filepath.Join(src, "lib.rs"), filepath.Join(src, "main.rs"))
 }
@@ -198,7 +218,7 @@ func (r *resolver) rust(from, spec string) []string {
 		switch filepath.Base(from) {
 		case "mod.rs", "lib.rs", "main.rs":
 		default:
-			if _, inSrc := r.rustSrcRoot(from); inSrc {
+			if _, root, ok := r.rustCrateRoot(from); ok && from != root {
 				base = strings.TrimSuffix(from, ".rs")
 			}
 		}
@@ -210,7 +230,7 @@ func (r *resolver) rust(from, spec string) []string {
 		// segment can also be a local type or module (Vec::new, config::load).
 		segs := strings.Split(strings.TrimPrefix(path, "::"), "::")
 		if dir, ok := r.crates[segs[0]]; ok && len(segs) > 1 {
-			return r.rustModuleFile(filepath.Join(dir, "src"), segs[1:])
+			return r.rustModuleFile(filepath.Join(dir, "src"), "", segs[1:])
 		}
 		return nil
 	}
@@ -218,16 +238,16 @@ func (r *resolver) rust(from, spec string) []string {
 	segs := strings.Split(strings.TrimPrefix(spec, "::"), "::")
 	switch segs[0] {
 	case "crate", "self", "super":
-		src, ok := r.rustSrcRoot(from)
+		src, root, ok := r.rustCrateRoot(from)
 		if !ok {
 			return nil
 		}
 		if segs[0] == "crate" {
-			return r.rustModuleFile(src, segs[1:])
+			return r.rustModuleFile(src, root, segs[1:])
 		}
-		mod := rustModule(src, from)
+		mod := rustModule(src, root, from)
 		if segs[0] == "self" {
-			return r.rustModuleFile(src, append(mod, segs[1:]...))
+			return r.rustModuleFile(src, root, append(mod, segs[1:]...))
 		}
 		for len(segs) > 0 && segs[0] == "super" {
 			if len(mod) == 0 {
@@ -235,10 +255,10 @@ func (r *resolver) rust(from, spec string) []string {
 			}
 			mod, segs = mod[:len(mod)-1], segs[1:]
 		}
-		return r.rustModuleFile(src, append(append([]string{}, mod...), segs...))
+		return r.rustModuleFile(src, root, append(append([]string{}, mod...), segs...))
 	}
 	if dir, ok := r.crates[segs[0]]; ok {
-		return r.rustModuleFile(filepath.Join(dir, "src"), segs[1:])
+		return r.rustModuleFile(filepath.Join(dir, "src"), "", segs[1:])
 	}
 	return nil
 }
@@ -251,13 +271,20 @@ var (
 	jsToTSExtension = map[string][]string{".js": {".ts", ".tsx"}, ".jsx": {".tsx"}, ".mjs": {".mts"}, ".cjs": {".cts"}}
 )
 
-// jsFile resolves base the way Node/TypeScript do: exact file, TS source for a .js-style
-// specifier ("./x.js" -> x.ts), added extensions, then a directory index file.
-func (r *resolver) jsFile(base string) []string {
-	cands := []string{base}
+// jsFile resolves base the way Node/TypeScript do: the exact file and the TS
+// source for a .js-style specifier ("./x.js" -> x.ts), then added extensions,
+// then a directory index file. A TypeScript importer (tsImporter) tries the TS
+// source before the exact file, as tsc does; a JavaScript importer the reverse.
+func (r *resolver) jsFile(base string, tsImporter bool) []string {
+	var cands []string
 	ext := filepath.Ext(base)
 	for _, tsExt := range jsToTSExtension[ext] {
 		cands = append(cands, strings.TrimSuffix(base, ext)+tsExt)
+	}
+	if tsImporter {
+		cands = append(cands, base)
+	} else {
+		cands = append([]string{base}, cands...)
 	}
 	for _, e := range jsExtensions {
 		cands = append(cands, base+e)
@@ -277,9 +304,19 @@ func (r *resolver) jsFile(base string) []string {
 	return nil
 }
 
+// isTSFile reports whether path is a TypeScript source file.
+func isTSFile(path string) bool {
+	switch filepath.Ext(path) {
+	case ".ts", ".tsx", ".mts", ".cts":
+		return true
+	}
+	return false
+}
+
 func (r *resolver) js(from, spec string) []string {
+	ts := isTSFile(from)
 	if spec == "." || spec == ".." || strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") {
-		return r.jsFile(filepath.Join(filepath.Dir(from), spec))
+		return r.jsFile(filepath.Join(filepath.Dir(from), spec), ts)
 	}
 	if strings.HasPrefix(spec, "/") {
 		return nil
@@ -290,13 +327,13 @@ func (r *resolver) js(from, spec string) []string {
 	}
 	if targets, ok := cfg.match(spec); ok {
 		for _, t := range targets {
-			if hit := r.jsFile(filepath.Join(cfg.pathsBase, t)); hit != nil {
+			if hit := r.jsFile(filepath.Join(cfg.pathsBase, t), ts); hit != nil {
 				return hit
 			}
 		}
 	}
 	if cfg.baseURL != "" {
-		return r.jsFile(filepath.Join(cfg.baseURL, spec))
+		return r.jsFile(filepath.Join(cfg.baseURL, spec), ts)
 	}
 	return nil
 }

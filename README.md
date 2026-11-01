@@ -535,7 +535,7 @@ Chosen on the [calibration benchmark](bench/README.md) (7 repos, about 5,500 fil
 
 ### What leaves your machine
 
-With an API key, each assessed file's path and first 300 lines go to the configured endpoint. Files ignored by `.gitignore` are never read, and files that look like credentials (`.env*`, `*.pem`, `credentials.json`, kubeconfigs, files containing private keys or tokens, and so on) are never sent: they are scored statically and marked `llm_skipped: "sensitive"`. With `--no-llm` nothing is sent. Full list in [How it works](docs/how-it-works.md#what-is-sent-and-what-is-never-sent).
+With an API key, each assessed file's path and first 300 lines go to the configured endpoint. Untracked files ignored by `.gitignore` are never read; tracked files are analysed, and may be sent, even if they match an ignore pattern. For those, a sensitive-file denylist is the protection: files that look like credentials (`.env*`, `*.pem`, `credentials.json`, kubeconfigs, files containing private keys or tokens, and so on) are never sent: they are scored statically and marked `llm_skipped: "sensitive"`. With `--no-llm` nothing is sent. Full list in [How it works](docs/how-it-works.md#what-is-sent-and-what-is-never-sent).
 
 ## Exit Codes
 

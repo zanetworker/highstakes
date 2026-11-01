@@ -202,8 +202,8 @@ Imports are resolved to files in the repo. Anything that does not name a repo fi
 | Language | Resolved |
 |---|---|
 | Go | Same-module imports via `go.mod`; a package import credits every non-test file in that directory |
-| Rust | `mod x;` (`x.rs` or `x/mod.rs`), `use crate::`, `use self::`, `use super::`, and `use other_crate::` for crates in the same repo (by `Cargo.toml` name) |
-| TypeScript / JavaScript | Relative specifiers with extension and `index` resolution (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`), TypeScript's `./x.js` to `x.ts` convention, `require()` and dynamic `import()`, and `tsconfig.json`/`jsconfig.json` `paths` and `baseUrl` (nearest config, relative `extends` followed) |
+| Rust | `mod x;` (`x.rs` or `x/mod.rs`), `use crate::`, `use self::`, `use super::` (each `src/bin/<name>.rs` or `src/bin/<name>/main.rs` binary is its own crate root), and `use other_crate::` for crates in the same repo (by `Cargo.toml` name) |
+| TypeScript / JavaScript | Relative specifiers with extension and `index` resolution (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`), TypeScript's `./x.js` to `x.ts` (then `x.tsx`) convention, tried before the exact `x.js` when the importer is TypeScript, `require()` and dynamic `import()`, and `tsconfig.json`/`jsconfig.json` `paths` and `baseUrl` (nearest config, relative `extends` followed) |
 | Java / Kotlin | `import a.b.C` to the Kotlin file that declares top-level `C` (class, interface, object, `fun` or `val`) in `package a.b`, whatever the file is named, else the file `C.java`/`C.kt` declaring `package a.b`; wildcard imports credit the whole package; static imports resolve to their class |
 | C# | `using A.B` credits every file declaring namespace `A.B`; `using static A.B.T` and `using X = A.B.T` go to the file declaring type `T` in namespace `A.B` (block or file-scoped), whatever the file is named |
 | C / C++ | `#include` paths relative to the file, the repo root, `include/` and `src/` |
@@ -248,7 +248,7 @@ Not all files are sent to the LLM. Skipped:
 
 Only with an API key set, and only to the endpoint you configure (OpenRouter by default, or `HIGHSTAKES_API_URL`), HighStakes sends each assessed file's repo-relative path and its first 300 lines. Nothing else about the repo leaves your machine: no git history and no other file contents.
 
-In a git repo, `analyze` only looks at files git tracks or would track (`git ls-files --cached --others --exclude-standard`), so anything in `.gitignore` is never read, scored or sent. Outside a git repo it walks the directory tree.
+In a git repo, `analyze` only looks at files git tracks or would track (`git ls-files --cached --others --exclude-standard`). `.gitignore` excludes untracked files only: a file that is committed is analysed, and may be sent, even if it matches an ignore pattern. For tracked files the protection is the sensitive-file denylist below. Outside a git repo it walks the directory tree.
 
 Files that look like credentials are never sent, even when they are tracked. They still appear in the heatmap with static data and `"llm_skipped": "sensitive"`, and a file caught by name is never read into a prompt. A file is sensitive when:
 

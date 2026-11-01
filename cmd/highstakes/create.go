@@ -58,7 +58,7 @@ var createCodeownersCmd = &cobra.Command{
 				return cliError(3, "read git history for owners: %v", err)
 			}
 		}
-		block, rows := policy.Codeowners(entries, owners, maxOwners)
+		block, rows, unrepresentable := policy.Codeowners(entries, owners, maxOwners)
 
 		written := ""
 		if write {
@@ -77,15 +77,19 @@ var createCodeownersCmd = &cobra.Command{
 
 		if jsonOut {
 			return printJSON(map[string]interface{}{
-				"min_tier": minTier,
-				"entries":  rows,
-				"block":    block,
-				"written":  written,
+				"min_tier":        minTier,
+				"entries":         rows,
+				"unrepresentable": unrepresentable,
+				"block":           block,
+				"written":         written,
 			})
 		}
 		fmt.Print(block)
-		if len(rows) == 0 {
+		if len(rows) == 0 && len(unrepresentable) == 0 {
 			fmt.Fprintln(os.Stderr, noFilesHint(string(minTier)))
+		}
+		if len(unrepresentable) > 0 {
+			fmt.Fprintf(os.Stderr, "%d hot paths contain a space or glob character CODEOWNERS cannot express; left as comments\n", len(unrepresentable))
 		}
 		if written != "" {
 			fmt.Fprintf(os.Stderr, "Updated %s (%d paths)\n", written, len(rows))

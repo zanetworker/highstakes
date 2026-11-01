@@ -356,11 +356,11 @@ highstakes create codeowners [flags]
 | `--file` | `.github/CODEOWNERS` | File updated by `--write` |
 | `--json` | `false` | Output as JSON |
 
-A file is hot when its tier is at or above `--min-tier`, or when its LLM-assessed impact is at or above that tier's threshold (61 for `high`, 86 for `critical`), so stable but impactful code is protected even if it rarely changes. A directory with at least two scored files, all hot, becomes one `/dir/` rule; otherwise each hot file gets its own rule. Owners are ranked the same way as `pr check` reviewers. Paths with no owner in git history are written as comments, so they never clear an earlier rule. In the block, spaces and the characters `\`, `*`, `?`, `[`, `]`, `!` and `#` in a path are backslash-escaped so each rule matches the literal path; the JSON `entries` paths stay unescaped.
+A file is hot when its tier is at or above `--min-tier`, or when its LLM-assessed impact is at or above that tier's threshold (61 for `high`, 86 for `critical`), so stable but impactful code is protected even if it rarely changes. A directory with at least two scored files, all hot, becomes one `/dir/` rule; otherwise each hot file gets its own rule. Owners are ranked the same way as `pr check` reviewers. Paths with no owner in git history are written as comments, so they never clear an earlier rule. GitHub's CODEOWNERS has no documented way to escape characters, so a path containing whitespace or one of `\`, `*`, `?`, `[`, `]` cannot be a rule that matches only that path. Such paths are written as `# cannot express in CODEOWNERS (space in path): <path>` (or `(glob character in path)`) comments, reported on stderr and listed in JSON `unrepresentable`; protect them by hand, for example by owning their directory.
 
 The block sits between `# BEGIN highstakes` and `# END highstakes` markers. `--write` replaces that block in place, or appends it to the end of the file, where CODEOWNERS rules take precedence. Lines outside the markers are left alone.
 
-JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_score`, `files`, `owners`), `block` (the text), `written` (path, empty unless `--write`).
+JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_score`, `files`, `owners`), `unrepresentable` (hot paths left as comments), `block` (the text), `written` (path, empty unless `--write`).
 
 **Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read. **Exit code 4** if there is no heatmap.
 

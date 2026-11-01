@@ -705,3 +705,51 @@ func TestAnalyzer_RustCratePathsWithoutUse(t *testing.T) {
 		"src/bin/aliased.rs": {"src/config.rs"},
 	})
 }
+
+// Each src/bin/<name>.rs and src/bin/<name>/main.rs is its own crate root, so
+// crate::, self:: and super:: resolve inside the binary, not the library.
+func TestAnalyzer_RustBinaryCrateRoots(t *testing.T) {
+	a := analyzeRepo(t, map[string]string{
+		"Cargo.toml":                      "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n",
+		"src/lib.rs":                      "pub mod handler;\n",
+		"src/handler.rs":                  "pub fn lib_handler() {}\n",
+		"src/bin/server/main.rs":          "mod handler;\nmod api;\nfn main() {}\n",
+		"src/bin/server/handler.rs":       "mod inner;\npub fn serve() {}\n",
+		"src/bin/server/handler/inner.rs": "pub struct Inner;\n",
+		"src/bin/server/api/mod.rs":       "use crate::handler::serve;\nuse self::v1::Route;\nmod v1;\n",
+		"src/bin/server/api/v1.rs":        "use super::super::handler::serve;\npub struct Route;\n",
+		"src/bin/tool.rs":                 "use crate::run;\nfn run() {}\nfn main() {}\n",
+	})
+	assertEdges(t, a, nil, map[string][]string{
+		"src/bin/server/handler.rs": {"src/bin/server/handler/inner.rs"},
+		"src/bin/server/api/mod.rs": {"src/bin/server/api/v1.rs", "src/bin/server/handler.rs"},
+		"src/bin/server/api/v1.rs":  {"src/bin/server/handler.rs"},
+		"src/bin/tool.rs":           {},
+	})
+}
+
+// TypeScript maps a ".js"-style specifier to its TS source before the exact
+// file; JavaScript importers keep the exact file first.
+func TestAnalyzer_TypeScriptExtensionSubstitution(t *testing.T) {
+	a := analyzeRepo(t, map[string]string{
+		"src/foo.ts":   "export const a = 1;\n",
+		"src/foo.js":   "export const a = 1;\n",
+		"src/bar.tsx":  "export const b = 1;\n",
+		"src/bar.js":   "export const b = 1;\n",
+		"src/esm.mts":  "export const e = 1;\n",
+		"src/esm.mjs":  "export const e = 1;\n",
+		"src/only.js":  "export const o = 1;\n",
+		"src/app.ts":   "import { a } from \"./foo.js\";\nimport { b } from \"./bar.js\";\nimport { o } from \"./only.js\";\n",
+		"src/view.tsx": "import { a } from \"./foo.js\";\n",
+		"src/mod.mts":  "import { e } from \"./esm.mjs\";\n",
+		"src/cjs.cts":  "import { a } from \"./foo.js\";\n",
+		"src/main.js":  "import { a } from \"./foo.js\";\nimport { e } from \"./esm.mjs\";\n",
+	})
+	assertEdges(t, a, nil, map[string][]string{
+		"src/app.ts":   {"src/bar.tsx", "src/foo.ts", "src/only.js"},
+		"src/view.tsx": {"src/foo.ts"},
+		"src/mod.mts":  {"src/esm.mts"},
+		"src/cjs.cts":  {"src/foo.ts"},
+		"src/main.js":  {"src/esm.mjs", "src/foo.js"},
+	})
+}

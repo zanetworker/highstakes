@@ -127,12 +127,20 @@ type CodeownersRow struct {
 // Codeowners renders a marked CODEOWNERS block. Owners of a directory entry are
 // ranked by their summed share across its files; at most maxOwners are kept.
 // Entries without owners become comments so they never clear an earlier rule.
-func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners int) (string, []CodeownersRow) {
+// Paths CODEOWNERS cannot express (see unrepresentableReason) also become
+// comments and are returned in unrepresentable instead of rows.
+func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners int) (block string, rows []CodeownersRow, unrepresentable []string) {
 	var b strings.Builder
 	b.WriteString(BeginMarker + "\n")
 	b.WriteString("# High-stakes paths and their most active recent authors.\n")
-	rows := make([]CodeownersRow, 0, len(entries))
+	rows = make([]CodeownersRow, 0, len(entries))
+	unrepresentable = []string{}
 	for _, e := range entries {
+		if reason := unrepresentableReason(e.Path); reason != "" {
+			fmt.Fprintf(&b, "# cannot express in CODEOWNERS (%s): %s\n", reason, e.Path)
+			unrepresentable = append(unrepresentable, e.Path)
+			continue
+		}
 		score := map[string]float64{}
 		for _, f := range e.Files {
 			for _, o := range owners[f] {
@@ -156,7 +164,7 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 		}
 		rows = append(rows, CodeownersRow{Entry: e, Owners: handles})
 
-		line := "/" + escapeCodeownersPath(e.Path)
+		line := "/" + e.Path
 		if len(handles) == 0 {
 			fmt.Fprintf(&b, "# %s (%s, heat %d): no owner found in git history\n", line, e.Tier, e.HeatScore)
 			continue
@@ -164,18 +172,23 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 		fmt.Fprintf(&b, "%s %s\n", line, strings.Join(handles, " "))
 	}
 	b.WriteString(EndMarker + "\n")
-	return b.String(), rows
+	return b.String(), rows, unrepresentable
 }
 
-// codeownersEscaper backslash-escapes characters that CODEOWNERS (gitignore
-// syntax) would read as a separator, glob or comment, so a rule matches the
-// literal path. Policy JSON/YAML keeps raw paths; only CODEOWNERS escapes.
-var codeownersEscaper = strings.NewReplacer(
-	`\`, `\\`, " ", `\ `, "*", `\*`, "?", `\?`,
-	"[", `\[`, "]", `\]`, "!", `\!`, "#", `\#`,
-)
-
-func escapeCodeownersPath(p string) string { return codeownersEscaper.Replace(p) }
+// unrepresentableReason says why a path cannot be a CODEOWNERS rule, or "" if
+// it can. GitHub documents no backslash escaping (it lists escaping a leading
+// # and [ ] ranges as unsupported), so whitespace would split the path from
+// its owners and a glob character would match other files. Every rule starts
+// with "/", so # and ! are never leading and stay literal.
+func unrepresentableReason(p string) string {
+	switch {
+	case strings.ContainsAny(p, " \t"):
+		return "space in path"
+	case strings.ContainsAny(p, `*?[]\`):
+		return "glob character in path"
+	}
+	return ""
+}
 
 // ReplaceBlock swaps the marked block in existing CODEOWNERS content, or
 // appends it. Appending puts it last, where CODEOWNERS rules take precedence.

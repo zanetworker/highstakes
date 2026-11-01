@@ -130,7 +130,7 @@ func TestCodeowners(t *testing.T) {
 		"main.go":         {{Handle: "dave@x.com", Share: 1}},
 	}
 
-	block, rows := Codeowners(entries, owners, 2)
+	block, rows, _ := Codeowners(entries, owners, 2)
 
 	t.Run("dir owners aggregate across files", func(t *testing.T) {
 		if got := rows[0].Owners; len(got) != 2 || got[0] != "@alice" || got[1] != "@bob" {
@@ -153,7 +153,7 @@ func TestCodeowners(t *testing.T) {
 		}
 	})
 	t.Run("maxOwners one limits list", func(t *testing.T) {
-		_, rows := Codeowners(entries, owners, 1)
+		_, rows, _ := Codeowners(entries, owners, 1)
 		if len(rows[0].Owners) != 1 {
 			t.Errorf("owners = %v, want 1", rows[0].Owners)
 		}
@@ -250,26 +250,44 @@ func TestHotPaths_ByImpact(t *testing.T) {
 	}
 }
 
-func TestCodeowners_EscapesPaths(t *testing.T) {
+// GitHub documents no backslash escaping in CODEOWNERS (escaping a leading
+// # and [ ] ranges are listed as unsupported), so a path with whitespace or a
+// glob character cannot be written as a rule matching only that path.
+func TestCodeowners_UnrepresentablePaths(t *testing.T) {
 	tests := []struct {
-		name, path, want string
+		name, path, wantLine string
+		wantUnrepresentable  bool
 	}{
-		{"plain path unchanged", "auth/jwt.go", "/auth/jwt.go @alice"},
-		{"space is escaped so it is not an owner", "src/payment handlers.go", `/src/payment\ handlers.go @alice`},
-		{"glob metacharacters are literal", "a/*?[x]!.go", `/a/\*\?\[x\]\!.go @alice`},
-		{"backslash is escaped", `a\b.go`, `/a\\b.go @alice`},
-		{"leading hash is not a comment", "#notes.md", `/\#notes.md @alice`},
+		{"plain path is a rule", "auth/jwt.go", "/auth/jwt.go @alice", false},
+		{"hash and bang after the leading slash are literal", "a/#notes!.md", "/a/#notes!.md @alice", false},
+		{"space cannot be expressed", "src/payment handlers.go", "# cannot express in CODEOWNERS (space in path): src/payment handlers.go", true},
+		{"tab counts as space", "a\tb.go", "# cannot express in CODEOWNERS (space in path): a\tb.go", true},
+		{"glob star cannot be expressed", "a/*.go", "# cannot express in CODEOWNERS (glob character in path): a/*.go", true},
+		{"bracket cannot be expressed", "a/[x].go", "# cannot express in CODEOWNERS (glob character in path): a/[x].go", true},
+		{"backslash cannot be expressed", `a\b.go`, `# cannot express in CODEOWNERS (glob character in path): a\b.go`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entries := []Entry{{Path: tt.path, Tier: types.TierCritical, HeatScore: 90, Files: []string{tt.path}}}
 			owners := map[string][]ownership.Owner{tt.path: {{Handle: "@alice", Share: 1}}}
-			block, _ := Codeowners(entries, owners, 2)
-			if !strings.Contains(block, "\n"+tt.want+"\n") {
-				t.Errorf("block missing %q:\n%s", tt.want, block)
+			block, rows, unrep := Codeowners(entries, owners, 2)
+			if !strings.Contains(block, "\n"+tt.wantLine+"\n") {
+				t.Errorf("block missing %q:\n%s", tt.wantLine, block)
+			}
+			if tt.wantUnrepresentable {
+				if len(unrep) != 1 || unrep[0] != tt.path || len(rows) != 0 {
+					t.Errorf("unrepresentable = %v rows = %v, want [%q] and no rows", unrep, rows, tt.path)
+				}
+			} else if len(unrep) != 0 || len(rows) != 1 {
+				t.Errorf("unrepresentable = %v rows = %d, want none and one row", unrep, len(rows))
 			}
 		})
 	}
+	t.Run("no entries gives empty list not nil", func(t *testing.T) {
+		if _, _, unrep := Codeowners(nil, nil, 2); unrep == nil {
+			t.Error("want empty slice for stable JSON")
+		}
+	})
 }
 
 func TestBuild_PathsStayUnescaped(t *testing.T) {
