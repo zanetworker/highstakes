@@ -8,6 +8,12 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
+# One run per PR at a time, in order, so sign-off changes are never
+# applied out of sequence.
+concurrency:
+  group: highstakes-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 permissions:
   pull-requests: write
   issues: write # remove the sign-off label after a new push
@@ -72,16 +78,17 @@ jobs:
           ADDED: ${{ github.event.label.name }}
           SENDER: ${{ github.event.sender.login }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PUSHED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           signed=false
           has_label=false
-          case ",$LABELS," in *,highstakes:signed-off,*) has_label=true ;; esac
+          # The PR's labels now, not the event's snapshot: a later event may
+          # already have added or removed the label.
+          if gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'highstakes:signed-off'; then has_label=true; fi
           # 1. Removing the label withdraws the sign-off: a newer failing status
           #    on the head means an older success no longer counts.
           if [ "$ACTION" = "unlabeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
-            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=failure -f context=highstakes/signed-off \
+            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=failure -f context="highstakes/signed-off/pr-$PR" \
               -f description="Sign-off withdrawn" >/dev/null || true
           fi
           # 2. A push removes a label added before it (a sign-off given on the
@@ -100,7 +107,7 @@ jobs:
             perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
             case "$perm" in
               admin|maintain|write)
-                gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=success -f context=highstakes/signed-off \
+                gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=success -f context="highstakes/signed-off/pr-$PR" \
                   -f description="Signed off by $SENDER" >/dev/null || true ;;
               *) echo "Sign-off label added by $SENDER (permission: $perm) does not count: write access is required." ;;
             esac
@@ -109,7 +116,7 @@ jobs:
           #    (newest first, across all pages) is a success set by this bot.
           if [ "$has_label" = true ]; then
             latest=$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
-              --jq 'first(.[] | select(.context == "highstakes/signed-off")) | "\(.state) \(.creator.login)"' | head -n1)
+              --jq 'first(.[] | select(.context == "highstakes/signed-off/pr-'"$PR"'")) | "\(.state) \(.creator.login)"' | head -n1)
             if [ "$latest" = "success github-actions[bot]" ]; then signed=true; else echo "No current sign-off for this commit; review again and re-add the label."; fi
           fi
           echo "signed=$signed" >> "$GITHUB_OUTPUT"

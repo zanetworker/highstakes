@@ -82,6 +82,9 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 			`"$ACTION" = "unlabeled"`,                      // removing the label withdraws the sign-off
 			"state=failure",                                // ... as a newer, failing status
 			"first(",                                       // only the latest status for the context counts
+			"concurrency:",                                 // one run per PR at a time
+			"highstakes/signed-off/pr-$PR",                 // sign-off scoped to this PR
+			"repos/$REPO/issues/$PR/labels",                // live labels, not the event snapshot
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)
