@@ -585,3 +585,37 @@ func TestGenerate_ImportsAreRepoPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestLLMInputs_SkipsSensitiveFiles(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"main.go":            "package main\n",
+		"credentials.json":   `{"user": "a"}`,
+		"deploy/values.yaml": "key: |\n  -----BEGIN PRIVATE KEY-----\n",
+		"main_test.go":       "package main\n",
+	}
+	for p, c := range files {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths := []string{"main.go", "credentials.json", "deploy/values.yaml", "main_test.go", "missing.go"}
+
+	inputs, sensitive := llmInputs(dir, paths)
+
+	var sent []string
+	for _, in := range inputs {
+		sent = append(sent, in.Path)
+	}
+	if !reflect.DeepEqual(sent, []string{"main.go"}) {
+		t.Errorf("sent to LLM = %v, want [main.go]", sent)
+	}
+	wantSensitive := map[string]bool{"credentials.json": true, "deploy/values.yaml": true}
+	if !reflect.DeepEqual(sensitive, wantSensitive) {
+		t.Errorf("sensitive = %v, want %v", sensitive, wantSensitive)
+	}
+}

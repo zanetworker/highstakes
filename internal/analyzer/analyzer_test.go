@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -142,6 +143,58 @@ func TestAnalyzer_DiscoverFiles(t *testing.T) {
 	}
 	if _, ok := allFiles[".github/workflows/ci.yml"]; !ok {
 		t.Error("should find CI workflows under .github")
+	}
+}
+
+func TestAnalyzer_DiscoverFiles_RespectsGitignore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		".gitignore":         "secrets/\nlocal.json\nbuild/\n",
+		"main.go":            "package main\n",
+		"tracked.go":         "package main\n",
+		"config.json":        "{}\n",
+		"local.json":         "{\"token\": \"x\"}\n",
+		"secrets/creds.json": "{}\n",
+		"build/gen.go":       "package build\n",
+		"vendor/lib/lib.go":  "package lib\n",
+		".hidden/tracked.go": "package hidden\n",
+	}
+	for path, content := range files {
+		full := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "tracked.go", ".hidden/tracked.go", "vendor"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	// A tracked file that was deleted from the worktree is not discovered.
+	if err := os.Remove(filepath.Join(dir, "tracked.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	a := New(dir, []string{"vendor"}, nil)
+	if err := a.discoverFiles(); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for p := range a.GetAllFiles() {
+		got = append(got, p)
+	}
+	sort.Strings(got)
+	want := []string{"config.json", "main.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("discovered %v, want %v", got, want)
 	}
 }
 

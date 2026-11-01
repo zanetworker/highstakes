@@ -244,6 +244,17 @@ Not all files are sent to the LLM. Skipped:
 - Lock files (`go.sum`, `go.mod`, `*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`)
 - Excluded directories (configured in `.heatmap/config.yaml`)
 
+### What is sent, and what is never sent
+
+Only with an API key set, and only to the endpoint you configure (OpenRouter by default, or `HIGHSTAKES_API_URL`), HighStakes sends each assessed file's repo-relative path and its first 300 lines. Nothing else about the repo leaves your machine: no git history and no other file contents.
+
+In a git repo, `analyze` only looks at files git tracks or would track (`git ls-files --cached --others --exclude-standard`), so anything in `.gitignore` is never read, scored or sent. Outside a git repo it walks the directory tree.
+
+Files that look like credentials are never sent, even when they are tracked. They still appear in the heatmap with static data and `"llm_skipped": "sensitive"`, and a file caught by name is never read into a prompt. A file is sensitive when:
+
+- Its name matches `credentials.json`, `auth.json`, `credentials.enc`, `mcp-oauth-tokens.json`, `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `id_dsa*`, `id_ecdsa*`, `id_ed25519*`, `service-account*.json`, `*secret*.json`, `*secret*.yaml`, `*secret*.yml`, `kubeconfig`, `kubeconfig.*`, `.npmrc`, `.pypirc`, `.netrc`, `terraform.tfstate*` or `*.tfvars` (case-insensitive), or it sits under `.aws/` or `.ssh/`, or it is `.docker/config.json`.
+- Its first 300 lines contain a private key header (`-----BEGIN ... PRIVATE KEY-----`), a `"private_key":` field, an `aws_secret_access_key` assignment, or a GitHub (`ghp_`), OpenAI-style (`sk-`) or Slack (`xoxb-`, `xoxp-`) token.
+
 ## PR Risk: Importance and Change Risk
 
 `pr check` keeps two questions apart. Importance is the max impact of the files a PR touches (heat for files without an LLM assessment): how bad a mistake there would be. Change risk scores the diff itself: how likely this particular change is to contain one (lines changed, new files, config or infra files, lines deleted from hot files, test ratio). The PR tier, and any `--fail-on` gate, is the most severe tier among the touched files; change risk tells a reviewer how much attention the diff needs. See the [CLI reference](cli-reference.md#two-axis-risk) for the formula.

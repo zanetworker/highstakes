@@ -533,6 +533,10 @@ One [OpenRouter](https://openrouter.ai) API key, any model. Assessments are cach
 
 Chosen on the [calibration benchmark](bench/README.md) (7 repos, about 5,500 files assessed per model, October 2026): the four models rank files by impact in largely the same order (rank correlation 0.72 to 0.90), so a cheap model is enough. Costs are upper estimates from token counts.
 
+### What leaves your machine
+
+With an API key, each assessed file's path and first 300 lines go to the configured endpoint. Files ignored by `.gitignore` are never read, and files that look like credentials (`.env*`, `*.pem`, `credentials.json`, kubeconfigs, files containing private keys or tokens, and so on) are never sent: they are scored statically and marked `llm_skipped: "sensitive"`. With `--no-llm` nothing is sent. Full list in [How it works](docs/how-it-works.md#what-is-sent-and-what-is-never-sent).
+
 ## Exit Codes
 
 | Code | Meaning |

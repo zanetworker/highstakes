@@ -124,6 +124,11 @@
           "enum": ["fragile-critical", "protect", "watch", "low"],
           "description": "Likelihood x impact quadrant; present only when impact is assessed"
         },
+        "llm_skipped": {
+          "type": "string",
+          "enum": ["sensitive"],
+          "description": "Why the file was not sent to the LLM; sensitive means its name or content looks like credentials"
+        },
         "component": {
           "type": "string",
           "description": "Top-level unit of code the file belongs to (crate, package, module)"

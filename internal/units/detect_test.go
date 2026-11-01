@@ -140,6 +140,30 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "toml literal strings name cargo bins",
+			fs: fstest.MapFS{
+				"Cargo.toml":        file("[package]\nname = 'tool'\n\n[[bin]]\nname = 'cli'\npath = 'src/cli.rs'\n"),
+				"src/cli.rs":        file("fn main() {}\n"),
+				"other/Cargo.toml":  file("[package]\nname = 'other'\n"),
+				"other/src/main.rs": file("fn main() {}\n"),
+			},
+			want: []Entry{
+				{Name: "cli", Kind: KindRustBin, Entry: "src/cli.rs", Evidence: "Cargo.toml:4"},
+				{Name: "other", Kind: KindRustBin, Entry: "other/src/main.rs", Evidence: "other/src/main.rs:1"},
+			},
+		},
+		{
+			name: "toml literal strings in python scripts",
+			fs: fstest.MapFS{
+				"pyproject.toml":  file("[project]\nname = 'tool'\n\n[project.scripts]\ntool = 'tool.cli:main'\n'tool-dev' = \"tool.cli:dev\"\n"),
+				"src/tool/cli.py": file("def main(): pass\n"),
+			},
+			want: []Entry{
+				{Name: "tool", Kind: KindPythonScript, Entry: "src/tool/cli.py", Evidence: "pyproject.toml:5"},
+				{Name: "tool-dev", Kind: KindPythonScript, Entry: "src/tool/cli.py", Evidence: "pyproject.toml:6"},
+			},
+		},
+		{
 			name: "empty repo",
 			fs:   fstest.MapFS{"README.md": file("hi")},
 			want: []Entry{},
@@ -169,5 +193,43 @@ func TestDetect_BadManifestIsSkipped(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Kind != KindGoMain {
 		t.Errorf("Detect = %+v, want only the Go main", got)
+	}
+}
+
+func TestTOMLStrings_QuoteStyles(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantKey   string
+		wantValue string
+		wantFound bool
+	}{
+		{"basic string", `name = "a"`, "name", "a", true},
+		{"literal string", `name = 'a'`, "name", "a", true},
+		{"literal string keeps backslashes", `path = 'C:\bin'`, "path", `C:\bin`, true},
+		{"literal string may hold double quotes", `msg = 'say "hi"'`, "msg", `say "hi"`, true},
+		{"quoted basic key", `"my-tool" = "m:main"`, "my-tool", "m:main", true},
+		{"quoted literal key", `'my-tool' = 'm:main'`, "my-tool", "m:main", true},
+		{"empty literal string", `name = ''`, "name", "", true},
+		{"trailing comment", `name = 'a' # c`, "name", "a", true},
+		{"unterminated literal is skipped", `name = 'a`, "", "", false},
+		{"non-string value is skipped", `autobins = false`, "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got *tomlEntry
+			for _, e := range tomlStrings([]byte("[s]\n" + tt.line + "\n")) {
+				if e.key != "" {
+					e := e
+					got = &e
+				}
+			}
+			if (got != nil) != tt.wantFound {
+				t.Fatalf("found = %v, want %v (%+v)", got != nil, tt.wantFound, got)
+			}
+			if got != nil && (got.key != tt.wantKey || got.value != tt.wantValue) {
+				t.Errorf("key/value = %q/%q, want %q/%q", got.key, got.value, tt.wantKey, tt.wantValue)
+			}
+		})
 	}
 }

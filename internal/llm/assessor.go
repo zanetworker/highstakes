@@ -125,6 +125,10 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	// Count cached files first
 	var toAssess []FileInput
 	for _, f := range files {
+		// Credentials never reach a prompt, even if the caller passes them.
+		if SensitivePath(f.Path) || SensitiveContent(f.Content) {
+			continue
+		}
 		if c, ok := a.loadCache(a.cacheKey(f.Content)); ok {
 			mu.Lock()
 			results[f.Path] = c

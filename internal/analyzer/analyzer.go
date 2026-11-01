@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -137,65 +138,115 @@ func (a *Analyzer) CalculateDependencyCentrality(path string) types.DependencyCe
 	}
 }
 
-// discoverFiles walks the repo and discovers all source files
+// discoverFiles finds the source files to analyze. In a git repo it takes
+// the files git knows about (tracked, plus untracked ones not ignored), so
+// .gitignored files such as local credentials are never read; elsewhere it
+// walks the directory tree.
 func (a *Analyzer) discoverFiles() error {
+	if paths, ok := gitListFiles(a.repoPath); ok {
+		for _, rel := range paths {
+			if a.excludedPath(rel) {
+				continue
+			}
+			stat, err := os.Stat(filepath.Join(a.repoPath, rel))
+			if err != nil || !stat.Mode().IsRegular() {
+				continue // deleted from the worktree, or a submodule
+			}
+			a.addFile(rel, stat.Size())
+		}
+		return nil
+	}
 	return filepath.WalkDir(a.repoPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip hidden directories and common excludes
 		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") && name != ".github" {
+			if path != a.repoPath && a.excludedDir(d.Name()) {
 				return filepath.SkipDir
-			}
-			if a.excludeDirs[name] {
-				return filepath.SkipDir
-			}
-			for _, pat := range a.excludeGlob {
-				if matched, _ := filepath.Match(pat, name); matched {
-					return filepath.SkipDir
-				}
 			}
 			return nil
 		}
 
-		// Only analyze source files
-		lang := detectLanguage(path)
-		if lang == "" {
-			return nil
-		}
-
-		// Get relative path
 		relPath, err := filepath.Rel(a.repoPath, path)
 		if err != nil {
 			return err
 		}
-
-		// Get file size
 		stat, err := os.Stat(path)
 		if err != nil {
 			return err
 		}
-
-		// Count lines
-		lines, err := countLines(path)
-		if err != nil {
-			lines = 0 // Best effort
-		}
-
-		a.files[relPath] = &FileInfo{
-			Path:     relPath,
-			Language: lang,
-			Lines:    lines,
-			Bytes:    int(stat.Size()),
-			Imports:  []string{},
-			ImportedBy: []string{},
-		}
-
+		a.addFile(relPath, stat.Size())
 		return nil
 	})
+}
+
+// gitListFiles returns the repo-relative paths git tracks or would track
+// (untracked but not ignored). ok is false when repoPath is not in a git
+// work tree or git is unavailable.
+func gitListFiles(repoPath string) (paths []string, ok bool) {
+	out, err := exec.Command("git", "-C", repoPath, "ls-files", "--cached", "--others", "--exclude-standard", "-z").Output()
+	if err != nil {
+		return nil, false
+	}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, filepath.FromSlash(p))
+		}
+	}
+	return paths, true
+}
+
+// excludedDir reports whether a directory name is skipped: hidden ones
+// (except .github), configured exclude dirs and exclude patterns.
+func (a *Analyzer) excludedDir(name string) bool {
+	if strings.HasPrefix(name, ".") && name != ".github" {
+		return true
+	}
+	if a.excludeDirs[name] {
+		return true
+	}
+	for _, pat := range a.excludeGlob {
+		if matched, _ := filepath.Match(pat, name); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// excludedPath reports whether any directory of a repo-relative file path
+// is excluded.
+func (a *Analyzer) excludedPath(rel string) bool {
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return false
+	}
+	for _, name := range strings.Split(dir, string(filepath.Separator)) {
+		if a.excludedDir(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// addFile records a source file; files in no known language are ignored.
+func (a *Analyzer) addFile(relPath string, size int64) {
+	lang := detectLanguage(relPath)
+	if lang == "" {
+		return
+	}
+	lines, err := countLines(filepath.Join(a.repoPath, relPath))
+	if err != nil {
+		lines = 0 // Best effort
+	}
+	a.files[relPath] = &FileInfo{
+		Path:       relPath,
+		Language:   lang,
+		Lines:      lines,
+		Bytes:      int(size),
+		Imports:    []string{},
+		ImportedBy: []string{},
+	}
 }
 
 // analyzeFile performs deep analysis on a single file

@@ -219,3 +219,39 @@ func TestIsTestFile(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculatePRRisk_UnscoredInheritsQuadrantTier(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		// Quadrant tiers that the numeric thresholds would not give.
+		"core/store.go":  {Path: "core/store.go", HeatScore: 75, Tier: types.TierCritical, ImpactAssessed: true, Quadrant: types.QuadrantFragileCritical},
+		"core/cache.go":  {Path: "core/cache.go", HeatScore: 40, Tier: types.TierMedium},
+		"tools/lint.go":  {Path: "tools/lint.go", HeatScore: 90, Tier: types.TierMedium, ImpactAssessed: true, Quadrant: types.QuadrantWatch},
+		"tools/hooks.go": {Path: "tools/hooks.go", HeatScore: 20, Tier: types.TierLow},
+		// Stale stored tier: unassessed files are re-tiered with the thresholds.
+		"flat/old.go": {Path: "flat/old.go", HeatScore: 70, Tier: types.TierLow},
+	}}
+	tests := []struct {
+		name     string
+		path     string
+		wantHeat int
+		wantTier types.Tier
+	}{
+		{"fragile-critical neighbour keeps the new file critical", "core/wal.go", 75, types.TierCritical},
+		{"nearest ancestor's quadrant tier carries down", "core/v2/wal.go", 75, types.TierCritical},
+		{"hot but low-impact neighbour does not raise the tier", "tools/fmt.go", 90, types.TierMedium},
+		{"no scored ancestor stays low", "other/new.go", 0, types.TierLow},
+		{"unassessed neighbour is tiered from heat", "flat/new.go", 70, types.TierHigh},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			risk := CalculatePRRisk(1, []FileChange{{Path: tt.path, LinesAdded: 5, IsNew: true}}, hm, scorer.DefaultTierThresholds())
+			fc := risk.FilesChanged[0]
+			if fc.HeatScore != tt.wantHeat || fc.Tier != tt.wantTier {
+				t.Errorf("file heat/tier = %d/%s, want %d/%s", fc.HeatScore, fc.Tier, tt.wantHeat, tt.wantTier)
+			}
+			if risk.Tier != tt.wantTier {
+				t.Errorf("PR tier = %s, want %s", risk.Tier, tt.wantTier)
+			}
+		})
+	}
+}

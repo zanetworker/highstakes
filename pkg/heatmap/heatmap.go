@@ -94,6 +94,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 
 	// Run LLM analysis if enabled
 	var assessments map[string]*llm.Assessment
+	var sensitive map[string]bool
 	if !g.opts.NoLLM {
 		apiKey := os.Getenv("OPENROUTER_API_KEY")
 		apiURL := ""
@@ -114,16 +115,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				fmt.Fprintf(os.Stderr, "  Warning: LLM init failed: %v (falling back to static)\n", err)
 			} else {
 				var inputs []llm.FileInput
-				for path := range allFiles {
-					if !llm.ShouldAssess(path) {
-						continue
-					}
-					content, err := os.ReadFile(filepath.Join(g.repoPath, path))
-					if err != nil {
-						continue
-					}
-					inputs = append(inputs, llm.FileInput{Path: path, Content: string(content)})
-				}
+				inputs, sensitive = llmInputs(g.repoPath, filePaths)
 				assessments, err = assessor.AssessFiles(inputs)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  Warning: LLM assessment failed: %v\n", err)
@@ -155,6 +147,9 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	// Process each file
 	for path, fileInfo := range allFiles {
 		heat := g.processFile(path, fileInfo, staticAnalyzer, gitHistory)
+		if sensitive[path] {
+			heat.LLMSkipped = "sensitive"
+		}
 
 		// Apply LLM assessment if available
 		if assessment, ok := assessments[path]; ok {
@@ -450,4 +445,30 @@ func containsAny(s string, substrings []string) bool {
 		}
 	}
 	return false
+}
+
+// llmInputs reads the files the LLM should assess. Files that look like
+// credentials, by name or by content, are returned in sensitive instead;
+// a file flagged by name is never read.
+func llmInputs(repoPath string, paths []string) (inputs []llm.FileInput, sensitive map[string]bool) {
+	sensitive = make(map[string]bool)
+	for _, path := range paths {
+		if !llm.ShouldAssess(path) {
+			continue
+		}
+		if llm.SensitivePath(path) {
+			sensitive[path] = true
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(repoPath, path))
+		if err != nil {
+			continue
+		}
+		if llm.SensitiveContent(string(content)) {
+			sensitive[path] = true
+			continue
+		}
+		inputs = append(inputs, llm.FileInput{Path: path, Content: string(content)})
+	}
+	return inputs, sensitive
 }

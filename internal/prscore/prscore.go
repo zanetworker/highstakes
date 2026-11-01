@@ -40,9 +40,9 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 			fc.HeatScore = 0
 			fc.Tier = types.TierLow
 		} else {
-			// Unknown files must not silently pass: inherit the nearest scored directory's heat.
-			fc.HeatScore = inheritedHeat(change.Path, hm)
-			fc.Tier = scorer.CalculateTier(fc.HeatScore, thresholds)
+			// Unknown files must not silently pass: inherit the nearest scored
+			// directory's heat and tier (the tier may come from a quadrant).
+			fc.HeatScore, fc.Tier = inheritedHeat(change.Path, hm, thresholds)
 			fc.Unscored = true
 			unscored = append(unscored, change.Path)
 		}
@@ -132,21 +132,30 @@ func checkCircuitBreakers(changes []FileChange, hm *types.Heatmap) []string {
 	return signals
 }
 
-// inheritedHeat returns the max heat of scored files in the file's directory,
-// walking up to the nearest ancestor directory that has any. Returns 0 if none.
-func inheritedHeat(path string, hm *types.Heatmap) int {
+// inheritedHeat returns the max heat and most severe tier of scored files in
+// the file's directory, walking up to the nearest ancestor directory that has
+// any. Returns 0 and TierLow if none. A file with assessed impact keeps its
+// quadrant tier; any other file is tiered from its heat with thresholds, so
+// the repo's current config applies.
+func inheritedHeat(path string, hm *types.Heatmap, thresholds types.TierThresholds) (int, types.Tier) {
 	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
-		maxHeat, found := 0, false
+		maxHeat, maxTier, found := 0, types.TierLow, false
 		for p, heat := range hm.Files {
-			if filepath.Dir(p) == dir {
-				found = true
-				if heat.HeatScore > maxHeat {
-					maxHeat = heat.HeatScore
-				}
+			if filepath.Dir(p) != dir {
+				continue
+			}
+			found = true
+			maxHeat = max(maxHeat, heat.HeatScore)
+			tier := heat.Tier
+			if !heat.ImpactAssessed {
+				tier = scorer.CalculateTier(heat.HeatScore, thresholds)
+			}
+			if tierRank[tier] > tierRank[maxTier] {
+				maxTier = tier
 			}
 		}
 		if found || dir == "." || dir == "/" {
-			return maxHeat
+			return maxHeat, maxTier
 		}
 	}
 }

@@ -401,8 +401,14 @@ func loadTSConfig(repo, rel string, depth int) *tsPaths {
 	return cfg
 }
 
-// stripJSONC removes comments and trailing commas, which tsconfig files allow.
+// stripJSONC removes comments and trailing commas, which tsconfig files
+// allow. Comments go first so a comment after a trailing comma cannot hide it.
 func stripJSONC(in []byte) []byte {
+	return stripTrailingCommas(stripJSONComments(in))
+}
+
+// stripJSONComments removes // and /* */ comments outside strings.
+func stripJSONComments(in []byte) []byte {
 	out := make([]byte, 0, len(in))
 	inString := false
 	for i := 0; i < len(in); i++ {
@@ -432,7 +438,34 @@ func stripJSONC(in []byte) []byte {
 				i++
 			}
 			i++
-		case ch == ',':
+		default:
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// stripTrailingCommas removes commas outside strings that are followed only
+// by whitespace and a closing brace or bracket.
+func stripTrailingCommas(in []byte) []byte {
+	out := make([]byte, 0, len(in))
+	inString := false
+	for i := 0; i < len(in); i++ {
+		ch := in[i]
+		if inString {
+			out = append(out, ch)
+			if ch == '\\' && i+1 < len(in) {
+				i++
+				out = append(out, in[i])
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+		}
+		if ch == ',' {
 			j := i + 1
 			for j < len(in) && strings.ContainsRune(" \t\r\n", rune(in[j])) {
 				j++
@@ -440,10 +473,8 @@ func stripJSONC(in []byte) []byte {
 			if j < len(in) && (in[j] == '}' || in[j] == ']') {
 				continue
 			}
-			out = append(out, ch)
-		default:
-			out = append(out, ch)
 		}
+		out = append(out, ch)
 	}
 	return out
 }

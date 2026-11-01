@@ -107,6 +107,7 @@ type FileHeat struct {
 	Impact         int      `json:"impact"`             // 0-100
 	ImpactAssessed bool     `json:"impact_assessed"`    // impact came from the LLM
 	Quadrant       Quadrant `json:"quadrant,omitempty"` // set only when impact is assessed
+	LLMSkipped     string   `json:"llm_skipped,omitempty"` // "sensitive": looks like credentials, never sent to the LLM
 	Language           string             `json:"language,omitempty"`
 	Size               FileSize           `json:"size,omitempty"`
 	Factors            Factors            `json:"factors"`

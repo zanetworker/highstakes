@@ -145,7 +145,7 @@ func join(dir, p string) string {
 
 var (
 	tomlSection = regexp.MustCompile(`^\s*(\[\[?[^\]]+\]\]?)\s*(#.*)?$`)
-	tomlString  = regexp.MustCompile(`^\s*("?[A-Za-z0-9_.-]+"?)\s*=\s*"([^"]*)"`)
+	tomlString  = regexp.MustCompile(`^\s*("[A-Za-z0-9_.-]+"|'[A-Za-z0-9_.-]+'|[A-Za-z0-9_.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 	tomlNoBins  = regexp.MustCompile(`^\s*autobins\s*=\s*false\s*(#.*)?$`)
 	rustMain    = regexp.MustCompile(`^\s*(pub\s+)?(async\s+)?fn\s+main\s*\(`)
 )
@@ -157,7 +157,7 @@ type tomlEntry struct {
 	header              int // line of the section header
 }
 
-// tomlStrings reads `key = "value"` pairs per section. It is a line scanner,
+// tomlStrings reads `key = "value"` and `key = 'value'` pairs per section. It is a line scanner,
 // not a TOML parser: enough for package names, bins and scripts.
 func tomlStrings(data []byte) []tomlEntry {
 	var out []tomlEntry
@@ -172,7 +172,7 @@ func tomlStrings(data []byte) []tomlEntry {
 			continue
 		}
 		if m := tomlString.FindStringSubmatch(line); m != nil {
-			out = append(out, tomlEntry{section: section, key: strings.Trim(m[1], `"`), value: m[2], line: n, header: header})
+			out = append(out, tomlEntry{section: section, key: strings.Trim(m[1], `"'`), value: m[2] + m[3], line: n, header: header})
 		}
 	}
 	return out
