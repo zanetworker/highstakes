@@ -28,7 +28,7 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-The comment leads with the verdict (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize` or `✅ Routine`) and one sentence naming the riskiest file, then **Do before merge** as a checklist (`[x]` for items the PR already satisfies: a test next to the risky file changed, CODEOWNERS covers it, a suggested owner approved), a short file table (File, Will it break?, How bad?, Action), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers and backlog commands. See the [CLI reference](cli-reference.md#verdict-and-checklist).
+The comment leads with the verdict (`⛔ Harden before merge`, `🛡 Protect`, `🔧 Stabilize` or `✅ Routine`) and one sentence naming the riskiest file, then **Do before merge** as a checklist (`[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved), a short file table (File, Will it break?, How bad?, Action), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers and the backlog (plain items with their commands, such as a CODEOWNERS line to add; no checkboxes). See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 ### Secrets
 

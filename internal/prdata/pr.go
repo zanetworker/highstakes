@@ -18,7 +18,8 @@ type PR struct {
 	Labels             []string  `json:"labels"`
 	ClosingIssues      []int     `json:"closing_issues"`
 	ClosingIssueLabels []string  `json:"closing_issue_labels"`
-	Reviews            int       `json:"reviews"`   // total review count
-	Approvers          int       `json:"approvers"` // distinct approving reviewers
-	Commits            int       `json:"commits"`   // commits in the PR; 0 when unknown
+	Reviews            int       `json:"reviews"`          // total review count
+	Approvers          int       `json:"approvers"`        // distinct approving reviewers
+	Commits            int       `json:"commits"`          // commits in the PR; 0 when unknown
+	CommitHeadlines    []string  `json:"commit_headlines"` // first-line messages of the PR's first 100 commits
 }

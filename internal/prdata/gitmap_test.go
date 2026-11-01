@@ -95,6 +95,7 @@ func TestMapPRs_LandedFiles(t *testing.T) {
 		{SHA: "s", Parents: []string{"o"}, Message: "fix: thing (#4)", Files: []string{"s.go"}},
 		{SHA: "o", Parents: []string{"z"}, Message: "older", Files: []string{"o.go"}},
 	}
+	steps := []string{"first step", "second step", "third step"}
 	tests := []struct {
 		name string
 		pr   PR
@@ -103,9 +104,12 @@ func TestMapPRs_LandedFiles(t *testing.T) {
 	}{
 		{"squash merge", PR{Number: 4, MergeCommit: "s", Commits: 3}, "s", []string{"s.go"}},
 		{"merge commit uses the diff against the first parent", PR{Number: 5, MergeCommit: "m", Commits: 4}, "m", []string{"m.go"}},
-		{"rebase merge unions every landed commit", PR{Number: 7, MergeCommit: "r3", Commits: 3}, "r3", []string{"a.go", "b.go", "c.go"}},
-		{"rebase merge with commit count unknown", PR{Number: 7, MergeCommit: "r3"}, "r3", []string{"c.go"}},
-		{"commit count past the read history stops at its end", PR{Number: 8, MergeCommit: "o", Commits: 3}, "o", []string{"o.go"}},
+		{"rebase merge unions every landed commit", PR{Number: 7, MergeCommit: "r3", Commits: 3, CommitHeadlines: steps}, "r3", []string{"a.go", "b.go", "c.go"}},
+		{"rebase merge with commit count unknown", PR{Number: 7, MergeCommit: "r3", CommitHeadlines: steps}, "r3", []string{"c.go"}},
+		{"rebase merge with headlines unknown does not walk", PR{Number: 7, MergeCommit: "r3", Commits: 3}, "r3", []string{"c.go"}},
+		{"rebase merge stops at an unrelated commit in between", PR{Number: 7, MergeCommit: "r3", Commits: 3, CommitHeadlines: []string{"first step", "third step"}}, "r3", []string{"c.go"}},
+		{"squash with a custom message does not walk into unrelated ancestors", PR{Number: 9, Title: "second step", MergeCommit: "r2", Commits: 2, CommitHeadlines: []string{"wip", "address review"}}, "r2", []string{"b.go"}},
+		{"commit count past the read history stops at its end", PR{Number: 8, MergeCommit: "o", Commits: 3, CommitHeadlines: []string{"older", "x"}}, "o", []string{"o.go"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

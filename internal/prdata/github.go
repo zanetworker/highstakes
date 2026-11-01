@@ -84,7 +84,7 @@ const prQuery = `query($owner:String!,$name:String!,$cursor:String){
         number title mergedAt updatedAt
         mergeCommit{oid}
         author{login}
-        commits{totalCount}
+        commits(first:100){totalCount nodes{commit{messageHeadline}}}
         labels(first:20){nodes{name}}
         closingIssuesReferences(first:5){nodes{number labels(first:10){nodes{name}}}}
         reviews(first:30){totalCount nodes{state author{login}}}
@@ -164,6 +164,11 @@ type gqlPR struct {
 	} `json:"author"`
 	Commits struct {
 		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
+			Commit struct {
+				MessageHeadline string `json:"messageHeadline"`
+			} `json:"commit"`
+		} `json:"nodes"`
 	} `json:"commits"`
 	Labels        gqlNames `json:"labels"`
 	ClosingIssues struct {
@@ -212,6 +217,9 @@ func decodePage(body []byte) (Page, error) {
 		if n.Author != nil {
 			p.Author = n.Author.Login
 		}
+		for _, c := range n.Commits.Nodes {
+			p.CommitHeadlines = append(p.CommitHeadlines, c.Commit.MessageHeadline)
+		}
 		for _, l := range n.Labels.Nodes {
 			p.Labels = append(p.Labels, l.Name)
 		}
@@ -254,8 +262,8 @@ type FetchResult struct {
 }
 
 // cacheSchema is the version of the cached PR fields; bump it when PR gains a
-// field so cached PRs are refetched (2: Commits).
-const cacheSchema = 2
+// field so cached PRs are refetched (2: Commits, 3: CommitHeadlines).
+const cacheSchema = 3
 
 type cacheIndex struct {
 	CoveredFrom time.Time `json:"covered_from"` // every PR merged after this was fetched...

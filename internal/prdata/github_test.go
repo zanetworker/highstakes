@@ -61,7 +61,8 @@ func TestDecodePage(t *testing.T) {
 	body := `{"data":{"rateLimit":{"remaining":4900},"repository":{"pullRequests":{
 	  "pageInfo":{"hasNextPage":true,"endCursor":"CUR"},
 	  "nodes":[{"number":12,"title":"fix: x","mergedAt":"2026-05-02T10:00:00Z","updatedAt":"2026-05-03T10:00:00Z",
-	    "mergeCommit":{"oid":"abc"},"author":{"login":"alice"},"commits":{"totalCount":3},
+	    "mergeCommit":{"oid":"abc"},"author":{"login":"alice"},"commits":{"totalCount":3,"nodes":[
+	      {"commit":{"messageHeadline":"step one"}},{"commit":{"messageHeadline":"step two"}}]},
 	    "labels":{"nodes":[{"name":"bug"}]},
 	    "closingIssuesReferences":{"nodes":[{"number":7,"labels":{"nodes":[{"name":"security"}]}}]},
 	    "reviews":{"totalCount":4,"nodes":[
@@ -85,7 +86,7 @@ func TestDecodePage(t *testing.T) {
 		UpdatedAt:   time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC),
 		MergeCommit: "abc", Author: "alice", Labels: []string{"bug"},
 		ClosingIssues: []int{7}, ClosingIssueLabels: []string{"security"},
-		Reviews: 4, Approvers: 2, Commits: 3,
+		Reviews: 4, Approvers: 2, Commits: 3, CommitHeadlines: []string{"step one", "step two"},
 	}
 	if !reflect.DeepEqual(page.PRs[0], want) {
 		t.Errorf("PR = %+v\nwant %+v", page.PRs[0], want)

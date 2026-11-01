@@ -108,8 +108,9 @@ func subjectPRNumber(subject string) (int, bool) {
 // the commit GitHub reports as its merge commit when that commit is in
 // commits, otherwise the newest commit whose subject names the PR. PRs with
 // no such commit are absent from the result. A rebase-merged PR (merge commit
-// with one parent and no "(#N)" in its subject, more than one PR commit) is
-// reported as its last commit with Files the union over the PR's commits.
+// with one parent and no "(#N)" in its subject, more than one PR commit, and
+// subjects matching the PR's commit headlines) is reported as its last commit
+// with Files the union over the PR's commits.
 func MapPRs(prs []PR, commits []Commit) map[int]Commit {
 	bySHA := make(map[string]Commit, len(commits))
 	byNumber := map[int]Commit{}
@@ -134,8 +135,11 @@ func MapPRs(prs []PR, commits []Commit) map[int]Commit {
 
 // withRebasedFiles returns c with Files covering every commit of pr when pr
 // was rebase-merged: GitHub reports only the last rebased commit as the merge
-// commit, so the files of the earlier pr.Commits-1 first-parent ancestors are
-// added (as far as commits reach).
+// commit, so the files of up to pr.Commits-1 first-parent ancestors are added
+// (as far as commits reach). A commit counts as the PR's only while its
+// subject is one of pr.CommitHeadlines, so a squash merge with a custom
+// message (or the PR title as its subject) is not walked into unrelated
+// earlier commits.
 func withRebasedFiles(c Commit, pr PR, bySHA map[string]Commit) Commit {
 	if pr.Commits <= 1 || len(c.Parents) != 1 {
 		return c
@@ -143,10 +147,18 @@ func withRebasedFiles(c Commit, pr PR, bySHA map[string]Commit) Commit {
 	if n, ok := subjectPRNumber(c.subject()); ok && n == pr.Number {
 		return c
 	}
+	unmatched := map[string]int{}
+	for _, h := range pr.CommitHeadlines {
+		unmatched[strings.TrimSpace(h)]++
+	}
+	if unmatched[c.subject()] == 0 {
+		return c
+	}
 	seen := map[string]bool{}
 	var files []string
 	cur, ok := c, true
-	for i := 0; i < pr.Commits && ok; i++ {
+	for i := 0; i < pr.Commits && ok && unmatched[cur.subject()] > 0; i++ {
+		unmatched[cur.subject()]--
 		for _, f := range cur.Files {
 			if !seen[f] {
 				seen[f] = true
