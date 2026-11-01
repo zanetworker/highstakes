@@ -74,7 +74,7 @@ Ordering:
 
 Each stop shows impact, likelihood and quadrant, and its `why` leads with the impact reason (LLM `critical_reason`, else `summary`).
 
-Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
+Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
 
 `tour` is a subcommand of `get`, so `highstakes get tour` runs the tour and `highstakes get <file>` still looks up a file. A file literally named `tour` at the repo root cannot be looked up with `get`; use `list` instead.
 

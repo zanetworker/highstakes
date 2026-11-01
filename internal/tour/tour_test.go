@@ -441,6 +441,17 @@ func TestIsTestFile(t *testing.T) {
 		{"internal/tour/tour.go", false},
 		{"internal/testing/helpers.go", false}, // directory name alone is not a test
 		{"contest.go", false},                  // "test" inside a name is not a test
+		{"src/jsx/dom/render.test.tsx", true},
+		{"src/app.spec.jsx", true},
+		{"lib/x.test.mjs", true},
+		{"lib/x.spec.mts", true},
+		{"src/test/java/org/FooTest.java", true},
+		{"src/test/kotlin/BarTests.kt", true},
+		{"spec/models/user_spec.rb", true},
+		{"test/user_test.rb", true},
+		{"tests/ServiceTests.cs", true},
+		{"src/Testing.java", false},
+		{"src/Latest.java", false},
 		{"", false},
 	}
 	for _, tt := range tests {

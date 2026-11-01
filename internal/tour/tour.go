@@ -101,12 +101,20 @@ func Dir(p string) string { return path.Dir(p) }
 // little about where the stakes are.
 func IsTestFile(p string) bool {
 	base := path.Base(p)
-	for _, s := range []string{"_test.go", ".test.ts", ".test.js", ".spec.ts", ".spec.js", "_test.py"} {
-		if strings.HasSuffix(base, s) {
-			return true
-		}
+	if strings.HasPrefix(base, "test_") {
+		return true
 	}
-	return strings.HasPrefix(base, "test_")
+	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	switch ext {
+	case ".go", ".py", ".rb":
+		return strings.HasSuffix(stem, "_test") || (ext == ".rb" && strings.HasSuffix(stem, "_spec"))
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts":
+		return strings.HasSuffix(stem, ".test") || strings.HasSuffix(stem, ".spec")
+	case ".java", ".kt", ".cs":
+		return strings.HasSuffix(stem, "Test") || strings.HasSuffix(stem, "Tests")
+	}
+	return false
 }
 
 // DirGraph aggregates the file import graph to directories:

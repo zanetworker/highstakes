@@ -110,7 +110,7 @@ The quadrant and its tier apply only to files whose impact was assessed. Other f
 
 ### Test Files
 
-Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are capped just below the MEDIUM threshold on both axes and on heat, and they are never counted as likely. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
+Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`) are capped just below the MEDIUM threshold on both axes and on heat, and they are never counted as likely. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
 
 ## Static Analysis by Language
 
