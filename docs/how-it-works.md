@@ -32,8 +32,9 @@ highstakes analyze
   │     └── Cache result by SHA-256 of model, prompt version and content
   │
   └── 4. Scoring
-        ├── Combine factors with weights (LLM 40%, static 30%, git 20%, manual 10%)
-        ├── Assign tier (CRITICAL/HIGH/MEDIUM/LOW)
+        ├── Likelihood: churn, complexity, centrality, path keywords, incidents
+        ├── Impact: LLM blast radius (an estimate without the LLM)
+        ├── Tier from the likelihood x impact quadrant (from heat without the LLM)
         └── Calculate review requirements per tier
 ```
 
@@ -62,24 +63,16 @@ The prompt includes explicit calibration:
 - **61-80**: Core infrastructure. Service degradation or partial outage.
 - **81-100**: Security boundary, auth, crypto, sandbox. Security breach, data loss, or complete outage.
 
-## Heat Score Formula
+## Two Axes: Likelihood and Impact
 
-The aggregate heat score (0-100) is a weighted combination:
+HighStakes scores every file on two separate axes, because they answer different questions:
 
-### With LLM (default)
+- **Likelihood** (0-100): how likely the file is to need fixes. It comes from history and structure, never from the LLM.
+- **Impact** (0-100): how much breaks if the file has a bug. It is the LLM blast radius, the highest of the four dimensions.
 
-| Factor | Weight | Source |
-|--------|--------|--------|
-| LLM Blast Radius | 40% | Max of security/data/availability/user scores |
-| Dependency Centrality | 15% | How many files import this one (normalized 0-1) |
-| Complexity | 15% | Cyclomatic + cognitive complexity |
-| Test Coverage Risk | 10% | 100 minus coverage percent |
-| Incident History | 10% | Manual incident records (if any) |
-| Change Frequency | 10% | Commits in last 90 days |
+The [calibration benchmark](../bench/README.md) showed why they stay apart. Churn and complexity predicted which files needed fixes later: with the weights below, the ten top-ranked files on the primary repos were all fixed after the holdout cutoff (precision@10 1.00, Spearman 0.43). Blast radius was consistent across four models (rank agreement 0.72 to 0.90) but correlated weakly with fixes (Spearman 0.18 in-sample and 0.23 holdout with the default model), because a stable auth module can be critical without ever breaking. Blending blast radius into one score at 40% made fix prediction worse for every model (holdout Spearman 0.37 with the default model). So each axis keeps its meaning, and the tier comes from where a file sits on both.
 
-Weights normalize against available data. If git history is unavailable, its weight redistributes to other factors.
-
-### Without LLM (`--no-llm`)
+### Likelihood
 
 | Factor | Weight | Source |
 |--------|--------|--------|
@@ -89,11 +82,35 @@ Weights normalize against available data. If git history is unavailable, its wei
 | Dependency Centrality | 10 | How many files import this one (normalized 0-1) |
 | Path Keywords | 5 | The larger of user impact and data sensitivity, both from path keywords |
 
-Weights are relative and normalize over the factors present. They were chosen on the [calibration benchmark](../bench/README.md): across seven repos in five languages, churn and complexity predicted which files needed fixes later (holdout), centrality added a little, and test coverage is a placeholder today, so it carries no weight without the LLM. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier.
+Weights are relative and normalize over the factors present. They were chosen on the benchmark across seven repos in five languages: churn and complexity predicted later fixes best, centrality added a little, and test coverage is a placeholder today, so it carries no weight. Path keywords ("auth", "token", "payment", "user" and similar in the file path) are a weak signal: they match on names alone and cannot tell a core auth module from an SDK helper. They count once, as the larger of user impact and data sensitivity, so a file whose only signal is its name stays in the LOW tier. Likelihood is the same with or without the LLM.
+
+### Impact
+
+With the LLM, impact is the blast radius score (`impact_assessed: true`). Without it (`--no-llm`, no API key, or files the LLM skips such as docs and lock files), impact is an estimate from centrality and path keywords, weighted 10 and 5 as above, and `impact_assessed` is `false`. Treat the estimate as a hint for sorting, not an assessment: it never decides a tier.
+
+### The Quadrant
+
+After every file is scored, two thresholds split the grid:
+
+- **Likely**: likelihood in the top 20% of the repo's non-test files. The cutoff is repo-relative (the likelihood of the file at the 20% rank, at least one file, ties included, never 0) because churn levels differ widely between repos. It is stored as `metadata.likely_cutoff`.
+- **Impactful**: impact at or above the HIGH threshold (61 by default, `tiers.high` in the config), stored as `metadata.impact_threshold`.
+
+| Quadrant | `quadrant` | Tier | Review guidance |
+|---|---|---|---|
+| Likely and impactful | `fragile-critical` | CRITICAL | Likely to break and costly when it does: senior review, add tests first |
+| Impactful, stable | `protect` | HIGH | Stable but costly if broken: keep owners on review, never auto-merge |
+| Likely, low impact | `watch` | MEDIUM | Changes and breaks often, limited damage: refactor or add tests |
+| Neither | `low` | LOW | Light review |
+
+The quadrant and its tier apply only to files whose impact was assessed. Other files keep the tier from their heat score, and `quadrant` is left out of the JSON.
+
+### Heat Score
+
+`heat_score` stays in the JSON for backward compatibility. With an assessed impact it is `max(likelihood, impact)`; otherwise it equals likelihood. Tiers of assessed files come from the quadrant, not from heat, so a file can have heat 90 and tier MEDIUM (likely, low impact).
 
 ### Test Files
 
-Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are capped just below the MEDIUM threshold in both modes. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
+Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are capped just below the MEDIUM threshold on both axes and on heat, and they are never counted as likely. They import everything and change often, but a broken test does not reach users; ranked alongside source they pushed real hotspots down. `check calibration` leaves them out of the population for the same reason.
 
 ## Static Analysis by Language
 
@@ -126,6 +143,8 @@ Change frequency, unique authors and recent changes come from a single `git log 
 
 ## Tier Assignment
 
+Files with an LLM-assessed impact take the tier of their quadrant (see above). Files without one take the tier of their heat score:
+
 | Tier | Score Range | Review Requirements |
 |------|-------------|---------------------|
 | CRITICAL | 86-100 | 2 senior reviewers, security scan, no auto-merge |
@@ -153,7 +172,7 @@ Not all files are sent to the LLM. Skipped:
 
 ## PR Risk: Importance and Change Risk
 
-`pr check` keeps two questions apart. Importance is the max heat of the files a PR touches: how bad a mistake there would be. Change risk scores the diff itself: how likely this particular change is to contain one (lines changed, new files, config or infra files, lines deleted from hot files, test ratio). The tier and any `--fail-on` gate follow importance; change risk tells a reviewer how much attention the diff needs. See the [CLI reference](cli-reference.md#two-axis-risk) for the formula.
+`pr check` keeps two questions apart. Importance is the max impact of the files a PR touches (heat for files without an LLM assessment): how bad a mistake there would be. Change risk scores the diff itself: how likely this particular change is to contain one (lines changed, new files, config or infra files, lines deleted from hot files, test ratio). The PR tier, and any `--fail-on` gate, is the most severe tier among the touched files; change risk tells a reviewer how much attention the diff needs. See the [CLI reference](cli-reference.md#two-axis-risk) for the formula.
 
 ## Ownership
 
@@ -161,9 +180,9 @@ Owners are derived from one `git log --numstat` pass. Each author's score for a 
 
 ## Is It Right?
 
-`highstakes check calibration` tests the scores against git history: did the files the heatmap calls hot attract reverts, bug fixes, security fixes and incidents? It reports per-tier event rates, precision@K, lift over random and rank correlation, for the heat score and for each factor on its own. See the [CLI reference](cli-reference.md#highstakes-check-calibration).
+`highstakes check calibration` tests the scores against git history: did the files the heatmap calls hot attract reverts, bug fixes, security fixes and incidents? It reports per-tier event rates, precision@K, lift over random and rank correlation, for the heat score, for the two axes (`likelihood`, `impact`) and for each factor on its own. See the [CLI reference](cli-reference.md#highstakes-check-calibration).
 
-Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve CRITICAL with no fixes at all, so expect blast radius to correlate weakly with fix counts. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
+Read the results with two limits in mind. Fix history measures how often code breaks, while blast radius measures how bad it is when it does; a stable payment module can deserve CRITICAL with no fixes at all, so expect blast radius and impact to correlate weakly with fix counts. Judge likelihood by fix prediction and impact by whether its ranking matches what your team would protect. And churn is computed from the same history, so use `--holdout` (score with history before a cutoff, count events after it) before trusting any churn number.
 
 ### Validating impact
 

@@ -202,3 +202,39 @@ func TestDecide(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculatePRRisk_ImportanceFromImpact(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		// stable but impactful: protect quadrant
+		"core/auth.go": {Path: "core/auth.go", HeatScore: 70, Likelihood: 10, Impact: 70, ImpactAssessed: true, Tier: types.TierHigh},
+		// churny, low impact: watch quadrant, heat above the other file's impact
+		"ui/view.go": {Path: "ui/view.go", HeatScore: 80, Likelihood: 80, Impact: 20, ImpactAssessed: true, Tier: types.TierMedium},
+		// fragile-critical: quadrant tier is above its heat tier
+		"pay/charge.go": {Path: "pay/charge.go", HeatScore: 65, Likelihood: 50, Impact: 65, ImpactAssessed: true, Tier: types.TierCritical},
+		// no LLM: impact is an estimate, importance falls back to heat
+		"lib/util.go": {Path: "lib/util.go", HeatScore: 40, Likelihood: 40, Impact: 90, Tier: types.TierMedium},
+	}}
+	tests := []struct {
+		name           string
+		paths          []string
+		wantImportance int
+		wantTier       types.Tier
+	}{
+		{"impact, not heat, of assessed files", []string{"core/auth.go", "ui/view.go"}, 70, types.TierHigh},
+		{"churny low-impact file alone", []string{"ui/view.go"}, 20, types.TierMedium},
+		{"PR tier is the most severe file tier", []string{"pay/charge.go"}, 65, types.TierCritical},
+		{"unassessed falls back to heat", []string{"lib/util.go"}, 40, types.TierMedium},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var changes []FileChange
+			for _, p := range tt.paths {
+				changes = append(changes, FileChange{Path: p, LinesAdded: 1})
+			}
+			risk := CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
+			if risk.Importance != tt.wantImportance || risk.Tier != tt.wantTier {
+				t.Errorf("importance=%d tier=%s, want %d %s", risk.Importance, risk.Tier, tt.wantImportance, tt.wantTier)
+			}
+		})
+	}
+}

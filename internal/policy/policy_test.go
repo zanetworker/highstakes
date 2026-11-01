@@ -1,10 +1,12 @@
 package policy
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/zanetworker/highstakes/internal/ownership"
+	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -13,6 +15,8 @@ func file(path string, heat int, tier types.Tier) *types.FileHeat {
 	fh.Factors.BlastRadius.CriticalReason = "reason for " + path
 	return fh
 }
+
+var th = scorer.DefaultTierThresholds()
 
 func testHeatmap() *types.Heatmap {
 	return &types.Heatmap{Files: map[string]*types.FileHeat{
@@ -79,7 +83,7 @@ func TestHotPaths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := HotPaths(testHeatmap(), tt.minTier)
+			got := HotPaths(testHeatmap(), tt.minTier, th)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d entries %+v, want %v", len(got), got, tt.want)
 			}
@@ -98,7 +102,7 @@ func TestHotPaths(t *testing.T) {
 	}
 
 	t.Run("dir entry carries max heat, tier and files", func(t *testing.T) {
-		for _, e := range HotPaths(testHeatmap(), types.TierHigh) {
+		for _, e := range HotPaths(testHeatmap(), types.TierHigh, th) {
 			if e.Path == "auth/" {
 				if e.HeatScore != 95 || e.Tier != types.TierCritical || len(e.Files) != 3 {
 					t.Errorf("auth/ entry = %+v", e)
@@ -108,7 +112,7 @@ func TestHotPaths(t *testing.T) {
 	})
 
 	t.Run("empty heatmap", func(t *testing.T) {
-		if got := HotPaths(&types.Heatmap{Files: map[string]*types.FileHeat{}}, types.TierHigh); len(got) != 0 {
+		if got := HotPaths(&types.Heatmap{Files: map[string]*types.FileHeat{}}, types.TierHigh, th); len(got) != 0 {
 			t.Errorf("got %v, want none", got)
 		}
 	})
@@ -182,7 +186,7 @@ func TestReplaceBlock(t *testing.T) {
 }
 
 func TestBuild(t *testing.T) {
-	entries := HotPaths(testHeatmap(), types.TierHigh)
+	entries := HotPaths(testHeatmap(), types.TierHigh, th)
 	p := Build(testHeatmap(), entries, types.TierHigh)
 
 	if p.MinTier != types.TierHigh || p.GeneratedBy != "highstakes" {
@@ -207,4 +211,41 @@ func TestBuild(t *testing.T) {
 			t.Errorf("want empty slices for stable JSON, got %+v", p)
 		}
 	})
+}
+
+func TestHotPaths_ByImpact(t *testing.T) {
+	assessed := func(path string, impact int, tier types.Tier) *types.FileHeat {
+		fh := file(path, impact, tier)
+		fh.Impact, fh.ImpactAssessed = impact, true
+		return fh
+	}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"core/stable.go": assessed("core/stable.go", 90, types.TierHigh),        // protect: impact 90, stable
+		"core/edge.go":   assessed("core/edge.go", 61, types.TierHigh),          // impact at the high threshold
+		"ui/churn.go":    assessed("ui/churn.go", 40, types.TierMedium),         // watch: likely, low impact
+		"pay/hot.go":     assessed("pay/hot.go", 70, types.TierCritical),        // fragile-critical, impact below 86
+		"lib/static.go":  file("lib/static.go", 70, types.TierHigh),             // no LLM: tier as today
+		"lib/est.go":     {Path: "lib/est.go", Impact: 95, Tier: types.TierLow}, // estimate is ignored
+	}}
+	tests := []struct {
+		name    string
+		minTier types.Tier
+		want    []string
+	}{
+		{"high: impact >= 61 or tier high", types.TierHigh, []string{"core/", "lib/static.go", "pay/hot.go"}},
+		{"critical: impact >= 86, plus critical tier", types.TierCritical, []string{"core/stable.go", "pay/hot.go"}},
+		{"medium adds likely files by tier and impact >= 31", types.TierMedium, []string{"core/", "lib/static.go", "pay/hot.go", "ui/churn.go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, e := range HotPaths(hm, tt.minTier, th) {
+				got = append(got, e.Path)
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("paths = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

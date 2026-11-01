@@ -43,10 +43,10 @@ func TestBuildArchitecture_Nodes(t *testing.T) {
 		id   string
 		want archNode
 	}{
-		{"api", archNode{ID: "api", Files: 2, Lines: 150, MaxHeat: 90, Tier: "critical", Hottest: "api/a.go", Level: 1}},
-		{"types", archNode{ID: "types", Files: 1, Lines: 80, MaxHeat: 10, Tier: "low", Hottest: "types/t.go", Level: 0}},
-		{"cmd", archNode{ID: "cmd", Files: 1, Lines: 300, MaxHeat: 40, Tier: "medium", Hottest: "cmd/main.go", Level: 2}},
-		{".", archNode{ID: ".", Files: 1, Lines: 20, MaxHeat: 5, Tier: "low", Hottest: "README.md", Level: 0}},
+		{"api", archNode{ID: "api", Files: 2, Lines: 150, MaxHeat: 90, Tier: "critical", ImpactTier: "critical", Hottest: "api/a.go", Level: 1}},
+		{"types", archNode{ID: "types", Files: 1, Lines: 80, MaxHeat: 10, Tier: "low", ImpactTier: "low", Hottest: "types/t.go", Level: 0}},
+		{"cmd", archNode{ID: "cmd", Files: 1, Lines: 300, MaxHeat: 40, Tier: "medium", ImpactTier: "medium", Hottest: "cmd/main.go", Level: 2}},
+		{".", archNode{ID: ".", Files: 1, Lines: 20, MaxHeat: 5, Tier: "low", ImpactTier: "low", Hottest: "README.md", Level: 0}},
 	}
 	if len(arch.Nodes) != len(tests) {
 		t.Fatalf("got %d nodes, want %d: %+v", len(arch.Nodes), len(tests), arch.Nodes)
@@ -140,6 +140,77 @@ func TestBuildArchitecture_IgnoresTestFiles(t *testing.T) {
 	for _, e := range arch.Edges {
 		if e.From == "e2e" {
 			t.Errorf("edge from test-only dir: %+v", e)
+		}
+	}
+}
+
+func TestBuildArchitecture_ImpactAndFragility(t *testing.T) {
+	axes := func(path string, tier types.Tier, impact, likelihood int, assessed bool) *types.FileHeat {
+		f := fh(path, max(impact, likelihood), tier, 10)
+		f.Impact, f.Likelihood, f.ImpactAssessed = impact, likelihood, assessed
+		return f
+	}
+	hm := &types.Heatmap{Metadata: types.Metadata{LikelyCutoff: 70}, Files: map[string]*types.FileHeat{
+		"core/auth.go":       axes("core/auth.go", types.TierHigh, 90, 10, true),      // protect
+		"core/parse.go":      axes("core/parse.go", types.TierMedium, 30, 80, true),   // watch: likely
+		"core/parse_test.go": axes("core/parse_test.go", types.TierLow, 30, 95, true), // tests never count
+		"ui/view.go":         axes("ui/view.go", types.TierMedium, 50, 70, false),     // no LLM: likely at the cutoff
+		"lib/x.go":           axes("lib/x.go", types.TierLow, 70, 10, true),           // impact 70: high
+	}}
+	byID := map[string]archNode{}
+	for _, n := range buildArchitecture(hm).Nodes {
+		byID[n.ID] = n
+	}
+	tests := []struct {
+		id         string
+		maxImpact  int
+		impactTier string
+		likely     int
+	}{
+		{"core", 90, "critical", 1},
+		{"ui", 0, "medium", 1}, // unassessed: colour falls back to the heat tier
+		{"lib", 70, "high", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			n := byID[tt.id]
+			if n.MaxImpact != tt.maxImpact || n.ImpactTier != tt.impactTier || n.Likely != tt.likely {
+				t.Errorf("node = %+v, want max_impact %d impact_tier %s likely %d", n, tt.maxImpact, tt.impactTier, tt.likely)
+			}
+		})
+	}
+
+	t.Run("no cutoff in old heatmaps: nothing is likely", func(t *testing.T) {
+		hm.Metadata.LikelyCutoff = 0
+		for _, n := range buildArchitecture(hm).Nodes {
+			if n.Likely != 0 {
+				t.Errorf("node %s likely = %d, want 0", n.ID, n.Likely)
+			}
+		}
+	})
+}
+
+func TestGenerate_EmbedsQuadrantView(t *testing.T) {
+	hm := archHeatmap()
+	hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold = 55, 61
+	f := hm.Files["api/a.go"]
+	f.Likelihood, f.Impact, f.ImpactAssessed, f.Quadrant = 60, 90, true, types.QuadrantFragileCritical
+	out := filepath.Join(t.TempDir(), "d.html")
+	if err := Generate(hm, out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(b)
+	for _, want := range []string{
+		`setMode('quadrant',this)`, `id="quadrant"`, `function renderQuadrant`,
+		`"likely_cutoff":55`, `"impact_threshold":61`,
+		`"likelihood":60,"impact":90,"impact_assessed":true,"quadrant":"fragile-critical"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
 		}
 	}
 }

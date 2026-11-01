@@ -19,7 +19,7 @@ internal/
   analyzer/                  Static analysis (AST, imports, complexity)
   gitanalyzer/               Git history (commits, churn, contributors)
   llm/                       LLM blast radius assessment via OpenRouter
-  scorer/                    Heat score formula and tier assignment
+  scorer/                    Likelihood, impact, heat and quadrant tier assignment
   prscore/                   PR risk scoring (importance + change risk), reviewers, gate
   ownership/                 Per-file owners from git log (recency-weighted, .mailmap aware)
   policy/                    Hot path collapsing, CODEOWNERS block, AI reviewer policy
@@ -33,7 +33,7 @@ docs/                        User-facing documentation
 
 ## Key Patterns
 
-- Scoring: LLM blast radius (40%) + static analysis (30%) + git history (20%) + incidents (10%)
+- Scoring: two axes per file, likelihood (churn, complexity, centrality, incidents; no LLM) and impact (LLM blast radius); tier from the likelihood x impact quadrant (scorer.ApplyQuadrants), heat_score = max of the two for compatibility
 - LLM calls go through OpenRouter (OpenAI-compatible format), default model is GPT-6 Luna (chosen on the bench/ benchmark)
 - Assessments cached in .heatmap/cache/ by SHA-256 of file content
 - Analyzer excludes configurable in .heatmap/config.yaml (not hardcoded)

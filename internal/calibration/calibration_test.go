@@ -82,6 +82,8 @@ func TestRun_InSample(t *testing.T) {
 		{"churn", 1, 1, 2.5, 0, true, true},
 		{"complexity", 0.5, 0.5, 1.25, 0, true, true},
 		{"blast_radius", 0, 0, 0, 0, false, false},
+		{"likelihood", 1, 1, 2.5, 0, true, true},  // hot.go 62, cold.go 40 lead
+		{"impact", 0.5, 0.5, 1.25, 0, true, true}, // estimate from centrality: hot.go, mid.go
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -210,6 +212,9 @@ func TestRescoreAtCutoff(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fh := mk()
 			got := rescoreAtCutoff(fh, tt.commits, tt.incidents, cutoff, scorer.DefaultTierThresholds())
+			if got.Likelihood != tt.wantHeat {
+				t.Errorf("likelihood = %d, want %d (no LLM: equals heat)", got.Likelihood, tt.wantHeat)
+			}
 			if got.HeatScore != tt.wantHeat || got.Factors.ChangeFrequency.Score != tt.wantChurn || got.Tier != tt.wantTier {
 				t.Errorf("heat=%d churn=%d tier=%s, want heat=%d churn=%d tier=%s",
 					got.HeatScore, got.Factors.ChangeFrequency.Score, got.Tier, tt.wantHeat, tt.wantChurn, tt.wantTier)
@@ -286,5 +291,40 @@ func TestRun_EventFilterAndTooFew(t *testing.T) {
 				t.Errorf("security caveat present = %v, want %v: %q", !tt.wantSecurity, tt.wantSecurity, r.Caveats)
 			}
 		})
+	}
+}
+
+func TestRun_ImpactSignalNotes(t *testing.T) {
+	hm := testHeatmap()
+	r := Run(hm, nil, nil, Options{K: 2, From: base, To: base.AddDate(0, 0, 30), Tiers: scorer.DefaultTierThresholds()})
+	if s := signal(t, r, "impact"); !s.Available || !strings.Contains(s.Note, "estimate") {
+		t.Errorf("no LLM: impact available=%v note=%q, want available with an estimate note", s.Available, s.Note)
+	}
+
+	hm.Files["hot.go"].Factors.BlastRadius = types.BlastRadius{Score: 80, Assessed: true}
+	r = Run(hm, nil, nil, Options{K: 2, From: base, To: base.AddDate(0, 0, 30), Tiers: scorer.DefaultTierThresholds()})
+	if s := signal(t, r, "impact"); !strings.Contains(s.Note, "assessed files only (1 of 5)") {
+		t.Errorf("with LLM: impact note = %q, want assessed-only population", s.Note)
+	}
+}
+
+func TestRun_HoldoutReappliesQuadrants(t *testing.T) {
+	cutoff := base
+	assessed := func(path string) *types.FileHeat {
+		f := fileHeat(path, 70, types.TierHigh, 0, 10, 0)
+		f.Factors.BlastRadius = types.BlastRadius{Score: 70, Assessed: true}
+		f.Impact, f.ImpactAssessed = 70, true
+		return f
+	}
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{"a.go": assessed("a.go"), "b.go": assessed("b.go")}}
+	commits := fixes("b.go", 45, cutoff.AddDate(0, 0, -30)) // only b.go churned before the cutoff
+
+	r := Run(hm, commits, nil, Options{K: 1, From: cutoff, To: cutoff.AddDate(0, 0, 30), Holdout: true, Tiers: scorer.DefaultTierThresholds()})
+	got := map[types.Tier]int{}
+	for _, tr := range r.Tiers {
+		got[tr.Tier] = tr.Files
+	}
+	if got[types.TierCritical] != 1 || got[types.TierHigh] != 1 {
+		t.Errorf("holdout tiers = %v, want b.go critical (likely and impactful) and a.go high", got)
 	}
 }

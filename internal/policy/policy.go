@@ -41,15 +41,27 @@ func ParseTier(s string) (types.Tier, error) {
 	return t, nil
 }
 
-// HotPaths lists files at or above minTier, collapsing a directory into one
+// IsHot reports whether a file belongs on a protected-path list for minTier:
+// its tier is at least minTier, or its LLM-assessed impact is at least the
+// threshold of minTier. The impact rule keeps stable, high-impact files on
+// the list even when they rarely change.
+func IsHot(f *types.FileHeat, minTier types.Tier, th types.TierThresholds) bool {
+	if TierAtLeast(f.Tier, minTier) {
+		return true
+	}
+	limit := map[types.Tier]int{types.TierCritical: th.Critical, types.TierHigh: th.High, types.TierMedium: th.Medium, types.TierLow: th.Low}[minTier]
+	return f.ImpactAssessed && f.Impact >= limit
+}
+
+// HotPaths lists hot files (see IsHot), collapsing a directory into one
 // entry when it has at least two scored files and all of them are hot. The
 // highest such directory wins; the repo root is never collapsed.
-func HotPaths(hm *types.Heatmap, minTier types.Tier) []Entry {
+func HotPaths(hm *types.Heatmap, minTier types.Tier, th types.TierThresholds) []Entry {
 	// For every ancestor dir: total scored files and hot files beneath it.
 	total, hot := map[string]int{}, map[string]int{}
 	var hotFiles []string
 	for p, f := range hm.Files {
-		isHot := TierAtLeast(f.Tier, minTier)
+		isHot := IsHot(f, minTier, th)
 		if isHot {
 			hotFiles = append(hotFiles, p)
 		}

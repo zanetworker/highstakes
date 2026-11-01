@@ -1,6 +1,7 @@
-// Package tour builds a risk-ordered reading path through a heatmap:
-// directories in dependency order (dependencies first), hottest files first
-// within each directory. It makes no LLM calls and reads only the heatmap.
+// Package tour builds a reading path through a heatmap for learning a
+// codebase: directories in dependency order (dependencies first), the most
+// impactful files first within each level. It makes no LLM calls and reads
+// only the heatmap.
 package tour
 
 import (
@@ -32,7 +33,7 @@ var (
 
 // Options controls tour selection.
 type Options struct {
-	Limit int    // keep the N hottest files; 0 = all
+	Limit int    // keep the N most impactful files; 0 = all
 	Focus string // directory or file path prefix; "" or "." = whole repo
 	// Source optionally returns a file's content so stops get a line hint
 	// pointing at the first top-level declaration. Errors leave line 1.
@@ -60,7 +61,8 @@ type Section struct {
 	Dir       string     `json:"dir"`
 	Level     int        `json:"level"` // 0 = depends on no other directory
 	MaxHeat   int        `json:"max_heat"`
-	Tier      types.Tier `json:"tier"`
+	MaxImpact int        `json:"max_impact"`
+	Tier      types.Tier `json:"tier"`       // most severe tier among its stops
 	DependsOn []string   `json:"depends_on"` // directories this one imports
 	UsedBy    []string   `json:"used_by"`    // directories importing this one
 	Stops     []Stop     `json:"stops"`
@@ -68,23 +70,27 @@ type Section struct {
 
 // Stop is one file to read.
 type Stop struct {
-	Order          int        `json:"order"`
-	Path           string     `json:"path"`
-	Line           int        `json:"line"`
-	Anchor         string     `json:"anchor"` // "path:line"
-	Title          string     `json:"title"`
-	Heat           int        `json:"heat"`
-	Tier           types.Tier `json:"tier"`
-	Why            string     `json:"why"`
-	Summary        string     `json:"summary,omitempty"`
-	CriticalReason string     `json:"critical_reason,omitempty"`
-	TopImpact      string     `json:"top_impact,omitempty"`
-	DependsOn      []string   `json:"depends_on"`
-	DependsOnCount int        `json:"depends_on_count"`
-	UsedBy         []string   `json:"used_by"`
-	UsedByCount    int        `json:"used_by_count"`
-	Owners         []string   `json:"owners"`
-	Notes          string     `json:"notes,omitempty"`
+	Order          int            `json:"order"`
+	Path           string         `json:"path"`
+	Line           int            `json:"line"`
+	Anchor         string         `json:"anchor"` // "path:line"
+	Title          string         `json:"title"`
+	Heat           int            `json:"heat"`
+	Tier           types.Tier     `json:"tier"`
+	Impact         int            `json:"impact"`
+	Likelihood     int            `json:"likelihood"`
+	ImpactAssessed bool           `json:"impact_assessed"`
+	Quadrant       types.Quadrant `json:"quadrant,omitempty"`
+	Why            string         `json:"why"`
+	Summary        string         `json:"summary,omitempty"`
+	CriticalReason string         `json:"critical_reason,omitempty"`
+	TopImpact      string         `json:"top_impact,omitempty"`
+	DependsOn      []string       `json:"depends_on"`
+	DependsOnCount int            `json:"depends_on_count"`
+	UsedBy         []string       `json:"used_by"`
+	UsedByCount    int            `json:"used_by_count"`
+	Owners         []string       `json:"owners"`
+	Notes          string         `json:"notes,omitempty"`
 }
 
 // Dir returns the directory of a slash-separated repo path ("." for root files).
@@ -242,12 +248,29 @@ func inFocus(p, focus string) bool {
 	return p == focus || strings.HasPrefix(p, focus+"/")
 }
 
+// moreImpactful orders files by impact, then centrality, then heat (for
+// heatmaps written before impact existed), then path.
+func moreImpactful(a, b *types.FileHeat) bool {
+	if a.Impact != b.Impact {
+		return a.Impact > b.Impact
+	}
+	if ac, bc := a.Factors.DependencyCentrality.Score, b.Factors.DependencyCentrality.Score; ac != bc {
+		return ac > bc
+	}
+	if a.HeatScore != b.HeatScore {
+		return a.HeatScore > b.HeatScore
+	}
+	return a.Path < b.Path
+}
+
 func hotter(a, b *types.FileHeat) bool {
 	if a.HeatScore != b.HeatScore {
 		return a.HeatScore > b.HeatScore
 	}
 	return a.Path < b.Path
 }
+
+var tierRank = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.TierHigh: 2, types.TierCritical: 3}
 
 // Build creates the tour. It returns ErrInvalidLimit for a negative limit and
 // ErrNoFiles when nothing matches the focus.
@@ -265,7 +288,7 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	if len(picked) == 0 {
 		return nil, fmt.Errorf("%w focus %q", ErrNoFiles, opts.Focus)
 	}
-	sort.Slice(picked, func(i, j int) bool { return hotter(picked[i], picked[j]) })
+	sort.Slice(picked, func(i, j int) bool { return moreImpactful(picked[i], picked[j]) })
 	if opts.Limit > 0 && len(picked) > opts.Limit {
 		picked = picked[:opts.Limit]
 	}
@@ -293,9 +316,15 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 	var dirs []string
 	for _, f := range picked {
 		d := Dir(f.Path)
-		if byDir[d] == nil {
-			byDir[d] = &Section{Title: d, Dir: d, MaxHeat: f.HeatScore, Tier: f.Tier}
+		s := byDir[d]
+		if s == nil {
+			s = &Section{Title: d, Dir: d, MaxImpact: f.Impact, Tier: f.Tier}
+			byDir[d] = s
 			dirs = append(dirs, d)
+		}
+		s.MaxHeat = max(s.MaxHeat, f.HeatScore)
+		if tierRank[f.Tier] > tierRank[s.Tier] {
+			s.Tier = f.Tier
 		}
 		byDir[d].Stops = append(byDir[d].Stops, newStop(hm, f, imports[f.Path], opts.Source))
 	}
@@ -313,6 +342,9 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		a, b := sections[i], sections[j]
 		if a.Level != b.Level {
 			return a.Level < b.Level
+		}
+		if a.MaxImpact != b.MaxImpact {
+			return a.MaxImpact > b.MaxImpact
 		}
 		if a.MaxHeat != b.MaxHeat {
 			return a.MaxHeat > b.MaxHeat
@@ -336,7 +368,7 @@ func Build(hm *types.Heatmap, opts Options) (*Tour, error) {
 		Branch:     hm.Metadata.Branch,
 		AnalyzedAt: formatTime(hm),
 		Focus:      opts.Focus,
-		Ordering:   "sections by dependency level (dependencies first), then max heat; stops by heat",
+		Ordering:   "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality",
 		TotalStops: order,
 		Sections:   sections,
 	}, nil
@@ -374,6 +406,10 @@ func newStop(hm *types.Heatmap, f *types.FileHeat, deps []*types.FileHeat, sourc
 		Title:          path.Base(f.Path),
 		Heat:           f.HeatScore,
 		Tier:           f.Tier,
+		Impact:         f.Impact,
+		Likelihood:     f.Likelihood,
+		ImpactAssessed: f.ImpactAssessed,
+		Quadrant:       f.Quadrant,
 		Why:            why(f),
 		TopImpact:      topImpact(br),
 		DependsOn:      hottestPaths(deps),

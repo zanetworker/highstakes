@@ -34,31 +34,19 @@ func TestCalculateHeatScore_MaxFactors(t *testing.T) {
 	}
 }
 
-func TestCalculateHeatScore_HighCoverageReducesScore(t *testing.T) {
-	// Coverage only counts in LLM mode; without the LLM it is a placeholder
-	// and carries no weight (see TestCalculateHeatScore_NoLLMWeights).
+func TestCalculateHeatScore_CoverageIgnoredWithLLM(t *testing.T) {
+	// Coverage is a placeholder: it counts in neither mode now that the LLM
+	// score is max(likelihood, impact) instead of a 40% blend.
 	base := types.Factors{
-		BlastRadius:          types.BlastRadius{Score: 50, Assessed: true},
-		DependencyCentrality: types.DependencyCentrality{Score: 0.5},
-		IncidentHistory:      types.IncidentHistory{Score: 50},
-		ChangeFrequency:      types.ChangeFrequency{Score: 50},
-		UserImpact:           types.UserImpact{Score: 50},
-		DataSensitivity:      types.DataSensitivity{Score: 50},
-		Complexity:           types.Complexity{Score: 50},
+		BlastRadius:     types.BlastRadius{Score: 50, Assessed: true},
+		ChangeFrequency: types.ChangeFrequency{Score: 50},
+		Complexity:      types.Complexity{Score: 50},
 	}
-
-	noCoverage := base
-	noCoverage.TestCoverage = types.TestCoverage{Score: 100} // No coverage = high risk score
-
-	highCoverage := base
-	highCoverage.TestCoverage = types.TestCoverage{Score: 0} // Full coverage = low risk score
-
-	scoreNoCoverage := CalculateHeatScore(noCoverage)
-	scoreHighCoverage := CalculateHeatScore(highCoverage)
-
-	if scoreHighCoverage >= scoreNoCoverage {
-		t.Errorf("high coverage (%d) should produce lower score than no coverage (%d)",
-			scoreHighCoverage, scoreNoCoverage)
+	noCoverage, highCoverage := base, base
+	noCoverage.TestCoverage = types.TestCoverage{Score: 100}
+	highCoverage.TestCoverage = types.TestCoverage{Score: 0}
+	if a, b := CalculateHeatScore(noCoverage), CalculateHeatScore(highCoverage); a != b {
+		t.Errorf("coverage changed the LLM-mode score: %d vs %d", a, b)
 	}
 }
 

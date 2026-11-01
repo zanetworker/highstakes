@@ -459,6 +459,20 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 		fmt.Sprintf("  %s %s %d", tierIcon(heat.Tier), tierLabel(heat.Tier), heat.HeatScore)))
 	b.WriteString("\n")
 
+	// The two axes: damage if it breaks, and chance it needs fixes.
+	b.WriteString("\n")
+	b.WriteString(labelStyle.Render("AXES"))
+	b.WriteString("\n")
+	if heat.ImpactAssessed {
+		fmt.Fprintf(&b, "  Impact      %d  damage if it breaks\n", heat.Impact)
+	} else {
+		fmt.Fprintf(&b, "  Impact     ~%d (estimate) damage if it breaks\n", heat.Impact)
+	}
+	fmt.Fprintf(&b, "  Likelihood  %d  chance it needs fixes\n", heat.Likelihood)
+	if heat.Quadrant != "" {
+		fmt.Fprintf(&b, "  Quadrant    %s\n", heat.Quadrant)
+	}
+
 	// Blast radius (the key insight, matches dashboard)
 	br := heat.Factors.BlastRadius
 	if br.Assessed {

@@ -40,11 +40,13 @@ highstakes analyze [flags]
 
 ## heatmap get
 
-Get the heat score and blast radius reasoning for a specific file.
+Get both axes, the quadrant and the blast radius reasoning for a specific file.
 
 ```sh
 highstakes get <file> [--json]
 ```
+
+Text output starts with one line per axis: `Impact` (damage if it breaks; `~N (estimate)` without an LLM assessment), `Likelihood` (chance it needs fixes) and, when impact is assessed, `Quadrant` with its review guidance. `--json` returns the file record, including the fields in [File fields](#file-fields).
 
 If the file is not found, suggests similar paths from the heatmap.
 
@@ -52,7 +54,7 @@ If the file is not found, suggests similar paths from the heatmap.
 
 ## highstakes get tour
 
-Get a risk-ordered reading path through the repository. Makes no LLM calls; reads only `.heatmap/heatmap.json` and the source files (for line anchors).
+Get a reading path for learning the repository: dependencies first, the most impactful files first. Makes no LLM calls; reads only `.heatmap/heatmap.json` and the source files (for line anchors).
 
 ```sh
 highstakes get tour [--limit N] [--focus <dir|file>] [--json]
@@ -60,7 +62,7 @@ highstakes get tour [--limit N] [--focus <dir|file>] [--json]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--limit` | `0` | Keep the N hottest files (0 = all). Selection happens before ordering |
+| `--limit` | `0` | Keep the N most impactful files (0 = all). Selection happens before ordering |
 | `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
 | `--json` | `false` | Output as JSON |
 
@@ -68,7 +70,9 @@ Ordering:
 
 1. Files are grouped into sections by directory (one Go package per section).
 2. Sections are ordered by dependency level: level 0 imports no other directory, level N imports something at level N-1. Levels come from the whole repo's import graph, so the order holds even when `--limit` drops the directories in between. Directories in an import cycle share a level.
-3. Within a level, sections go hottest first; within a section, files go hottest first.
+3. Within a level, sections go by max impact; within a section, files go by impact, then dependency centrality. Heat breaks remaining ties, so heatmaps from before the two axes still order sensibly.
+
+Each stop shows impact, likelihood and quadrant, and its `why` leads with the impact reason (LLM `critical_reason`, else `summary`).
 
 Test files (`*_test.go`, `*.test.ts`, `*.spec.js`, `test_*.py` and similar) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
 
@@ -86,7 +90,7 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
   "branch": "main",
   "analyzed_at": "2026-10-30T12:37:55+01:00",
   "focus": "internal",
-  "ordering": "sections by dependency level (dependencies first), then max heat; stops by heat",
+  "ordering": "sections by dependency level (dependencies first), then max impact; stops by impact, then centrality",
   "total_stops": 8,
   "sections": [
     {
@@ -95,6 +99,7 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
       "dir": "internal/types",
       "level": 0,
       "max_heat": 31,
+      "max_impact": 45,
       "tier": "medium",
       "depends_on": [],
       "used_by": ["internal/scorer", "pkg/heatmap"],
@@ -107,6 +112,10 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
           "title": "types.go",
           "heat": 31,
           "tier": "medium",
+          "impact": 45,
+          "likelihood": 31,
+          "impact_assessed": true,
+          "quadrant": "low",
           "why": "imported by 20 files",
           "summary": "LLM blast radius summary (when assessed)",
           "critical_reason": "LLM critical reason (when assessed)",
@@ -130,6 +139,8 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 | `sections[].depends_on` / `used_by` | Directories this one imports / that import it |
 | `stops[].order` | Global 1-based reading position |
 | `stops[].line`, `anchor` | First top-level declaration (`func`, `type`, `class`, `def`, `export`, `pub`, ...), else 1 |
+| `sections[].max_impact`, `tier` | Highest impact and most severe tier among the section's stops |
+| `stops[].impact`, `likelihood`, `impact_assessed`, `quadrant` | The two axes; see [File fields](#file-fields) |
 | `stops[].why` | `critical_reason`, else `summary`, else static signals (importers, recent commits, incidents) |
 | `stops[].top_impact` | Highest LLM impact dimension: `security`, `data`, `availability` or `user`; omitted when not assessed |
 | `stops[].depends_on` / `used_by` | Up to 5 files, hottest first; `*_count` is the full number |
@@ -137,7 +148,7 @@ JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: 
 
 ## highstakes list
 
-List files sorted by heat score.
+List files sorted by heat, likelihood or impact. Text rows show heat, `L` (likelihood) and `I` (impact; `I~` marks an estimate without the LLM).
 
 ```sh
 highstakes list [flags]
@@ -147,9 +158,27 @@ highstakes list [flags]
 |------|---------|-------------|
 | `--tier` | (all) | Filter by tier: `critical`, `high`, `medium`, `low` |
 | `--limit` | `0` | Maximum files to return (0 = all) |
+| `--sort` | `heat` | Sort by `heat`, `likelihood` or `impact` (descending, ties by path) |
 | `--json` | `false` | Output as JSON |
 
-**Exit code 2** if `--tier` value is invalid (error includes valid values).
+JSON rows keep `path`, `heat_score`, `tier` and `reason`, and add `likelihood`, `impact`, `impact_assessed` and `quadrant`.
+
+**Exit code 2** if `--tier` or `--sort` is invalid (error includes valid values).
+
+### File fields
+
+Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axes. See [How It Works](how-it-works.md#two-axes-likelihood-and-impact) for the formulas.
+
+| Field | Meaning |
+|-------|---------|
+| `likelihood` | 0-100, chance the file needs fixes (churn, complexity, centrality, path keywords, incidents) |
+| `impact` | 0-100, damage if it breaks: LLM blast radius, or an estimate from centrality and path keywords when not assessed |
+| `impact_assessed` | `true` when impact came from the LLM |
+| `quadrant` | `fragile-critical`, `protect`, `watch` or `low`; omitted when impact is not assessed |
+| `heat_score` | `max(likelihood, impact)` when assessed, else likelihood (kept for compatibility) |
+| `tier` | From the quadrant when assessed, else from `heat_score` |
+
+The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (impact counted as impactful: `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
 
 ## highstakes pr check
 
@@ -176,11 +205,11 @@ A changed file that is not in the heatmap (for example, a file added in this PR)
 
 ### Two-axis risk
 
-The tier answers "how important is the code this PR touches". A second, independent number answers "how risky is this change itself". Both appear in text output and in `--json`:
+The tier (the most severe tier among touched files) and importance answer "how important is the code this PR touches". A second, independent number answers "how risky is this change itself". Both appear in text output and in `--json`:
 
 | JSON field | Meaning |
 |------------|---------|
-| `importance` | 0-100, max heat of touched files (same value as `heat_score`) |
+| `importance` | 0-100, max impact of touched files; files without an LLM assessment count with their heat |
 | `change_risk` | 0-100, sum of: lines changed (up to 30), new files (5 each, up to 15), config or infra files such as CI workflows, Dockerfiles, Helm, Terraform, `go.mod` (20), lines deleted from high or critical files (up to 20), low test ratio (up to 15) |
 | `change_risk_level` | `low` (<30), `medium` (30-59), `high` (60+) |
 | `change_risk_factors` | Components worth 5 or more points, in plain words |
@@ -211,7 +240,7 @@ highstakes create codeowners [flags]
 | `--file` | `.github/CODEOWNERS` | File updated by `--write` |
 | `--json` | `false` | Output as JSON |
 
-A directory with at least two scored files, all at or above `--min-tier`, becomes one `/dir/` rule; otherwise each hot file gets its own rule. Owners are ranked the same way as `pr check` reviewers. Paths with no owner in git history are written as comments, so they never clear an earlier rule.
+A file is hot when its tier is at or above `--min-tier`, or when its LLM-assessed impact is at or above that tier's threshold (61 for `high`, 86 for `critical`), so stable but impactful code is protected even if it rarely changes. A directory with at least two scored files, all hot, becomes one `/dir/` rule; otherwise each hot file gets its own rule. Owners are ranked the same way as `pr check` reviewers. Paths with no owner in git history are written as comments, so they never clear an earlier rule.
 
 The block sits between `# BEGIN highstakes` and `# END highstakes` markers. `--write` replaces that block in place, or appends it to the end of the file, where CODEOWNERS rules take precedence. Lines outside the markers are left alone.
 
@@ -232,7 +261,7 @@ highstakes create policy [flags]
 | `--min-tier` | `high` | Lowest tier to include: `critical`, `high`, `medium`, `low` |
 | `--json` | `false` | Output JSON instead of YAML |
 
-Prints YAML by default. Fields: `version`, `generated_by`, `min_tier`, `description`, `paths` (globs: `dir/**` for fully hot directories, exact paths otherwise) and `files` (every hot file with `path`, `tier`, `heat_score` and the LLM `reason` when available). Feed `paths` to the path restrictions of Copilot code review, CodeRabbit path instructions, or your own approval bot.
+Files are selected the same way as `create codeowners`: tier at or above `--min-tier`, or assessed impact at or above that tier's threshold. Prints YAML by default. Fields: `version`, `generated_by`, `min_tier`, `description`, `paths` (globs: `dir/**` for fully hot directories, exact paths otherwise) and `files` (every hot file with `path`, `tier`, `heat_score` and the LLM `reason` when available). Feed `paths` to the path restrictions of Copilot code review, CodeRabbit path instructions, or your own approval bot.
 
 ```sh
 highstakes create policy > .github/highstakes-policy.yaml
@@ -314,9 +343,11 @@ highstakes dashboard [--output <path>] [--no-open]
 | `--output` | `.heatmap/dashboard.html` | Output file path |
 | `--no-open` | `false` | Don't open in browser |
 
-The dashboard has three views: a treemap (visual overview), a file explorer (hierarchical tree) and an architecture view. All support tier filtering, search, and a detail panel with blast radius reasoning.
+The dashboard has four views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support tier filtering, search, and a detail panel with both axes, the quadrant guidance and the blast radius reasoning.
 
-The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines, color is the most severe tier in the directory, and the label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. The layout is computed in the page (layered, with barycenter ordering to reduce crossings), so the HTML stays self-contained.
+The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. Node size is total lines; color is the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. The layout is computed in the page (layered, with barycenter ordering to reduce crossings), so the HTML stays self-contained.
+
+The quadrant view plots every non-test file with likelihood on x and impact on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its review guidance. Faded dots have an estimated impact. Click a dot to open the file in the detail panel.
 
 ## highstakes github install
 
@@ -370,7 +401,7 @@ highstakes check calibration --labels FILE [--top 10] [--json]
 | Lift | precision@K divided by the base rate; 1.0 means no better than a random pick |
 | Spearman | Rank correlation between the score and the event count, with average ranks for ties; `n/a` when a side has no variation |
 
-Metrics are reported for `heat` and for `blast_radius` (LLM-assessed files only), `churn`, `complexity` and `centrality` alone. Surprises list LOW-tier files with the most events and CRITICAL/HIGH files with none.
+Metrics are reported for `heat`, for the two axes (`likelihood`; `impact`, on LLM-assessed files only when any are assessed, else the estimate) and for `blast_radius` (LLM-assessed files only), `churn`, `complexity` and `centrality` alone. In holdout mode likelihood is recomputed at the cutoff and quadrant tiers are reassigned from it. Surprises list LOW-tier files with the most events and CRITICAL/HIGH files with none.
 
 The report starts with the event kinds counted (`event_filter` in JSON). When fewer than 10 scored files have events it prints a `WARNING` line and sets `too_few_events`: the numbers are then anecdotes, not evidence.
 

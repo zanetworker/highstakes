@@ -19,7 +19,8 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 		FilesChanged: make([]types.FileChange, 0, len(changes)),
 	}
 
-	maxHeat := 0
+	maxHeat, importance := 0, 0
+	maxTier := types.TierLow
 	var unscored []string
 
 	for _, change := range changes {
@@ -51,13 +52,24 @@ func CalculatePRRisk(prNumber int, changes []FileChange, hm *types.Heatmap, thre
 		if fc.HeatScore > maxHeat {
 			maxHeat = fc.HeatScore
 		}
+		if tierRank[fc.Tier] > tierRank[maxTier] {
+			maxTier = fc.Tier
+		}
+		imp := fc.HeatScore
+		if ok && heat.ImpactAssessed {
+			imp = heat.Impact
+		}
+		importance = max(importance, imp)
 	}
 
 	risk.HeatScore = maxHeat
-	risk.Importance = maxHeat
+	// Importance is what breaks if the touched code breaks: the max impact of
+	// assessed files, falling back to heat for files without an assessment.
+	risk.Importance = importance
 	risk.ChangeRisk, risk.ChangeRiskFactors = ChangeRisk(changes, hm)
 	risk.ChangeRiskLevel = ChangeRiskLevel(risk.ChangeRisk)
-	risk.Tier = scorer.CalculateTier(maxHeat, thresholds)
+	// The PR takes the most severe file tier, so quadrant tiers carry over.
+	risk.Tier = maxTier
 	risk.ReviewRequirements = scorer.CalculateReviewRequirements(risk.Tier)
 	risk.CircuitBreakerSignals = checkCircuitBreakers(changes, hm)
 	if len(unscored) > 0 {

@@ -11,7 +11,8 @@ import (
 
 // file builds a FileHeat; importedBy lists files that import this one.
 func file(path string, heat int, tier types.Tier, importedBy ...string) *types.FileHeat {
-	f := &types.FileHeat{Path: path, HeatScore: heat, Tier: tier, Size: types.FileSize{Lines: 100}}
+	// Impact mirrors heat so fixtures read as "how much this file matters".
+	f := &types.FileHeat{Path: path, HeatScore: heat, Impact: heat, Tier: tier, Size: types.FileSize{Lines: 100}}
 	for _, p := range importedBy {
 		f.Dependencies.ImportedBy = append(f.Dependencies.ImportedBy, types.Dependency{Path: p})
 	}
@@ -487,4 +488,50 @@ func TestBuild_OnlyTestFiles(t *testing.T) {
 	if !errors.Is(err, ErrNoFiles) {
 		t.Errorf("err = %v, want ErrNoFiles", err)
 	}
+}
+
+func TestBuild_OrdersByImpact(t *testing.T) {
+	mk := func(path string, heat, impact, likelihood int, centrality float64, importedBy ...string) *types.FileHeat {
+		f := file(path, heat, types.TierLow, importedBy...)
+		f.Impact, f.Likelihood, f.ImpactAssessed = impact, likelihood, true
+		f.Factors.DependencyCentrality.Score = centrality
+		return f
+	}
+	hm := hmOf(
+		mk("core/churny.go", 95, 20, 95, 0.1), // hottest, low impact
+		mk("core/auth.go", 70, 90, 10, 0.2),   // stable, impactful
+		mk("core/tie_a.go", 10, 50, 5, 0.1),   // ties on impact: centrality decides
+		mk("core/tie_b.go", 10, 50, 5, 0.9),
+		mk("app/app.go", 99, 30, 99, 0, "x"), // level 0 too; lower max impact than core
+		mk("svc/svc.go", 50, 99, 50, 0),      // level 1: imports core
+	)
+	hm.Files["core/auth.go"].Dependencies.ImportedBy = []types.Dependency{{Path: "svc/svc.go"}}
+	hm.Files["core/auth.go"].Quadrant = types.QuadrantProtect
+
+	tr, err := Build(hm, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"core/auth.go", "core/tie_b.go", "core/tie_a.go", "core/churny.go", "app/app.go", "svc/svc.go"}
+	if got := stopPaths(tr); !reflect.DeepEqual(got, want) {
+		t.Errorf("stops = %v, want %v", got, want)
+	}
+	core := tr.Sections[0]
+	if core.Dir != "core" || core.MaxImpact != 90 || core.MaxHeat != 95 {
+		t.Errorf("core section = dir %s max_impact %d max_heat %d, want core 90 95", core.Dir, core.MaxImpact, core.MaxHeat)
+	}
+	st := core.Stops[0]
+	if st.Impact != 90 || st.Likelihood != 10 || !st.ImpactAssessed || st.Quadrant != types.QuadrantProtect {
+		t.Errorf("stop axes = impact %d likelihood %d assessed %v quadrant %q", st.Impact, st.Likelihood, st.ImpactAssessed, st.Quadrant)
+	}
+
+	t.Run("limit keeps the most impactful files", func(t *testing.T) {
+		tr, err := Build(hm, Options{Limit: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := stopPaths(tr), []string{"core/auth.go", "svc/svc.go"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("stops = %v, want %v", got, want)
+		}
+	})
 }

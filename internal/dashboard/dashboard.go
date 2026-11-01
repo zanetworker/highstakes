@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -28,6 +29,11 @@ type fileEntry struct {
 	Language     string `json:"language"`
 	Complexity   int    `json:"complexity"`
 	ImportedBy   int    `json:"imported_by"`
+	Likelihood   int    `json:"likelihood"`
+	Impact       int    `json:"impact"`
+	Assessed     bool   `json:"impact_assessed"`
+	Quadrant     string `json:"quadrant"`
+	Test         bool   `json:"test"`
 }
 
 func Generate(hm *types.Heatmap, outputPath string) error {
@@ -67,6 +73,8 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 			Lines: lines, Language: f.Language,
 			Complexity: f.Factors.Complexity.Cyclomatic,
 			ImportedBy: len(f.Dependencies.ImportedBy),
+			Likelihood: f.Likelihood, Impact: f.Impact, Assessed: f.ImpactAssessed,
+			Quadrant: string(f.Quadrant), Test: tour.IsTestFile(f.Path),
 		})
 	}
 
@@ -89,13 +97,15 @@ func Generate(hm *types.Heatmap, outputPath string) error {
 	actionsJSON, _ := json.Marshal(actionItems)
 
 	statsJSON, _ := json.Marshal(map[string]interface{}{
-		"total":       len(files),
-		"tiers":       tierCounts,
-		"repo":        hm.Metadata.RepoPath,
-		"analyzed_at": hm.Metadata.AnalyzedAt.Format("2006-01-02 15:04"),
-		"commit":      hm.Metadata.CommitSHA,
-		"branch":      hm.Metadata.Branch,
-		"languages":   hm.Metadata.Languages,
+		"total":            len(files),
+		"tiers":            tierCounts,
+		"repo":             hm.Metadata.RepoPath,
+		"analyzed_at":      hm.Metadata.AnalyzedAt.Format("2006-01-02 15:04"),
+		"commit":           hm.Metadata.CommitSHA,
+		"branch":           hm.Metadata.Branch,
+		"languages":        hm.Metadata.Languages,
+		"likely_cutoff":    hm.Metadata.LikelyCutoff,
+		"impact_threshold": hm.Metadata.ImpactThreshold,
 	})
 
 	archJSON, _ := json.Marshal(buildArchitecture(hm))
@@ -219,6 +229,22 @@ header .meta{font:12px var(--font-m);color:var(--muted)}
 .arch .ae text{font:10px var(--font-m);fill:var(--muted)}
 .arch .ae.hl text{fill:var(--text)}
 .arch .arrow{fill:var(--dim)}
+.arch .an-frag{fill:none;stroke:var(--medium);stroke-width:1.5;stroke-dasharray:4 3}
+.arch .an-likely{font:600 10px var(--font-m);fill:var(--medium)}
+.arch-legend{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:4px}
+.arch-legend span{display:inline-flex;align-items:center;gap:5px}
+.arch-legend i{display:inline-block;width:12px;height:10px;border-radius:2px;border:1.5px solid}
+.arch-legend i.frag{border:1.5px dashed var(--medium);background:none}
+.quad{flex:1;display:none;position:relative;overflow:hidden}
+.quad svg{display:block}
+.quad .qd{cursor:pointer;stroke:#000;stroke-width:.5}
+.quad .qd:hover,.quad .qd.sel{stroke:#fff;stroke-width:2}
+.quad .qline{stroke:var(--muted);stroke-dasharray:5 4}
+.quad .qaxis{stroke:var(--border)}
+.quad .qtick{font:10px var(--font-m);fill:var(--dim)}
+.quad .qtitle{font:600 12px var(--font-d)}
+.quad .qguide{font:11px var(--font-t);fill:var(--muted);paint-order:stroke;stroke:#000;stroke-width:3px}
+.quad .qlab{font:600 11px var(--font-d);fill:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .flist .ex-row{padding:4px 0}
 .controls{display:flex;gap:6px;padding:6px 12px;align-items:center;border-bottom:1px solid var(--border)}
 .controls label{font:10px var(--font-d);color:var(--muted);text-transform:uppercase;letter-spacing:1px}
@@ -243,6 +269,7 @@ input:focus{outline:none;border-color:var(--accent)}
 <button class="on" onclick="setMode('treemap',this)">Treemap</button>
 <button onclick="setMode('explorer',this)">Explorer</button>
 <button onclick="setMode('arch',this)">Architecture</button>
+<button onclick="setMode('quadrant',this)">Quadrant</button>
 </div>
 <label style="margin-left:12px">Tier:</label>
 <button class="fbtn on" onclick="setView('all',this)">All</button>
@@ -264,6 +291,7 @@ input:focus{outline:none;border-color:var(--accent)}
 </div>
 <div class="explorer" id="explorer"></div>
 <div class="arch" id="arch"></div>
+<div class="quad" id="quadrant"></div>
 <div class="detail" id="detail"><div class="empty">Click a file to see its blast radius</div></div>
 </div>
 <script>
@@ -272,6 +300,11 @@ const STATS=/*__STATS__*/{};
 const ACTIONS=/*__ACTIONS__*/[];
 const ARCH=/*__ARCH__*/{};
 const C={critical:'#EE0000',high:'#E85D75',medium:'#D4874D',low:'#2D8A2D'};
+const QUAD={
+  'fragile-critical':{label:'Fragile and critical',guide:'likely to break and costly when it does: senior review, add tests first'},
+  'protect':{label:'Protect',guide:'stable but costly if broken: keep owners on review, never auto-merge'},
+  'watch':{label:'Watch',guide:'changes and breaks often, limited damage: refactor or add tests'},
+  'low':{label:'Low stakes',guide:'light review'}};
 
 document.getElementById('meta').textContent=(STATS.branch||'')+' @ '+(STATS.commit||'').slice(0,7)+'  |  '+STATS.analyzed_at+'  |  '+STATS.total+' files';
 
@@ -504,6 +537,15 @@ function selectFile(path){
   let h='<h3>'+f.path+'</h3>';
   h+='<span class="tier-badge" style="background:'+c+'22;color:'+c+'">'+f.tier+' '+f.heat_score+'</span>';
 
+  h+='<div class="sec"><div class="sec-title">Two axes</div>';
+  [{l:'Impact',v:f.impact,n:f.impact_assessed?'damage if it breaks':'estimate (no LLM)'},{l:'Likelihood',v:f.likelihood,n:'chance it needs fixes'}].forEach(a=>{
+    const v=a.v||0, bc=v>=86?C.critical:v>=61?C.high:v>=31?C.medium:C.low;
+    h+='<div class="bar-r"><span class="bl">'+a.l+'</span><div class="b"><div class="bf" style="width:'+v+'%;background:'+bc+'"></div></div><span class="bv" style="color:'+bc+'">'+v+'</span></div>';
+    h+='<div class="reason" style="font-size:11px;color:var(--muted);margin:0 0 4px 78px">'+a.n+'</div>';
+  });
+  if(f.quadrant)h+='<div class="reason"><strong>'+QUAD[f.quadrant].label+'</strong>: '+QUAD[f.quadrant].guide+'</div>';
+  h+='</div>';
+
   if(f.reason){
     h+='<div class="sec"><div class="sec-title">Blast Radius</div>';
     h+='<div class="reason">'+f.reason+'</div>';
@@ -546,6 +588,7 @@ function setMode(mode,btn){
   document.getElementById('treemap-wrap').style.display=mode==='treemap'?'block':'none';
   document.getElementById('explorer').style.display=mode==='explorer'?'block':'none';
   document.getElementById('arch').style.display=mode==='arch'?'block':'none';
+  document.getElementById('quadrant').style.display=mode==='quadrant'?'block':'none';
   rerender();
 }
 
@@ -639,6 +682,7 @@ function toggleDir(id,row){
 function rerender(){
   if(viewMode==='treemap')renderTreemap();
   else if(viewMode==='arch')renderArch();
+  else if(viewMode==='quadrant')renderQuadrant();
   else renderExplorer();
 }
 
@@ -712,19 +756,70 @@ function renderArch(){
   }
   for(const id in boxes){
     const {n,x,y,w,h}=boxes[id];
-    const c=C[n.tier]||C.low;
+    const c=C[n.impact_tier||n.tier]||C.low;
     const dim=(!visible.has(n.id))||(archSel&&!linked.has(n.id));
     const hot=n.hottest.split('/').pop();
+    const score=n.max_impact?n.max_impact:n.max_heat;
     s+='<g class="an'+(archSel===n.id?' sel':'')+(dim?' dim':'')+'" data-dir="'+attr(n.id)+'">';
+    if(n.likely>0)s+='<rect class="an-frag" x="'+(x-4)+'" y="'+(y-4)+'" width="'+(w+8)+'" height="'+(h+8)+'" rx="9"/>';
     s+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="6" fill="'+c+'2E" stroke="'+c+'"/>';
     s+='<text class="an-dir" x="'+(x+10)+'" y="'+(y+20)+'">'+html(clip(n.id==='.'?'(root)':n.id,w-50,7.2))+'</text>';
-    s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+20)+'" text-anchor="end" fill="'+c+'">'+n.max_heat+'</text>';
-    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(hot+' · '+n.files+' files · '+n.lines+' lines',w-20,6))+'</text>';
-    s+='<title>'+html(n.id)+'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')\n'+n.files+' files, '+n.lines+' lines</title></g>';
+    s+='<text class="an-heat" x="'+(x+w-10)+'" y="'+(y+20)+'" text-anchor="end" fill="'+c+'">'+score+'</text>';
+    const meta=n.files+' files'+(n.likely>0?'':' · '+n.lines+' lines');
+    s+='<text class="an-hot" x="'+(x+10)+'" y="'+(y+38)+'">'+html(clip(hot+' · '+meta,w-(n.likely>0?70:20),6))+'</text>';
+    if(n.likely>0)s+='<text class="an-likely" x="'+(x+w-10)+'" y="'+(y+38)+'" text-anchor="end">'+n.likely+' likely</text>';
+    s+='<title>'+html(n.id)+'\nmax impact: '+(n.max_impact||'not assessed')+'\nhottest: '+html(n.hottest)+' ('+n.max_heat+')\n'+n.likely+' file(s) likely to need fixes\n'+n.files+' files, '+n.lines+' lines</title></g>';
   }
   s+='</svg>';
-  el.innerHTML='<div class="arch-hint">Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines, color = most severe tier. Click a package to list its files.</div>'+s;
+  const legend='<div class="arch-legend">'+['critical','high','medium','low'].map(t=>'<span><i style="border-color:'+C[t]+';background:'+C[t]+'2E"></i>'+t+' impact</span>').join('')+
+    '<span><i class="frag"></i>contains files likely to need fixes</span></div>';
+  el.innerHTML='<div class="arch-hint">Packages by dependency layer: entry points on top, foundations below. Arrows point from importer to dependency (label = importing files). Size = lines; color = max impact if a file breaks (heat tier when not assessed); number = max impact. A dashed outline marks packages with files likely to need fixes. Click a package to list its files.'+legend+'</div>'+s;
   el.querySelectorAll('.an').forEach(g=>g.addEventListener('click',()=>selectDir(g.dataset.dir)));
+}
+
+// Quadrant view: x = likelihood of needing fixes, y = impact if it breaks.
+let quadSel=null;
+function renderQuadrant(){
+  const el=document.getElementById('quadrant');
+  const files=getFiltered().filter(f=>!f.test);
+  if(!files.length){el.innerHTML='<div class="empty">No files match filter</div>';return}
+  const assessed=files.some(f=>f.impact_assessed);
+  const rect=el.getBoundingClientRect();
+  const W=Math.max(rect.width,420),H=Math.max(rect.height-44,320);
+  const L=54,R=18,T=34,B=44,pw=W-L-R,ph=H-T-B;
+  const X=v=>L+v/100*pw, Y=v=>T+(100-v)/100*ph;
+  const cut=STATS.likely_cutoff>0&&STATS.likely_cutoff<=100?STATS.likely_cutoff:null;
+  const thr=STATS.impact_threshold||61;
+  let s='<svg width="'+W+'" height="'+H+'" xmlns="http://www.w3.org/2000/svg">';
+  s+='<rect class="qaxis" x="'+L+'" y="'+T+'" width="'+pw+'" height="'+ph+'" fill="none"/>';
+  for(let v=0;v<=100;v+=20){
+    s+='<text class="qtick" x="'+X(v)+'" y="'+(T+ph+14)+'" text-anchor="middle">'+v+'</text>';
+    s+='<text class="qtick" x="'+(L-6)+'" y="'+(Y(v)+3)+'" text-anchor="end">'+v+'</text>';
+  }
+  s+='<text class="qlab" x="'+(L+pw/2)+'" y="'+(H-8)+'" text-anchor="middle">Likelihood of needing fixes (churn, complexity) &#8594;</text>';
+  s+='<text class="qlab" transform="translate(14,'+(T+ph/2)+') rotate(-90)" text-anchor="middle">Impact if it breaks &#8594;</text>';
+  const xm=cut?X(cut):X(80), ym=Y(thr);
+  if(cut)s+='<line class="qline" x1="'+xm+'" y1="'+T+'" x2="'+xm+'" y2="'+(T+ph)+'"><title>likely: top 20% of non-test files (likelihood &#8805; '+cut+')</title></line>';
+  s+='<line class="qline" x1="'+L+'" y1="'+ym+'" x2="'+(L+pw)+'" y2="'+ym+'"><title>impactful: impact &#8805; '+thr+'</title></line>';
+  const corner=(q,x,y,anchor)=>{const c=q==='fragile-critical'?C.critical:q==='protect'?C.high:q==='watch'?C.medium:C.low;
+    const room=anchor==='end'?(L+pw-xm-16):(xm-L-16);
+    return '<text class="qtitle" x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" fill="'+c+'">'+QUAD[q].label+'</text>'+
+      QUAD[q].guide.split(': ').map((g,i)=>'<text class="qguide" x="'+x+'" y="'+(y+14+i*13)+'" text-anchor="'+anchor+'">'+html(clip(g,room,5.6))+'</text>').join('')};
+  const jit=p=>{let h=0;for(const ch of p)h=(h*31+ch.charCodeAt(0))|0;return ((h%1000)/1000-0.5)*1.6};
+  const sorted=[...files].sort((a,b)=>(a.impact+a.likelihood)-(b.impact+b.likelihood));
+  for(const f of sorted){
+    const c=C[f.tier]||C.low;
+    const cx=X(Math.min(100,Math.max(0,f.likelihood+jit(f.path)))), cy=Y(Math.min(100,Math.max(0,f.impact+jit(f.path+'#'))));
+    s+='<circle class="qd'+(quadSel===f.path?' sel':'')+'" data-path="'+attr(f.path)+'" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+(f.impact_assessed?5:4)+'" fill="'+c+'" fill-opacity="'+(f.impact_assessed?0.85:0.45)+'">'+
+      '<title>'+html(f.path)+'\nimpact '+f.impact+(f.impact_assessed?'':' (estimate)')+', likelihood '+f.likelihood+(f.quadrant?'\n'+QUAD[f.quadrant].label:'')+(f.reason?'\n'+html(f.reason):'')+'</title></circle>';
+  }
+  // Labels after the dots so they stay readable on top.
+  s+=corner('protect',L+8,T+16,'start')+corner('fragile-critical',L+pw-8,T+16,'end');
+  s+=corner('low',L+8,T+ph-34,'start')+corner('watch',L+pw-8,T+ph-34,'end');
+  s+='</svg>';
+  const note=assessed?'':' Impact is estimated from centrality and path keywords (no LLM assessment); tiers come from heat.';
+  el.innerHTML='<div class="arch-hint">Each dot is a file (tests left out). Right of the vertical line: top 20% likelihood in this repo. Above the horizontal line: impact &#8805; '+thr+'. Color = tier. Click a dot for details.'+note+'</div>'+s;
+  el.querySelectorAll('.qd').forEach(d=>d.addEventListener('click',()=>{quadSel=d.dataset.path;renderQuadrant();selectFile(d.dataset.path)}));
 }
 
 function clip(t,px,charW){const n=Math.max(4,Math.floor(px/charW));return t.length>n?t.slice(0,n-1)+'…':t}
@@ -755,7 +850,7 @@ function selectDir(dir){
   d.querySelectorAll('[data-path]').forEach(r=>r.addEventListener('click',()=>selectFile(r.dataset.path)));
 }
 
-window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap()});
+window.addEventListener('resize',()=>{if(viewMode==='treemap')renderTreemap();else if(viewMode==='quadrant')renderQuadrant()});
 renderTreemap();
 </script>
 </body>

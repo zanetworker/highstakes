@@ -46,7 +46,7 @@ var createCodeownersCmd = &cobra.Command{
 			return err
 		}
 
-		entries := policy.HotPaths(hm, minTier)
+		entries := policy.HotPaths(hm, minTier, cfg.Tiers)
 		var files []string
 		for _, e := range entries {
 			files = append(files, e.Files...)
@@ -109,7 +109,11 @@ var createPolicyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		p := policy.Build(hm, policy.HotPaths(hm, minTier), minTier)
+		cfg, err := loadConfigOrDefault()
+		if err != nil {
+			return err
+		}
+		p := policy.Build(hm, policy.HotPaths(hm, minTier, cfg.Tiers), minTier)
 		if jsonOut {
 			return printJSON(p)
 		}

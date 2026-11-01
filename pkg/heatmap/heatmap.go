@@ -165,14 +165,12 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				CriticalReason:     assessment.CriticalReason,
 				Assessed:           true,
 			}
-			// Recalculate heat score with LLM data
-			heat.HeatScore = scorer.CapTestFile(scorer.CalculateHeatScore(heat.Factors), tour.IsTestFile(path), g.config.Tiers)
-			heat.Tier = scorer.CalculateTier(heat.HeatScore, g.config.Tiers)
-			heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
+			scoreFile(heat, tour.IsTestFile(path), g.config.Tiers)
 		}
 
 		heatmap.Files[path] = heat
 	}
+	applyAxes(heatmap, g.config.Tiers)
 
 	// Load existing incidents if any
 	incidents, err := LoadIncidents(filepath.Join(g.repoPath, ".heatmap", "incidents.json"))
@@ -256,10 +254,6 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		FunctionCount: fileInfo.FunctionCount,
 	}
 
-	// Calculate aggregate heat score
-	heatScore := scorer.CapTestFile(scorer.CalculateHeatScore(factors), tour.IsTestFile(path), g.config.Tiers)
-	tier := scorer.CalculateTier(heatScore, g.config.Tiers)
-
 	// Build dependencies
 	deps := types.Dependencies{
 		ImportedBy: make([]types.Dependency, 0, len(fileInfo.ImportedBy)),
@@ -282,17 +276,37 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		recentChanges = hist.RecentChanges
 	}
 
-	return &types.FileHeat{
-		Path:               path,
-		HeatScore:          heatScore,
-		Tier:               tier,
-		Language:           fileInfo.Language,
-		Size:               types.FileSize{Lines: fileInfo.Lines, Bytes: fileInfo.Bytes},
-		Factors:            factors,
-		Dependencies:       deps,
-		RecentChanges:      recentChanges,
-		ReviewRequirements: scorer.CalculateReviewRequirements(tier),
+	heat := &types.FileHeat{
+		Path:          path,
+		Language:      fileInfo.Language,
+		Size:          types.FileSize{Lines: fileInfo.Lines, Bytes: fileInfo.Bytes},
+		Factors:       factors,
+		Dependencies:  deps,
+		RecentChanges: recentChanges,
 	}
+	scoreFile(heat, tour.IsTestFile(path), g.config.Tiers)
+	return heat
+}
+
+// scoreFile sets both axes, heat, tier and review requirements from the
+// file's factors. Test files are capped below MEDIUM on every score. The
+// tier is provisional for assessed files: applyAxes replaces it with the
+// quadrant tier once every file is scored.
+func scoreFile(heat *types.FileHeat, isTest bool, tiers types.TierThresholds) {
+	impact, assessed := scorer.CalculateImpact(heat.Factors)
+	heat.Likelihood = scorer.CapTestFile(scorer.CalculateLikelihood(heat.Factors), isTest, tiers)
+	heat.Impact = scorer.CapTestFile(impact, isTest, tiers)
+	heat.ImpactAssessed = assessed
+	heat.HeatScore = scorer.CapTestFile(scorer.CalculateHeatScore(heat.Factors), isTest, tiers)
+	heat.Tier = scorer.CalculateTier(heat.HeatScore, tiers)
+	heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
+}
+
+// applyAxes derives quadrant tiers from the repo-relative likelihood cutoff
+// and records the cutoff and impact threshold in the metadata.
+func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
+	hm.Metadata.LikelyCutoff = scorer.ApplyQuadrants(hm.Files, tiers, tour.IsTestFile)
+	hm.Metadata.ImpactThreshold = tiers.High
 }
 
 // getFileIncidents returns incidents for a file

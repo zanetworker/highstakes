@@ -122,6 +122,15 @@ func Run(hm *types.Heatmap, commits []gitanalyzer.CommitInfo, incidents []types.
 		files = append(files, fh)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	if opts.Holdout {
+		// Likelihood changed at the cutoff, so the repo-relative "likely"
+		// set and the quadrant tiers of assessed files change with it.
+		rescored := make(map[string]*types.FileHeat, len(files))
+		for _, fh := range files {
+			rescored[fh.Path] = fh
+		}
+		scorer.ApplyQuadrants(rescored, opts.Tiers, tour.IsTestFile)
+	}
 
 	inPop := map[string]bool{}
 	evOf := func(path string) FileEvents {
@@ -212,6 +221,7 @@ func rescoreAtCutoff(fh *types.FileHeat, commits []gitanalyzer.CommitInfo, incid
 	}
 
 	out.Factors = f
+	out.Likelihood = scorer.CalculateLikelihood(f)
 	out.HeatScore = scorer.CalculateHeatScore(f)
 	out.Tier = scorer.CalculateTier(out.HeatScore, tiers)
 	return &out
@@ -257,6 +267,10 @@ var signalDefs = []signalDef{
 	{"churn", func(f *types.FileHeat) float64 { return float64(f.Factors.ChangeFrequency.Score) }},
 	{"complexity", func(f *types.FileHeat) float64 { return float64(f.Factors.Complexity.Score) }},
 	{"centrality", func(f *types.FileHeat) float64 { return f.Factors.DependencyCentrality.Score * 100 }},
+	// The two axes, computed from factors so heatmaps written before the
+	// axes existed are measured the same way.
+	{"likelihood", func(f *types.FileHeat) float64 { return float64(scorer.CalculateLikelihood(f.Factors)) }},
+	{"impact", func(f *types.FileHeat) float64 { i, _ := scorer.CalculateImpact(f.Factors); return float64(i) }},
 }
 
 func signalResults(files []*types.FileHeat, evOf func(string) FileEvents, k int) []SignalResult {
@@ -279,13 +293,16 @@ func signalResults(files []*types.FileHeat, evOf func(string) FileEvents, k int)
 				out = append(out, res)
 				continue
 			}
-			pop = nil
-			for _, fh := range files {
-				if fh.Factors.BlastRadius.Assessed {
-					pop = append(pop, fh)
-				}
-			}
+			pop = assessedOnly(files)
 			res.Note = fmt.Sprintf("assessed files only (%d of %d)", len(pop), len(files))
+		}
+		if def.name == "impact" {
+			if assessed {
+				pop = assessedOnly(files)
+				res.Note = fmt.Sprintf("assessed files only (%d of %d)", len(pop), len(files))
+			} else {
+				res.Note = "estimate from centrality and path keywords (no LLM assessment)"
+			}
 		}
 
 		items := make([]Item, len(pop))
@@ -303,6 +320,16 @@ func signalResults(files []*types.FileHeat, evOf func(string) FileEvents, k int)
 			res.Spearman = &rho
 		}
 		out = append(out, res)
+	}
+	return out
+}
+
+func assessedOnly(files []*types.FileHeat) []*types.FileHeat {
+	var out []*types.FileHeat
+	for _, fh := range files {
+		if fh.Factors.BlastRadius.Assessed {
+			out = append(out, fh)
+		}
 	}
 	return out
 }

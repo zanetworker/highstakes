@@ -9,13 +9,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/highstakes/internal/tour"
+	"github.com/zanetworker/highstakes/internal/types"
 )
 
 // tourCmd is a subcommand of `get`; cobra matches subcommands before
 // positional args, so `get tour` and `get <file>` both work.
 var tourCmd = &cobra.Command{
 	Use:   "tour",
-	Short: "Get a risk-ordered reading path (dependencies first, hottest first)",
+	Short: "Get a reading path for learning the code (dependencies first, most impactful first)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
@@ -53,9 +54,9 @@ func printTour(w io.Writer, tr *tour.Tour) {
 	fmt.Fprintln(w, header)
 
 	for _, s := range tr.Sections {
-		fmt.Fprintf(w, "\n%d. %s  [level %d, max heat %d %s]\n", s.Order, s.Title, s.Level, s.MaxHeat, strings.ToUpper(string(s.Tier)))
+		fmt.Fprintf(w, "\n%d. %s  [level %d, max impact %d, %s]\n", s.Order, s.Title, s.Level, s.MaxImpact, strings.ToUpper(string(s.Tier)))
 		for _, st := range s.Stops {
-			fmt.Fprintf(w, "   %d. %s  %s %d %s\n", st.Order, st.Anchor, tierEmoji(st.Tier), st.Heat, st.Tier)
+			fmt.Fprintf(w, "   %d. %s  %s %s  %s\n", st.Order, st.Anchor, tierEmoji(st.Tier), st.Tier, axesLabel(st.Impact, st.Likelihood, st.ImpactAssessed, st.Quadrant))
 			fmt.Fprintf(w, "      why: %s\n", st.Why)
 			if len(st.DependsOn) > 0 {
 				fmt.Fprintf(w, "      depends on: %s%s\n", strings.Join(st.DependsOn, ", "), more(st.DependsOnCount, len(st.DependsOn)))
@@ -73,6 +74,14 @@ func printTour(w io.Writer, tr *tour.Tour) {
 	}
 }
 
+// axesLabel renders both axes, marking an impact estimate made without the LLM.
+func axesLabel(impact, likelihood int, assessed bool, q types.Quadrant) string {
+	if !assessed {
+		return fmt.Sprintf("impact ~%d (estimate), likelihood %d", impact, likelihood)
+	}
+	return fmt.Sprintf("impact %d, likelihood %d, %s", impact, likelihood, q)
+}
+
 func more(total, shown int) string {
 	if total > shown {
 		return fmt.Sprintf(" (+%d more)", total-shown)
@@ -82,7 +91,7 @@ func more(total, shown int) string {
 
 func init() {
 	tourCmd.Flags().Bool("json", false, "Output as JSON")
-	tourCmd.Flags().Int("limit", 0, "Keep the N hottest files (0 = all)")
+	tourCmd.Flags().Int("limit", 0, "Keep the N most impactful files (0 = all)")
 	tourCmd.Flags().String("focus", "", "Only files under this repo-relative directory or file")
 	scoreCmd.AddCommand(tourCmd)
 }

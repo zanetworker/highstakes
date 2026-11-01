@@ -152,6 +152,7 @@ func TestGetFile_StillWorks(t *testing.T) {
 func TestPrintTour(t *testing.T) {
 	tr, err := tour.Build(&types.Heatmap{Files: map[string]*types.FileHeat{
 		"core/a.go": {Path: "core/a.go", HeatScore: 80, Tier: types.TierHigh,
+			Impact: 80, Likelihood: 20, ImpactAssessed: true, Quadrant: types.QuadrantProtect,
 			Dependencies: types.Dependencies{ImportedBy: []types.Dependency{{Path: "cmd/main.go"}}}},
 		"cmd/main.go": {Path: "cmd/main.go", HeatScore: 30, Tier: types.TierLow},
 	}}, tour.Options{})
@@ -161,7 +162,8 @@ func TestPrintTour(t *testing.T) {
 	var buf bytes.Buffer
 	printTour(&buf, tr)
 	out := buf.String()
-	for _, want := range []string{"2 stops", "1. core", "1. core/a.go:1", "used by: cmd/main.go", "2. cmd", "2. cmd/main.go:1", "depends on: core/a.go"} {
+	for _, want := range []string{"2 stops", "1. core", "1. core/a.go:1", "used by: cmd/main.go", "2. cmd", "2. cmd/main.go:1", "depends on: core/a.go",
+		"impact 80, likelihood 20, protect", "max impact 80", "impact ~0 (estimate), likelihood 0"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

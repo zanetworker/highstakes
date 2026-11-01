@@ -3,6 +3,7 @@ package dashboard
 import (
 	"sort"
 
+	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -13,9 +14,16 @@ type archNode struct {
 	Files   int    `json:"files"`    // file count
 	Lines   int    `json:"lines"`    // total lines; drives node size
 	MaxHeat int    `json:"max_heat"` // heat of the hottest file
-	Tier    string `json:"tier"`     // most severe tier in the directory; drives color
+	Tier    string `json:"tier"`     // most severe tier in the directory
 	Hottest string `json:"hottest"`  // path of the hottest file
 	Level   int    `json:"level"`    // dependency depth; 0 = imports no other directory
+	// MaxImpact is the highest LLM-assessed impact (0 when none assessed).
+	// ImpactTier, the node colour, is the tier of MaxImpact, or Tier when no
+	// file in the directory was assessed. Likely counts likely files and
+	// drives the fragility marker.
+	MaxImpact  int    `json:"max_impact"`
+	ImpactTier string `json:"impact_tier"`
+	Likely     int    `json:"likely"`
 }
 
 // archEdge says Count distinct files in From import a file in To.
@@ -36,6 +44,7 @@ var tierRank = map[types.Tier]int{types.TierLow: 0, types.TierMedium: 1, types.T
 // to directory edges. Nodes are ordered by level, then max heat, then name.
 func buildArchitecture(hm *types.Heatmap) architecture {
 	nodes := map[string]*archNode{}
+	assessed := map[string]bool{}
 	for _, f := range hm.Files {
 		if tour.IsTestFile(f.Path) {
 			continue
@@ -53,6 +62,19 @@ func buildArchitecture(hm *types.Heatmap) architecture {
 		}
 		if tierRank[f.Tier] > tierRank[types.Tier(n.Tier)] {
 			n.Tier = string(f.Tier)
+		}
+		if f.ImpactAssessed {
+			assessed[d] = true
+			n.MaxImpact = max(n.MaxImpact, f.Impact)
+		}
+		if cutoff := hm.Metadata.LikelyCutoff; cutoff > 0 && f.Likelihood >= cutoff {
+			n.Likely++
+		}
+	}
+	for d, n := range nodes {
+		n.ImpactTier = n.Tier
+		if assessed[d] {
+			n.ImpactTier = string(scorer.CalculateTier(n.MaxImpact, scorer.DefaultTierThresholds()))
 		}
 	}
 

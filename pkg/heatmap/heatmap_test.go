@@ -12,6 +12,7 @@ import (
 
 	"github.com/zanetworker/highstakes/internal/analyzer"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
+	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -358,5 +359,89 @@ func TestProcessFile_CapsTestFiles(t *testing.T) {
 	}
 	if test.HeatScore != medium-1 || test.Tier != types.TierLow {
 		t.Errorf("test file heat=%d tier=%s, want %d low", test.HeatScore, test.Tier, medium-1)
+	}
+}
+
+func TestProcessFile_Axes(t *testing.T) {
+	hot := func(path string) *analyzer.FileInfo {
+		return &analyzer.FileInfo{Path: path, Cyclomatic: 40, Cognitive: 60}
+	}
+	history := map[string]*gitanalyzer.FileHistory{
+		"pay/charge.go":      {CommitCount: 80, CommitsLast90d: 60},
+		"pay/charge_test.go": {CommitCount: 80, CommitsLast90d: 60},
+	}
+	g := &Generator{config: DefaultConfig()}
+	medium := g.config.Tiers.Medium
+
+	tests := []struct {
+		name           string
+		path           string
+		wantLikelihood int
+	}{
+		{"source likelihood is the no-LLM score", "pay/charge.go", 50},
+		{"test file likelihood is capped", "pay/charge_test.go", medium - 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := g.processFile(tt.path, hot(tt.path), analyzer.New("", nil, nil), history)
+			if f.Likelihood != tt.wantLikelihood {
+				t.Errorf("Likelihood = %d, want %d", f.Likelihood, tt.wantLikelihood)
+			}
+			if f.ImpactAssessed || f.Quadrant != "" {
+				t.Errorf("no LLM: impact_assessed=%v quadrant=%q, want false and empty", f.ImpactAssessed, f.Quadrant)
+			}
+			if f.HeatScore != f.Likelihood {
+				t.Errorf("no LLM: heat %d, want likelihood %d", f.HeatScore, f.Likelihood)
+			}
+		})
+	}
+}
+
+func TestScoreFile_Assessed(t *testing.T) {
+	th := DefaultConfig().Tiers
+	tests := []struct {
+		name       string
+		isTest     bool
+		blast      int
+		wantImpact int
+		wantHeat   int
+	}{
+		{"impact is blast radius, heat is the max", false, 90, 90, 90},
+		{"low impact: heat is likelihood", false, 10, 10, 58},
+		{"test file caps impact", true, 90, th.Medium - 1, th.Medium - 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &types.FileHeat{Factors: types.Factors{
+				ChangeFrequency: types.ChangeFrequency{Score: 80, CommitCount: 10},
+				Complexity:      types.Complexity{Score: 60},
+				BlastRadius:     types.BlastRadius{Score: tt.blast, Assessed: true},
+			}}
+			scoreFile(f, tt.isTest, th)
+			if f.Impact != tt.wantImpact || !f.ImpactAssessed || f.HeatScore != tt.wantHeat {
+				t.Errorf("impact=%d assessed=%v heat=%d, want %d true %d", f.Impact, f.ImpactAssessed, f.HeatScore, tt.wantImpact, tt.wantHeat)
+			}
+			if f.Tier != scorer.CalculateTier(f.HeatScore, th) {
+				t.Errorf("tier %s not derived from heat %d before the quadrant pass", f.Tier, f.HeatScore)
+			}
+		})
+	}
+}
+
+func TestApplyAxes_SetsQuadrantsAndMetadata(t *testing.T) {
+	th := DefaultConfig().Tiers
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{
+		"a.go": {Path: "a.go", Likelihood: 80, Impact: 70, ImpactAssessed: true, Tier: types.TierLow},
+		"b.go": {Path: "b.go", Likelihood: 10, Impact: 10, ImpactAssessed: true, Tier: types.TierHigh},
+	}}
+	applyAxes(hm, th)
+	if hm.Files["a.go"].Quadrant != types.QuadrantFragileCritical || hm.Files["a.go"].Tier != types.TierCritical {
+		t.Errorf("a.go = %s/%s, want fragile-critical/critical", hm.Files["a.go"].Quadrant, hm.Files["a.go"].Tier)
+	}
+	if hm.Files["b.go"].Tier != types.TierLow {
+		t.Errorf("b.go tier = %s, want low", hm.Files["b.go"].Tier)
+	}
+	if hm.Metadata.LikelyCutoff != 80 || hm.Metadata.ImpactThreshold != th.High {
+		t.Errorf("metadata cutoff=%d threshold=%d, want 80 %d", hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold, th.High)
 	}
 }

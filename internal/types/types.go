@@ -22,13 +22,25 @@ type Metadata struct {
 	// GitHistory is "complete" when churn factors were read from git, or
 	// "unavailable: <reason>" when they could not be (churn is then 0).
 	GitHistory string `json:"git_history,omitempty"`
+	// LikelyCutoff is the lowest likelihood counted as "likely" (top 20% of
+	// non-test files); ImpactThreshold is the impact counted as "impactful".
+	LikelyCutoff    int `json:"likely_cutoff,omitempty"`
+	ImpactThreshold int `json:"impact_threshold,omitempty"`
 }
 
 // FileHeat represents heat data for a single file
 type FileHeat struct {
 	Path               string             `json:"path"`
-	HeatScore          int                `json:"heat_score"` // 0-100
-	Tier               Tier               `json:"tier"`
+	HeatScore          int                `json:"heat_score"` // 0-100; max(likelihood, impact) when impact is assessed
+	Tier               Tier               `json:"tier"`       // from the quadrant when impact is assessed, else from heat
+	// Two axes: Likelihood that the file needs fixes (churn, complexity,
+	// centrality, path keywords, incidents) and Impact if it breaks (LLM
+	// blast radius). Impact is an estimate from centrality and path keywords
+	// when ImpactAssessed is false.
+	Likelihood     int      `json:"likelihood"`         // 0-100
+	Impact         int      `json:"impact"`             // 0-100
+	ImpactAssessed bool     `json:"impact_assessed"`    // impact came from the LLM
+	Quadrant       Quadrant `json:"quadrant,omitempty"` // set only when impact is assessed
 	Language           string             `json:"language,omitempty"`
 	Size               FileSize           `json:"size,omitempty"`
 	Factors            Factors            `json:"factors"`
@@ -45,6 +57,16 @@ const (
 	TierHigh     Tier = "high"
 	TierMedium   Tier = "medium"
 	TierLow      Tier = "low"
+)
+
+// Quadrant places a file on the likelihood x impact grid.
+type Quadrant string
+
+const (
+	QuadrantFragileCritical Quadrant = "fragile-critical" // likely and impactful
+	QuadrantProtect         Quadrant = "protect"          // impactful, stable
+	QuadrantWatch           Quadrant = "watch"            // likely, low impact
+	QuadrantLow             Quadrant = "low"              // neither
 )
 
 // FileSize represents file size metrics
@@ -198,7 +220,7 @@ type PRRisk struct {
 	CircuitBreakerSignals []string           `json:"circuit_breaker_signals,omitempty"`
 
 	// Two-axis view: importance of the touched code vs risk of the change itself.
-	Importance         int        `json:"importance"`  // 0-100, max heat of touched files (same as heat_score)
+	Importance         int        `json:"importance"`  // 0-100, max impact of touched files (heat for files without an LLM assessment)
 	ChangeRisk         int        `json:"change_risk"` // 0-100, size/new files/infra/hot deletions/test ratio
 	ChangeRiskLevel    string     `json:"change_risk_level"`
 	ChangeRiskFactors  []string   `json:"change_risk_factors,omitempty"`

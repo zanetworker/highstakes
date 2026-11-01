@@ -188,6 +188,8 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Printf("%s  %s %s  (score: %d)\n\n",
 		file.Path, tierEmoji(file.Tier), strings.ToUpper(string(file.Tier)), file.HeatScore)
 
+	fmt.Println(axesLines(file))
+
 	// Blast radius reasoning (the key insight)
 	br := file.Factors.BlastRadius
 	if br.Assessed {
@@ -236,15 +238,38 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Println()
 }
 
+// quadrantGuidance is the review advice for each quadrant.
+var quadrantGuidance = map[types.Quadrant]string{
+	types.QuadrantFragileCritical: "likely to break and costly when it does: senior review, add tests first",
+	types.QuadrantProtect:         "stable but costly if broken: keep owners on review, never auto-merge",
+	types.QuadrantWatch:           "changes and breaks often, limited damage: refactor or add tests",
+	types.QuadrantLow:             "low stakes: light review",
+}
+
+// axesLines explains a file's two axes, one line each.
+func axesLines(f *types.FileHeat) string {
+	impact := fmt.Sprintf("Impact:     %d  (damage if it breaks: LLM blast radius)", f.Impact)
+	if !f.ImpactAssessed {
+		impact = fmt.Sprintf("Impact:     ~%d (estimate of damage if it breaks, from centrality and path keywords; analyze with an LLM to assess)", f.Impact)
+	}
+	lines := impact + "\n" +
+		fmt.Sprintf("Likelihood: %d  (chance it needs fixes: churn, complexity, centrality, incidents)", f.Likelihood)
+	if f.Quadrant != "" {
+		lines += fmt.Sprintf("\nQuadrant:   %s  (%s)", f.Quadrant, quadrantGuidance[f.Quadrant])
+	}
+	return lines + "\n"
+}
+
 // --- list ---
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List files by heat score",
+	Short: "List files by heat, likelihood or impact",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		tier, _ := cmd.Flags().GetString("tier")
 		limit, _ := cmd.Flags().GetInt("limit")
+		sortBy, _ := cmd.Flags().GetString("sort")
 
 		hm, err := loadHeatmap()
 		if err != nil {
@@ -257,14 +282,7 @@ var listCmd = &cobra.Command{
 			return cliError(2, "--tier must be one of: critical, high, medium, low (got: %q)", tier)
 		}
 
-		type entry struct {
-			Path    string `json:"path"`
-			Score   int    `json:"heat_score"`
-			Tier    string `json:"tier"`
-			Reason  string `json:"reason,omitempty"`
-		}
-
-		var files []entry
+		var files []listEntry
 		for path, f := range hm.Files {
 			if tier != "" && string(f.Tier) != tier {
 				continue
@@ -273,10 +291,13 @@ var listCmd = &cobra.Command{
 			if f.Factors.BlastRadius.Assessed && f.Factors.BlastRadius.Summary != "" {
 				reason = f.Factors.BlastRadius.Summary
 			}
-			files = append(files, entry{path, f.HeatScore, string(f.Tier), reason})
+			files = append(files, listEntry{path, f.HeatScore, string(f.Tier), reason,
+				f.Likelihood, f.Impact, f.ImpactAssessed, f.Quadrant})
 		}
 
-		sort.Slice(files, func(i, j int) bool { return files[i].Score > files[j].Score })
+		if err := sortListEntries(files, sortBy); err != nil {
+			return cliError(2, "--sort: %v", err)
+		}
 
 		if limit > 0 && len(files) > limit {
 			files = files[:limit]
@@ -292,7 +313,11 @@ var listCmd = &cobra.Command{
 
 		for _, f := range files {
 			emoji := tierEmoji(types.Tier(f.Tier))
-			line := fmt.Sprintf("%s %3d  %-50s", emoji, f.Score, f.Path)
+			estimate := " "
+			if !f.ImpactAssessed {
+				estimate = "~"
+			}
+			line := fmt.Sprintf("%s %3d  L %3d  I%s%3d  %-50s", emoji, f.Score, f.Likelihood, estimate, f.Impact, f.Path)
 			if f.Reason != "" {
 				line += "  " + f.Reason
 			}
@@ -301,6 +326,39 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// listEntry is one row of `list`. Fields after Reason were added with the
+// two axes; the earlier ones keep their JSON names.
+type listEntry struct {
+	Path           string         `json:"path"`
+	Score          int            `json:"heat_score"`
+	Tier           string         `json:"tier"`
+	Reason         string         `json:"reason,omitempty"`
+	Likelihood     int            `json:"likelihood"`
+	Impact         int            `json:"impact"`
+	ImpactAssessed bool           `json:"impact_assessed"`
+	Quadrant       types.Quadrant `json:"quadrant,omitempty"`
+}
+
+// sortListEntries orders entries by heat, likelihood or impact (descending,
+// ties by path).
+func sortListEntries(files []listEntry, by string) error {
+	key := map[string]func(listEntry) int{
+		"heat":       func(e listEntry) int { return e.Score },
+		"likelihood": func(e listEntry) int { return e.Likelihood },
+		"impact":     func(e listEntry) int { return e.Impact },
+	}[by]
+	if key == nil {
+		return fmt.Errorf("invalid value %q. Valid values: heat, likelihood, impact", by)
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if a, b := key(files[i]), key(files[j]); a != b {
+			return a > b
+		}
+		return files[i].Path < files[j].Path
+	})
+	return nil
 }
 
 // --- pr ---
@@ -943,6 +1001,7 @@ func init() {
 	listCmd.Flags().Bool("json", false, "Output as JSON")
 	listCmd.Flags().String("tier", "", "Filter by tier: critical, high, medium, low")
 	listCmd.Flags().Int("limit", 0, "Max files to return (0 = all)")
+	listCmd.Flags().String("sort", "heat", "Sort by: heat, likelihood, impact")
 	rootCmd.AddCommand(listCmd)
 
 	prCheckCmd.Flags().String("base", "main", "Base branch to compare against")

@@ -27,19 +27,21 @@ highstakes dashboard
 1. **Static analysis** scans complexity, dependency graph, and import structure
 2. **Git analysis** measures change frequency and contributor patterns
 3. **LLM assessment** reads each file and asks "if this breaks, what's the damage?"
-4. **Scoring** combines all signals into a 0-100 heat score per file
-5. **Tiering** maps scores to concrete review requirements
+4. **Scoring** gives every file two 0-100 scores: likelihood of needing fixes (churn, complexity) and impact if it breaks (LLM blast radius)
+5. **Tiering** places each file in the likelihood x impact quadrant and maps it to concrete review requirements
 
-| Tier | Score | Review |
+| Tier | Quadrant | Review |
 |------|-------|--------|
-| CRITICAL | 86-100 | 2 senior reviewers + security scan |
-| HIGH | 61-85 | 2 reviewers + integration tests |
-| MEDIUM | 31-60 | 1 reviewer |
-| LOW | 0-30 | Auto-merge safe |
+| CRITICAL | Likely and impactful | 2 senior reviewers + security scan |
+| HIGH | Impactful, stable | 2 reviewers + integration tests |
+| MEDIUM | Likely, low impact | 1 reviewer |
+| LOW | Neither | Auto-merge safe |
+
+Likely means the top 20% of the repo by likelihood; impactful means impact of 61 or more. Without an LLM, tiers come from the heat score (86, 61 and 31 thresholds).
 
 ## Three ways to see it
 
-**Dashboard** with treemap and file explorer:
+**Dashboard** with treemap, file explorer, architecture and quadrant views:
 
 ```sh
 highstakes dashboard

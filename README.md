@@ -29,6 +29,18 @@ Point it at any codebase. In under 2 minutes, you know:
 
 Static analysis alone can't do this. A complexity counter sees `auth.rs` and `theme.rs` as "both Rust files." The LLM reads the code and understands that one is a security boundary and the other formats colors.
 
+Every file gets two scores, because they answer different questions:
+
+- **Impact**: what breaks if this file has a bug (LLM blast radius).
+- **Likelihood**: how likely this file is to need fixes (churn, complexity, centrality, incidents).
+
+Together they place each file in a 2x2 that sets its tier and review guidance:
+
+|  | Low likelihood | High likelihood (top 20% of the repo) |
+|---|---|---|
+| **High impact (>= 61)** | **Protect** (HIGH): stable but costly if broken; keep owners on review, never auto-merge | **Fragile and critical** (CRITICAL): senior review, add tests first |
+| **Low impact** | **Low stakes** (LOW): light review | **Watch** (MEDIUM): changes and breaks often, limited damage; refactor or add tests |
+
 ## Quick Start
 
 **1.** Install and set up:
@@ -73,11 +85,11 @@ Navigate the file tree with colored tier indicators. Select any file to see blas
 
 ## Dashboard
 
-Three views, one detail panel. Click any file to see blast radius reasoning, impact dimensions, and review requirements.
+Four views, one detail panel. Click any file to see its impact and likelihood, quadrant guidance, blast radius reasoning, impact dimensions, and review requirements.
 
-**Treemap** — blocks sized by code volume, colored by heat. Your eye goes to the big red blocks first.
+**Treemap**: blocks sized by code volume, colored by heat. Your eye goes to the big red blocks first.
 
-**Explorer** — collapsible file tree sorted hottest-first, with heat bars and reasoning inline.
+**Explorer**: collapsible file tree sorted hottest-first, with heat bars and reasoning inline.
 
 <p align="center">
   <img src="docs/images/explorer-view.png" width="820" alt="Explorer view with file tree, heat scores, and blast radius reasoning">
@@ -85,15 +97,17 @@ Three views, one detail panel. Click any file to see blast radius reasoning, imp
 
 All views respond to tier filters (Critical / High / Medium / Low) and search; the treemap also has the size toggle (Lines vs Heat).
 
-**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the most severe tier in the package, and each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Packages outside the current tier filter or search are dimmed.
+**Architecture**: one node per package (directory), laid out in dependency layers: entry points on top, foundations at the bottom. Node size is total lines, color is the highest impact in the package (what breaks if it breaks), and a dashed outline with an "N likely" badge marks packages holding files likely to need fixes. Each node names its hottest file. Arrows run from importer to dependency and carry the number of importing files. Click a package to list its files hottest-first in the detail panel, then click a file for its blast radius. Packages outside the current tier filter or search are dimmed.
+
+**Quadrant**: every file as a dot, likelihood on x and impact on y, with the two thresholds drawn and each quadrant labelled with its review guidance. Click a dot to open the file in the detail panel.
 
 ## How It Works
 
 1. **Static analysis** scans every source file for complexity, dependency centrality, import graph
 2. **Git analysis** measures change frequency, contributor count, commit patterns
 3. **LLM assessment** sends each file to an LLM: *"if this code has a bug, what breaks?"*
-4. **Scoring** combines LLM blast radius (40%) with static signals into a 0-100 heat score
-5. **Tiering** maps scores to review requirements
+4. **Scoring** keeps two axes: likelihood from history and structure, impact from the LLM
+5. **Tiering** places each file in the likelihood x impact quadrant and maps it to review requirements
 
 The LLM returns structured scores across four dimensions:
 
@@ -104,25 +118,28 @@ The LLM returns structured scores across four dimensions:
 | **Availability** | Service lifecycle, infrastructure, single points of failure |
 | **User** | User-facing paths, API contracts, UX-critical flows |
 
-### Scoring Weights
+### Why Two Axes
 
-| Factor | Weight | Source |
+On the [calibration benchmark](bench/README.md) (seven repos, five languages), churn and complexity predicted which files needed fixes later: the ten top-ranked files on the primary repos were all fixed after the holdout cutoff. Blast radius was consistent across four LLMs but measures something else: a stable auth module can be critical and never break. Blending it into one score at 40% made fix prediction worse for every model. So HighStakes reports both and lets the quadrant decide.
+
+| Likelihood factor | Weight | Source |
 |--------|--------|--------|
-| **LLM Blast Radius** | **40%** | Max of four impact dimensions |
-| Dependency Centrality | 15% | Import graph analysis |
-| Complexity | 15% | Cyclomatic + cognitive |
-| Test Coverage Risk | 10% | Inverse of coverage |
-| Incident History | 10% | Manual records |
-| Change Frequency | 10% | Git churn |
+| Change Frequency | 40 | Commits in last 90 days |
+| Complexity | 30 | Cyclomatic + cognitive |
+| Incident History | 25 | Manual records (when present) |
+| Dependency Centrality | 10 | Import graph analysis |
+| Path Keywords | 5 | "auth", "payment" and similar in the path |
+
+Impact is the highest of the four LLM dimensions. Without an LLM it is an estimate from centrality and path keywords, shown with `~`, and tiers fall back to the heat score. `heat_score` stays in the JSON as `max(likelihood, impact)`. Details: [How It Works](docs/how-it-works.md#two-axes-likelihood-and-impact).
 
 ### Tier System
 
-| Tier | Score | Review Required |
-|------|-------|-----------------|
-| 🔥🔥🔥 **CRITICAL** | 86-100 | 2 senior reviewers + security scan |
-| 🔥🔥 **HIGH** | 61-85 | 2 reviewers + integration tests |
-| 🔥 **MEDIUM** | 31-60 | 1 reviewer |
-| 🟢 **LOW** | 0-30 | Auto-review safe |
+| Tier | Quadrant (with LLM) | Heat score (without LLM) | Review Required |
+|------|------|-------|-----------------|
+| 🔥🔥🔥 **CRITICAL** | Fragile and critical | 86-100 | 2 senior reviewers + security scan |
+| 🔥🔥 **HIGH** | Protect | 61-85 | 2 reviewers + integration tests |
+| 🔥 **MEDIUM** | Watch | 31-60 | 1 reviewer |
+| 🟢 **LOW** | Low stakes | 0-30 | Auto-review safe |
 
 ## Commands
 
@@ -145,8 +162,9 @@ heatmap                                              # Terminal TUI
 ### Query
 
 ```sh
-highstakes get <file>                                   # Score + reasoning
+highstakes get <file>                                   # Both axes, quadrant + reasoning
 highstakes list --tier high --limit 10                  # Filter files
+highstakes list --sort impact --limit 10                # Most impactful first (also: likelihood, heat)
 highstakes report                                       # Distribution report
 ```
 
@@ -155,46 +173,51 @@ All commands support `--json` for machine-readable output.
 <details><summary><b>Example: heatmap get</b></summary>
 
 ```
-$ highstakes get python/openshell/sandbox.py
+$ highstakes get src/middleware/jwt/jwt.ts        # hono
 
-python/openshell/sandbox.py  🔥🔥 HIGH  (score: 73)
+src/middleware/jwt/jwt.ts  🔥🔥🔥 CRITICAL  (score: 90)
+
+Impact:     90  (damage if it breaks: LLM blast radius)
+Likelihood: 35  (chance it needs fixes: churn, complexity, centrality, incidents)
+Quadrant:   fragile-critical  (likely to break and costly when it does: senior review, add tests first)
 
 Blast Radius (LLM-assessed):
-  Sandbox management and execution failures could compromise
-  isolation, leading to security breaches or service outage.
-  Reason: Sandbox isolation is a security boundary.
-  Security: 95  Data: 90  Availability: 90  User: 90
+  JWT authentication failures can block protected routes or allow unauthorized access.
+  Reason: Security boundary for token verification
+  Security: 90  Data: 45  Availability: 65  User: 70
 
 Risk Factors:
-  Dependency Centrality:  8 (1 imports)
-  Change Frequency:       0 (0 commits/90d)
-  Complexity:             100 (cyclomatic: 53)
+  Dependency Centrality:  1 (1 imports)
+  Change Frequency:       1 (2 commits/90d)
+  Complexity:             95 (cyclomatic: 20)
 
-Review: 2 reviewers, ~45 min, auto-merge blocked
+Review: 2 reviewers (senior), security scan, ~60 min, auto-merge blocked
 ```
 
 </details>
 
-<details><summary><b>Example: highstakes list --tier high</b></summary>
+<details><summary><b>Example: highstakes list --sort impact</b></summary>
 
 ```
-$ highstakes list --tier high --limit 5
+$ highstakes list --sort impact --limit 5        # hono
 
-🔥🔥  73  python/openshell/sandbox.py       Sandbox isolation breach risk
-🔥🔥  72  python/openshell/_proto/...       Import failures in security-critical logic
-🔥🔥  69  crates/.../runtime.rs             Host network misconfiguration, VM failures
-🔥🔥  67  crates/.../disposition.rs         Corrupted security event values
-🔥🔥  65  crates/.../embedded_runtime.rs    Complete loss of VM functionality
+🔥🔥🔥  92  L  35  I  92  src/middleware/jwk/jwk.ts           JWT authentication failures can block protected routes ...
+🔥🔥🔥  92  L  30  I  92  src/utils/jwt/jws.ts                JWS signing and verification failures disrupt JWT issuance ...
+🔥🔥🔥  92  L  37  I  92  src/utils/jwt/jwt.ts                JWT signing and verification failures can disrupt authentication ...
+🔥🔥🔥  90  L  35  I  90  src/middleware/basic-auth/index.ts  Broken checks can deny access or expose routes ...
+🔥🔥   90  L   2  I  90  src/middleware/jwt/index.ts         JWT middleware exports and context typing may fail ...
 ```
+
+Columns: tier, heat, `L` likelihood, `I` impact (`I~` is an estimate without the LLM). The last row is stable (likelihood 2) but impactful, so it is HIGH (protect), not CRITICAL.
 
 </details>
 
 ### Tour
 
-A risk-ordered reading path for newcomers, auditors and agents. Packages come in dependency order (what everything else imports first), hottest file first within each package. Each stop has a `file:line` anchor at the first top-level declaration, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
+A reading path for newcomers, auditors and agents learning the codebase. Packages come in dependency order (what everything else imports first), and within each level the most impactful code comes first (then the most central). Each stop has a `file:line` anchor at the first top-level declaration, its impact, likelihood and quadrant, why it matters (LLM critical reason or summary, else static signals), what it depends on, what uses it, and owners from recent commits and annotations. No LLM calls.
 
 ```sh
-highstakes get tour --limit 10                          # 10 hottest files, dependencies first
+highstakes get tour --limit 10                          # 10 most impactful files, dependencies first
 highstakes get tour --focus internal/llm                # One directory
 highstakes get tour --json > tour.json                  # Feed /show-me walkthrough or an agent
 ```
@@ -202,24 +225,22 @@ highstakes get tour --json > tour.json                  # Feed /show-me walkthro
 <details><summary><b>Example: highstakes get tour --limit 3</b></summary>
 
 ```
-$ highstakes get tour --limit 3
+$ highstakes get tour --limit 3        # hono
 Tour: 3 stops, dependencies first
 
-1. internal/types  [level 0, max heat 31 MEDIUM]
-   1. internal/types/types.go:6  🔥 31 medium
-      why: imported by 20 files
-      used by: internal/scorer/scorer.go, internal/tour/tour.go, ... (+15 more)
+1. src/middleware/basic-auth  [level 2, max impact 90, CRITICAL]
+   1. src/middleware/basic-auth/index.ts:12  🔥🔥🔥 critical  impact 90, likelihood 35, fragile-critical
+      why: Authentication security boundary
+      depends on: src/context.ts, src/utils/basic-auth.ts, src/http-exception.ts, src/types.ts, src/utils/buffer.ts
 
-2. internal/scorer  [level 1, max heat 31 MEDIUM]
-   2. internal/scorer/scorer.go:12  🔥 31 medium
-      why: imported by 5 files
-      depends on: internal/types/types.go
-      used by: pkg/heatmap/heatmap.go, internal/prscore/prscore.go, cmd/highstakes/main.go, ...
+2. src/middleware/bearer-auth  [level 2, max impact 90, CRITICAL]
+   2. src/middleware/bearer-auth/index.ts:16  🔥🔥🔥 critical  impact 90, likelihood 38, fragile-critical
+      why: Security boundary for bearer-protected endpoints
 
-3. internal/tour  [level 1, max heat 28 LOW]
-   3. internal/tour/tour.go:34  🟢 28 low
-      why: imported by 3 files
-      depends on: internal/types/types.go
+3. src/utils/jwt  [level 3, max impact 92, CRITICAL]
+   3. src/utils/jwt/jws.ts:13  🔥🔥🔥 critical  impact 92, likelihood 30, fragile-critical
+      why: JWT cryptographic security boundary
+      used by: src/middleware/jwk/jwk.ts, src/utils/jwt/jwt.ts, src/middleware/jwt/jwt.ts, src/utils/jwt/types.ts
 ```
 
 </details>
@@ -235,7 +256,7 @@ highstakes pr check --fail-on high                      # Exit 5 on high/critica
 highstakes pr check --shadow                            # Log the decision, never fail
 ```
 
-`pr check` reports two numbers: importance (how hot the touched code is) and change risk (size, new files, config or infra files, deletions in hot files, test ratio). It also names suggested reviewers: the most active recent authors of the hottest changed files, excluding the PR author. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
+`pr check` reports two numbers: importance (the highest impact among the touched files, or heat where there is no LLM assessment) and change risk (size, new files, config or infra files, deletions in hot files, test ratio). It also names suggested reviewers: the most active recent authors of the hottest changed files, excluding the PR author. See the [CLI reference](docs/cli-reference.md#highstakes-pr-check).
 
 ### Review Policy
 
@@ -246,7 +267,7 @@ highstakes create policy > .github/highstakes-policy.yaml   # No-auto-approve pa
 highstakes create policy --json --min-tier critical
 ```
 
-Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code, and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
+Copilot and CodeRabbit can approve PRs, limited by path rules. `create policy` generates those rules from the heatmap so bots stay out of high-stakes code (by tier, and by LLM impact so stable but critical code is covered too), and `create codeowners` routes the same paths to the people who know them. Map git emails to GitHub handles with the `owners` key in [configuration](docs/configuration.md#owner-aliases).
 
 ### Incidents
 
@@ -269,7 +290,7 @@ highstakes create labels --out labels.csv       # Blind sheet for maintainers to
 highstakes check calibration --labels labels.csv  # Score blast radius and heat against their ratings
 ```
 
-It reports the event rate per tier, precision@K and recall@K of the K hottest files, lift over the base rate (1.0 means no better than random), Spearman rank correlation, and the same metrics for blast radius, churn, complexity and centrality alone, so you can see which signal predicts fixes. It also lists surprises: LOW-tier files with many fixes and CRITICAL/HIGH files with none.
+It reports the event rate per tier, precision@K and recall@K of the K hottest files, lift over the base rate (1.0 means no better than random), Spearman rank correlation, and the same metrics for the two axes (likelihood, impact) and for blast radius, churn, complexity and centrality alone, so you can see which signal predicts fixes. It also lists surprises: LOW-tier files with many fixes and CRITICAL/HIGH files with none.
 
 Churn comes from the same history as the fixes, so the default run flatters it. Use `--holdout` for an honest number. Blast radius measures impact if broken, not how often code breaks, so a weak correlation for it is expected; check it with `--events security` or maintainer labels instead. See [How It Works](docs/how-it-works.md#is-it-right).
 
