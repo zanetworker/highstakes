@@ -1,14 +1,16 @@
 name: HighStakes Triage
 on:
   pull_request:
-    # labeled/unlabeled re-run on the highstakes:signed-off label.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # labeled/unlabeled re-run on the highstakes:signed-off label;
+    # auto_merge_* re-run when auto-merge is turned on or off.
+    types: [opened, synchronize, reopened, labeled, unlabeled, auto_merge_enabled, auto_merge_disabled]
   # Re-run on reviews so owner approvals tick the checklist.
   pull_request_review:
     types: [submitted, dismissed]
 
 permissions:
   pull-requests: write
+  issues: write # remove the sign-off label after a new push
   contents: read
 
 jobs:
@@ -53,6 +55,37 @@ jobs:
             | sort | paste -sd, -)
           echo "logins=$logins" >> "$GITHUB_OUTPUT"
 
+      # The highstakes:signed-off label counts only when someone with write
+      # access added it, and a new push clears it: new commits need a fresh
+      # review before the sign-off ticks the checklist again.
+      - name: Verify sign-off
+        id: signoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          signed=false
+          case ",$LABELS," in
+            *,highstakes:signed-off,*)
+              if [ "$ACTION" = "synchronize" ]; then
+                gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
+                echo "New commits pushed: the sign-off label was removed; review again and re-add it."
+              else
+                actor=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+                  --jq '.[] | select(.event == "labeled" and .label.name == "highstakes:signed-off") | .actor.login' | tail -n1)
+                perm=$(gh api "repos/$REPO/collaborators/$actor/permission" --jq .permission 2>/dev/null || echo none)
+                case "$perm" in
+                  admin|maintain|write) signed=true ;;
+                  *) echo "Sign-off label added by $actor (permission: $perm) does not count: write access is required." ;;
+                esac
+              fi
+              ;;
+          esac
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+
       # Exit 5 means the PR changes a Harden now file (--fail-on critical) and
       # before-merge items are still open. A maintainer with write access adds
       # the highstakes:signed-off label after reviewing to tick sign-off items
@@ -63,7 +96,7 @@ jobs:
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
-          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }}
           AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e

@@ -24,8 +24,8 @@ func TestGithubInstall_WritesTriageWorkflow(t *testing.T) {
 		"<!-- highstakes-triage -->",
 		"pull_request_review:",
 		"BASE: origin/${{ github.event.pull_request.base.ref }}",
-		"types: [opened, synchronize, reopened, labeled, unlabeled]",
-		"SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}",
+		"types: [opened, synchronize, reopened, labeled, unlabeled, auto_merge_enabled, auto_merge_disabled]",
+		"SIGNED_OFF: ${{ steps.signoff.outputs.signed }}",
 		"AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}",
 		`--auto-merge-enabled "$AUTO_MERGE"`,
 		`if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi`,
@@ -55,5 +55,32 @@ func TestTriageWorkflow_MatchesRepoWorkflow(t *testing.T) {
 	).Replace(string(b))
 	if repo != triageWorkflow {
 		t.Error("cmd/highstakes/triage-workflow.yml drifted from .github/workflows/heatmap-triage.yml; copy the change over")
+	}
+}
+
+// TestTriageWorkflow_SignOffIsTrusted pins the sign-off safeguards in both
+// workflow copies: a new push clears the label, only write access counts,
+// and auto-merge changes re-run the gate.
+func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
+	repoCopy, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "heatmap-triage.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, wf := range map[string]string{"template": triageWorkflow, "repo copy": string(repoCopy)} {
+		for _, want := range []string{
+			"auto_merge_enabled", "auto_merge_disabled", // re-run when auto-merge changes
+			"issues: write",                              // to remove the label
+			`"$ACTION" = "synchronize"`,                  // a new push clears the sign-off
+			"labels/highstakes:signed-off",               // ... by deleting the label
+			"collaborators/$actor/permission",            // only write access signs off
+			"admin|maintain|write",
+		} {
+			if !strings.Contains(wf, want) {
+				t.Errorf("%s workflow lacks %q", name, want)
+			}
+		}
+		if strings.Contains(wf, "contains(github.event.pull_request.labels") {
+			t.Errorf("%s workflow trusts the label's presence alone", name)
+		}
 	}
 }
