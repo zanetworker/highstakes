@@ -124,8 +124,8 @@ func TestAttachPRActions(t *testing.T) {
 				t.Errorf("busy.go carries %d before-merge actions, want 1", len(fc.Actions))
 			}
 		case "net/new.rs": // unscored, inherits Protect: needs a review
-			if len(fc.Actions) != 1 || fc.Actions[0].ID != "owner-review" {
-				t.Errorf("new.rs actions = %+v, want one owner review", fc.Actions)
+			if len(fc.Actions) != 2 || fc.Actions[0].ID != "owner-review" || fc.Actions[1].ID != "no-auto-merge" {
+				t.Errorf("new.rs actions = %+v, want an owner review and no auto-merge", fc.Actions)
 			}
 		default:
 			if len(fc.Actions) != 0 {
@@ -197,9 +197,9 @@ func TestAttachPRActions_UnscoredCriticalFileBlocks(t *testing.T) {
 		signedOff bool
 		want      string
 	}{
-		{"new file inheriting Harden now needs a senior review", types.TierCritical, false, "senior-review=open"},
-		{"new file inheriting Protect needs an owner review", types.TierHigh, false, "owner-review=open"},
-		{"the sign-off label satisfies it", types.TierCritical, true, "senior-review=done"},
+		{"new file inheriting Harden now needs a senior review", types.TierCritical, false, "senior-review=open,no-auto-merge=open"},
+		{"new file inheriting Protect needs an owner review", types.TierHigh, false, "owner-review=open,no-auto-merge=open"},
+		{"the sign-off label satisfies the review", types.TierCritical, true, "senior-review=done,no-auto-merge=open"},
 		{"a routine new file adds nothing", types.TierLow, false, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -228,8 +228,8 @@ func TestAttachPRActions_UnscoredReviewUsesDirectoryOwners(t *testing.T) {
 		approvals []string
 		want      string
 	}{
-		{"a directory owner's approval ticks it", []string{"ana"}, "owner-review=done"},
-		{"someone else's approval does not", []string{"carl"}, "owner-review=open"},
+		{"a directory owner's approval ticks it", []string{"ana"}, "owner-review=done,no-auto-merge=open"},
+		{"someone else's approval does not", []string{"carl"}, "owner-review=open,no-auto-merge=open"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/new.go", Tier: types.TierHigh, Unscored: true, IsNew: true}}}
@@ -243,5 +243,20 @@ func TestAttachPRActions_UnscoredReviewUsesDirectoryOwners(t *testing.T) {
 				t.Errorf("checklist = %v, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUnscoredReview_KeepsAutoMergeOff(t *testing.T) {
+	hm := &types.Heatmap{Files: map[string]*types.FileHeat{}}
+	risk := &types.PRRisk{FilesChanged: []types.FileChange{{Path: "core/new.go", Tier: types.TierCritical, Unscored: true, IsNew: true}}}
+	c := buildChange([]prscore.FileChange{{Path: "core/new.go", LinesAdded: 5, IsNew: true}}, hm, nil, nil)
+	c.SignedOff, c.AutoMerge = true, "true" // explain.AutoMergeOn
+	attachPRActions(risk, hm, c)
+	var got []string
+	for _, a := range risk.Checklist {
+		got = append(got, a.ID+"="+map[bool]string{true: "done", false: "open"}[a.Done])
+	}
+	if strings.Join(got, ",") != "senior-review=done,no-auto-merge=open" {
+		t.Errorf("checklist = %v: auto-merge on must keep a new Harden now file blocked", got)
 	}
 }

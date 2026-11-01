@@ -78,6 +78,7 @@ func TestTriageWorkflow_SignOffIsTrusted(t *testing.T) {
 			"statuses/$HEAD_SHA",                           // ... on the reviewed head commit
 			"commits/$HEAD_SHA/statuses",                   // ... read back for that commit only
 			`.creator.login == "github-actions[bot]"`,      // ... only the workflow's own status counts
+			"PUSHED_AT",                                    // keep a label added after the push
 		} {
 			if !strings.Contains(wf, want) {
 				t.Errorf("%s workflow lacks %q", name, want)

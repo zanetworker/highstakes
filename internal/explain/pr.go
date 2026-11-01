@@ -157,6 +157,11 @@ func Checklist(files []FileActions) (before, worth, backlog []types.Action) {
 			}
 			worthOnly := a.Scope != types.ScopeBacklog && !fa.Blocking
 			key := fmt.Sprint(a.Scope, "\x00", a.Text, "\x00", a.Command, "\x00", worthOnly)
+			if a.ID == "no-auto-merge" {
+				// Auto-merge is one PR-wide switch: one item, worded by the
+				// first (most severe) file, however each posture phrases it.
+				key = fmt.Sprint(a.Scope, "\x00no-auto-merge\x00", worthOnly)
+			}
 			if i, ok := index[key]; ok {
 				all[i].Files = append(all[i].Files, fa.Path)
 				all[i].Done = all[i].Done && a.Done

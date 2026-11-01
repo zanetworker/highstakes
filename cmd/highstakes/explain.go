@@ -174,11 +174,15 @@ func unscoredReview(fc *types.FileChange, owners []string) *types.FileHeat {
 	if fc.Posture() == "Harden now" {
 		id, who = "senior-review", "a senior owner of its directory"
 	}
+	noAuto := types.Action{ID: "no-auto-merge", Scope: types.ScopeBeforeMerge, Text: "Block auto-merge", Signal: "Protect files never auto-merge"}
+	if fc.Posture() == "Harden now" {
+		noAuto.Text, noAuto.Signal = "Keep auto-merge off", "Harden now files never auto-merge"
+	}
 	return &types.FileHeat{Path: fc.Path, Explanation: &types.Explanation{Actions: []types.Action{{
 		ID: id, Scope: types.ScopeBeforeMerge, Owners: owners,
 		Text:   "Review the new file `" + fc.Path + "` with " + who,
 		Signal: "new file: not scored yet, treated like its directory (" + fc.Posture() + ")",
-	}}}}
+	}, noAuto}}}
 }
 
 // directoryOwners are the review owners of scored files in the file's

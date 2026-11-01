@@ -227,3 +227,17 @@ func TestChecklist(t *testing.T) {
 		}
 	})
 }
+
+func TestChecklist_OneAutoMergeItem(t *testing.T) {
+	files := []FileActions{
+		{Path: "core/h.go", Blocking: true, Actions: []types.Action{{ID: "no-auto-merge", Scope: types.ScopeBeforeMerge, Text: "Keep auto-merge off", Signal: "Harden now files never auto-merge"}}},
+		{Path: "core/p.go", Blocking: true, Actions: []types.Action{{ID: "no-auto-merge", Scope: types.ScopeBeforeMerge, Text: "Block auto-merge", Signal: "Protect files never auto-merge"}}},
+	}
+	before, _, _ := Checklist(files)
+	if len(before) != 1 {
+		t.Fatalf("checklist = %+v, want one PR-wide auto-merge item", before)
+	}
+	if got := before[0]; got.Text != "Keep auto-merge off" || strings.Join(got.Files, ",") != "core/h.go,core/p.go" {
+		t.Errorf("auto-merge item = %+v, want Keep auto-merge off for both files", got)
+	}
+}

@@ -73,13 +73,20 @@ jobs:
           SENDER: ${{ github.event.sender.login }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
         run: |
           signed=false
           case ",$LABELS," in
             *,highstakes:signed-off,*)
               if [ "$ACTION" = "synchronize" ]; then
-                gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
-                echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
+                # Remove the label only if it predates this push: a maintainer may
+                # already have signed off on the new head while this run waited.
+                labeled_at=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+                  --jq '.[] | select(.event == "labeled" and .label.name == "highstakes:signed-off") | .created_at' | tail -n1)
+                if [ -z "$labeled_at" ] || [[ "$labeled_at" < "$PUSHED_AT" ]]; then
+                  gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
+                  echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
+                fi
               elif [ "$ACTION" = "labeled" ] && [ "$ADDED" = "highstakes:signed-off" ]; then
                 perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
                 case "$perm" in

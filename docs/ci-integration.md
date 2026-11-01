@@ -14,7 +14,7 @@ Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/hig
 4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
 5. Fails the `triage` job when `pr check` exited 5.
 
-The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run, and on `labeled`/`unlabeled`, so the sign-off label does too. `SIGNED_OFF` and `AUTO_MERGE` come from `github.event.pull_request`, which both events carry. The core step:
+The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist on the next run, and on `labeled`/`unlabeled`, so the sign-off label does too. `AUTO_MERGE` comes from `github.event.pull_request`, which both events carry. `SIGNED_OFF` must come from the workflow's **Verify sign-off** step (copy it from `highstakes github install`): passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core step:
 
 ```yaml
       - name: Assess PR risk
@@ -23,7 +23,7 @@ The workflow also runs on `pull_request_review`, so an owner's approval ticks th
           BASE: origin/${{ github.event.pull_request.base.ref }}
           APPROVALS: ${{ steps.approvals.outputs.logins }}
           REPO: ${{ github.repository }}
-          SIGNED_OFF: ${{ contains(github.event.pull_request.labels.*.name, 'highstakes:signed-off') }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # from the Verify sign-off step: never the label alone
           AUTO_MERGE: ${{ github.event.pull_request.auto_merge != null }}
         run: |
           set +e
