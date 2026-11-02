@@ -2,12 +2,12 @@
 
 All commands support `--json` for machine-readable output.
 
-## heatmap
+## highstakes
 
-Launch the interactive TUI explorer.
+Launch the interactive TUI explorer (run with no subcommand).
 
 ```sh
-heatmap
+highstakes
 ```
 
 Keyboard: `↑↓` navigate, `Enter` expand, `f` filter by tier, `s` sort, `/` search, `q` quit.
@@ -34,25 +34,212 @@ highstakes analyze [flags]
 |------|---------|-------------|
 | `--no-llm` | `false` | Skip LLM analysis, use static heuristics only |
 | `--force` | `false` | Re-assess all files, ignoring cache |
-| `--model` | `deepseek/deepseek-v4-flash` | OpenRouter model identifier |
+| `--model` | `openai/gpt-6-luna` | OpenRouter model identifier |
 | `--concurrency` | `10` | Number of parallel LLM requests |
 | `--json` | `false` | Output summary as JSON |
 
-## heatmap get
+Analysis continues without git history (no `git` binary, a repository without commits): `analyze` prints a warning on stderr, change frequency is 0 for every file, and the heatmap records it in `metadata.git_history` (`"complete"`, or `"unavailable: <reason>"`).
 
-Get the heat score and blast radius reasoning for a specific file.
+## highstakes get
+
+Get a file's verdict, both questions with their repo cutoffs, what to do before the next merge, what to put on the backlog, and why.
 
 ```sh
 highstakes get <file> [--json]
 ```
 
+Text output, top to bottom: the path; the verdict (`HARDEN NOW`, `PROTECT`, `STABILIZE`, `ROUTINE`, or `NOT ASSESSED` without an LLM); "Will it break?" and "How bad if it breaks?", each with its score, `HIGH` or `LOW`, and the repo cutoff (an unassessed impact shows as `~N estimate`); one line saying scores are a relative signal within the repo, not a probability, and one saying how far each question is backed ("Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings."); **Do before the next merge** and **Put on the backlog** checklists, each item with the signal that triggered it (`why:`) and, for backlog items, a copyable command; **Why** (break signals and break cost, quoting the file's numbers and repo percentiles); and the latest fix commit. `--json` returns the file record, including `quadrant_label` and `explanation` (see [File fields](#file-fields)), plus `likely_cutoff` and `impact_threshold`. Heatmaps written before explanations existed fall back to the per-axis lines and blast radius reasoning; run `analyze` again to get the sections. See [How It Works](how-it-works.md#reasons-and-actions) for the rules.
+
 If the file is not found, suggests similar paths from the heatmap.
 
 **Exit code 4** if file not found.
 
+## highstakes get tour
+
+Get a reading path for learning the repository: the most important product code first, each section after the sections it depends on. Makes no LLM calls; reads `.heatmap/heatmap.json`, `.heatmap/config.yaml` (for `tour.supporting`) and the source files (for line anchors).
+
+```sh
+highstakes get tour [--per-component N] [--min-impact N] [--components a,b] [--include-supporting] [--limit N] [--focus <dir|file>] [--format text|json|walkthrough] [--out FILE] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--per-component` | `0` | Keep the N most important files of every component, one section per component (0 = off). Takes precedence over `--limit` |
+| `--min-impact` | `0` | Skip files whose impact is below this (0-100); components left without files drop out. Applies before `--per-component` picks, so every stop shown reaches it |
+| `--components` | all | Only these components, comma-separated, named as in the section titles (e.g. `crates/core,internal/api`). A supporting component named here is shown without `--include-supporting` |
+| `--include-supporting` | `false` | Add supporting components (see below) in a final part titled "Supporting: CI, deployment, scripts and examples" |
+| `--limit` | `0` | Keep the N most impactful files across the repo (0 = all). Selection happens before ordering. Ignored with `--per-component` |
+| `--focus` | `""` | Only files under this repo-relative directory, or this one file. Matches whole path segments (`api` does not match `apiv2`) |
+| `--format` | `text` | `text`, `json`, or `walkthrough` (data for the show-me rich step-through; see below). Another value exits 2 listing these |
+| `--out` | stdout | Write the output to this file instead |
+| `--json` | `false` | Same as `--format json` |
+
+Ordering:
+
+1. Files are grouped into sections by directory (one Go package per section).
+2. Sections are ranked by importance: max impact, then the number of fragile-critical stops, then max heat, then name.
+3. Sections are emitted in that rank, except that a section's dependencies come first: before emitting a section, every selected section it imports (directly, or through sections that were not selected) is emitted, most important first. So a high-impact package that imports a low-impact one is read right after it. Sections in one import cycle have no order constraint between them and keep importance order. The import graph is the whole repo's, so the order holds even when `--limit` drops the sections in between.
+4. Product sections come first, then supporting sections (with `--include-supporting`), each part ordered by the same rule. A product section that imports a supporting one still comes first.
+5. Within a section, files go by impact, then dependency centrality. Heat breaks remaining ties, so heatmaps from before the two axes still order sensibly.
+
+With `--per-component`, sections are components instead of directories, the graph is the component import graph, and files within a component go fragile-critical first, then by impact, likelihood and centrality, among the files that pass `--min-impact`. A repo-wide `--limit` can fill every stop from two or three hot components; `--per-component` covers every part of the repo, which suits onboarding.
+
+`level` is still reported (dependency depth: 0 imports no other section, cycles share a level), but it no longer decides the order.
+
+Supporting components hold code around the product: any component with a path segment named `examples`, `scripts`, `.github`, `docs`, `deploy`, `tests`, `e2e`, `benchmarks`, `bench`, `fixtures`, `testdata`, `vendor` or `third_party`, plus `tour.supporting` globs in `.heatmap/config.yaml` (see [configuration](configuration.md#tour-supporting-components)). They are hidden by default, in both modes, unless `--include-supporting` is given, they are named in `--components`, or `--focus` points inside one. The text header counts the product components shown and the supporting components hidden.
+
+A component is the top-level unit a file belongs to, decided in this order:
+
+1. The shallowest directory below the repo root that holds `Cargo.toml` (Rust crate), `package.json` (JS/TS package), `pyproject.toml` or `__init__.py` (Python package) or `go.mod` (Go module). Units nested inside it fold into it.
+2. Under `cmd/`, `internal/` and `pkg/`, the top two path segments (`internal/tour`).
+3. Otherwise the top-level directory, and `.` for files at the repo root.
+
+Every section carries its `component` in the JSON output, in both modes.
+
+Each stop shows its verdict, both questions with the repo cutoffs ("Will it break? 50 HIGH, cutoff 35 · How bad if it breaks? 92 HIGH, cutoff 78"), its `why` (the impact reason: LLM `critical_reason`, else `summary`), the first break signal, and the top before-merge and top backlog action.
+
+Test files (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.ts(x)`, `*.spec.js(x)` and the `.mjs`/`.mts` variants, `*Test.java`, `*Tests.kt`, `*Tests.cs`, `*_spec.rb`, `*_test.rb`, `tests.rs`, `*_tests.rs`, `*_test.rs`, and any file under a `tests/` directory) are left out of the tour and of the dependency order: they import everything and say little about where the stakes are.
+
+`tour` is a subcommand of `get`, so `highstakes get tour` runs the tour and `highstakes get <file>` still looks up a file. A file literally named `tour` at the repo root cannot be looked up with `get`; use `list` instead.
+
+Line anchors point at the first top-level declaration (`func`, `type`, `class`, `def`, `export`, `fn`, `pub`, `struct`, `enum`, `trait`, `impl`, `mod` and similar).
+
+**Exit code 2** for a negative `--limit` or `--per-component`, a `--min-impact` outside 0-100, an unknown component in `--components` (the error lists the valid names), or a malformed `tour.supporting` glob. **Exit code 4** if `--focus` matches no file, no file reaches `--min-impact`, or only hidden supporting components are left (the error suggests `--include-supporting`).
+
+JSON schema (version `1`), shaped for `/show-me walkthrough` and coding agents: sections are the grouped narrative, stops carry `file:line` anchors.
+
+```json
+{
+  "version": "1",
+  "repo": "/path/to/repo",
+  "commit": "abc1234",
+  "branch": "main",
+  "analyzed_at": "2026-10-30T12:37:55+01:00",
+  "focus": "internal",
+  "ordering": "sections by importance (max impact, then fragile-critical count), each after the sections it depends on; product before supporting; stops by impact, then centrality",
+  "total_stops": 8,
+  "product_components": 6,
+  "supporting_components": 0,
+  "supporting_hidden": 2,
+  "sections": [
+    {
+      "order": 1,
+      "title": "internal/types",
+      "dir": "internal/types",
+      "component": "internal/types",
+      "kind": "product",
+      "level": 0,
+      "max_heat": 31,
+      "max_impact": 45,
+      "tier": "medium",
+      "depends_on": [],
+      "used_by": ["internal/scorer", "pkg/heatmap"],
+      "stops": [
+        {
+          "order": 1,
+          "path": "internal/types/types.go",
+          "line": 6,
+          "anchor": "internal/types/types.go:6",
+          "title": "types.go",
+          "heat": 31,
+          "tier": "medium",
+          "impact": 45,
+          "likelihood": 31,
+          "impact_assessed": true,
+          "quadrant": "low",
+          "why": "imported by 20 files",
+          "summary": "LLM blast radius summary (when assessed)",
+          "critical_reason": "LLM critical reason (when assessed)",
+          "top_impact": "security",
+          "depends_on": [],
+          "depends_on_count": 0,
+          "used_by": ["internal/scorer/scorer.go"],
+          "used_by_count": 20,
+          "owners": ["@owner", "alice"],
+          "notes": "annotation notes (when set)"
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `product_components`, `supporting_components` | Components shown, by kind |
+| `supporting_hidden` | Supporting components left out (pass `--include-supporting`) |
+| `sections[].kind` | `product` or `supporting` |
+| `sections[].level` | Dependency depth of the section; 0 = imports no other section. Informational; ordering is by importance with dependencies first |
+| `sections[].depends_on` / `used_by` | Directories this one imports / that import it |
+| `stops[].order` | Global 1-based reading position |
+| `stops[].line`, `anchor` | First top-level declaration (`func`, `type`, `class`, `def`, `export`, `pub`, ...), else 1 |
+| `sections[].max_impact`, `tier` | Highest impact and most severe tier among the section's stops |
+| `stops[].impact`, `likelihood`, `impact_assessed`, `quadrant` | The two axes; see [File fields](#file-fields) |
+| `stops[].why` | `critical_reason`, else `summary`, else static signals (importers, recent commits, incidents) |
+| `stops[].top_impact` | Highest LLM impact dimension: `security`, `data`, `availability` or `user`; omitted when not assessed |
+| `stops[].depends_on` / `used_by` | Up to 5 files, hottest first; `*_count` is the full number |
+| `stops[].owners` | Annotation owner first, then recent commit authors by commit count; up to 3 |
+| `stops[].explanation` | The file's explanation (headline, verdict, impact and likelihood reasons, actions); see `get`. The text tour prints the first likelihood reason as `break signals:` |
+| `stops[].verdict`, `top_before_merge`, `top_backlog` | The file's posture and the first action of each scope (each `{id, text, scope, signal, command}`); the text tour prints them as `before merge:` and `backlog:` |
+| `likely_cutoff`, `impact_threshold` | Top-level: the repo cutoffs the stop scores read against |
+
+### Walkthrough format
+
+`--format walkthrough` writes the data file of the show-me rich step-through (the `/show-me walkthrough` skill's `walkthrough_build.py` turns it into one self-contained HTML page):
+
+```sh
+highstakes get tour --per-component 1 --min-impact 85 --format walkthrough --out tour-walkthrough.data.json
+python3 <show-me skill>/scripts/walkthrough_build.py tour-walkthrough.data.json   # writes tour-walkthrough.html
+```
+
+| Walkthrough element | From the tour |
+|---------------------|---------------|
+| Box (node) | One per component, in tour order, left to right and top to bottom; name without the `<repo>-` prefix; sub line = max impact of its stops and its role (owning unit, or "N units" for a shared library, drawn darker) |
+| Flow | One per part: `product`, and `supporting` with `--include-supporting`; plus "How components connect" (`wiring`) |
+| Link (wiring step) | One per import link between drawn boxes, from the importing component to its dependency, payload = number of importing non-test files; the strongest 30 links |
+| Step (hop) | One per stop, travelling from the previous stop's box (a self step when it stays in one component) |
+| Payload chip | The stop's `file:line` anchor |
+| Rail gist | `do:` the first action, else `read <file>` |
+| Caption | The anchor and verdict, both questions with the repo cutoffs, why it matters (critical reason or summary), the first break signal, and the top before-merge and backlog action. The hop's short label is the top before-merge action |
+| Color | The stop's posture (Harden now, Protect, Stabilize, Routine; grey for an impact estimate) |
+| Key | HighStakes' own legend: the posture colors in use, reading order, imports, shared library. The template's network channel labels (browser, server to server, refused) are hidden through `legendExtra` |
+
+All heatmap text is HTML-escaped. The map holds 28 boxes; further components are left out and counted in the intro (narrow with `--components`, `--focus` or `--min-impact`). **Exit code 4** when the tour has no stops.
+
+## highstakes get architecture
+
+Get a generated architecture diagram of the runtime units, ready for SeeCode. Reads `.heatmap/heatmap.json`, `.heatmap/architecture.yaml` (declared links and placements; see [Configuration](configuration.md#architecture-declarations)) and the source files (evidence line anchors). No LLM calls.
+
+```sh
+highstakes get architecture [--format seecode|json] [--max-nodes 9] [--out FILE] [--include-supporting] [--json]
+node <seecode skill>/scripts/seecode.mjs render arch.json    # after --out arch.json: writes arch.html
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format` | `seecode` | `seecode` (a SeeCode `architecture` spec) or `json` (the same diagram as plain data). Another value exits 2 listing these |
+| `--max-nodes` | `9` | Most boxes (2-24). The arrow budget follows SeeCode: 12 up to 9 boxes, 20 up to 16, else 36 |
+| `--out` | stdout | Write to this file instead |
+| `--include-supporting` | `false` | Include supporting units (examples, scripts, tests, helper bins) |
+| `--json` | `false` | Same as `--format json` |
+
+What it draws:
+
+- **Boxes**: the product units by max impact (ties: more fragile-critical files, then name). When they fit, all of them plus the shared library the most units import directly. Otherwise the top `max-nodes - 2`, that library (from 4 boxes on; else `max-nodes - 1` units), and one muted "N other units" box for the rest. The highest-impact unit is `focal`.
+- **Arrows**: declared links first (dashed, SeeCode kind `async`, legend "declared (architecture.yaml)"), then imports between boxes labelled with the number of importing files, most first. Arrows over the budget are dropped and counted in the caption. Links into folded units point at "other units".
+- **Groups**: a unit's declared placement (dashed, "(declared)"), else its first inferred deployment hint ("(inferred)": Dockerfile name, `helm <values key>`, `k8s <manifest>`).
+- **Layout**: top to bottom; rows by dependency level over all arrows, drawn or not (callers above what they use), each row centered and ordered to reduce crossings.
+- **Evidence**: every box lists its top 3 files by impact as `{id, file, line, note}`, `note` = posture (or impact estimate) and the first action. SeeCode shows them in the box's detail panel.
+
+Text is clipped to SeeCode's limits (box label 40, sub 48, arrow label 28, group label 32 characters).
+
+JSON (`--format json`): `title`, `repo`, `commit`, `nodes[]` (`id`, `label`, `sub`, `tag`, `kind` = `unit`, `library` or `other`, `members`, `max_impact`, `impact_assessed`, `fragile_critical`, `focal`, `group`, `row`, `col`, `files[]` = `{path, line, impact, quadrant, note}`), `edges[]` (`from`, `to`, `label`, `source` = `imports` or `declared`, `count`, `both`, `evidence`), `groups[]` (`id`, `label`, `source` = `declared` or `inferred`, `evidence`), `product_units`, `supporting_hidden`, `dropped_edges`.
+
+**Exit code 2** for a bad flag or an invalid `architecture.yaml` (unknown unit names are listed with the valid ones). **Exit code 4** with no heatmap, no units, or only supporting units (add `--include-supporting`).
+
 ## highstakes list
 
-List files sorted by heat score.
+List files sorted by heat, likelihood or impact. Text rows show heat, `L` (likelihood) and `I` (impact; `I~` marks an estimate without the LLM).
 
 ```sh
 highstakes list [flags]
@@ -62,9 +249,69 @@ highstakes list [flags]
 |------|---------|-------------|
 | `--tier` | (all) | Filter by tier: `critical`, `high`, `medium`, `low` |
 | `--limit` | `0` | Maximum files to return (0 = all) |
+| `--sort` | `heat` | Sort by `heat`, `likelihood` or `impact` (descending, ties by path) |
 | `--json` | `false` | Output as JSON |
 
-**Exit code 2** if `--tier` value is invalid (error includes valid values).
+JSON rows keep `path`, `heat_score`, `tier` and `reason`, and add `likelihood` ("Will it break?"), `impact` ("How bad if it breaks?"), `impact_assessed` and `quadrant`.
+
+**Exit code 2** if `--tier` or `--sort` is invalid (error includes valid values).
+
+### File fields
+
+Every file in `.heatmap/heatmap.json` (and `get <file> --json`) carries both axes. See [How It Works](how-it-works.md#two-axes-likelihood-and-impact) for the formulas.
+
+| Field | Meaning |
+|-------|---------|
+| `likelihood` | 0-100, chance the file needs fixes (churn, complexity, centrality, path keywords, incidents) |
+| `impact` | 0-100, damage if it breaks: LLM blast radius, or an estimate from centrality and path keywords when not assessed |
+| `impact_assessed` | `true` when impact came from the LLM |
+| `quadrant` | `fragile-critical`, `protect`, `watch` or `low` (stable machine IDs, unchanged); omitted when impact is not assessed |
+| `quadrant_label` | The posture people read: `Harden now`, `Protect`, `Stabilize` or `Routine` (same order as `quadrant`) |
+| `heat_score` | `max(likelihood, impact)` when assessed, else likelihood (kept for compatibility) |
+| `tier` | From the quadrant when assessed, else from `heat_score` |
+| `explanation` | `headline`, `verdict` (posture, or `Not assessed`), `impact_high`, `likely`, `impact_reasons`, `likelihood_reasons` and `actions`: each `{id, text, scope, signal, done, command, owners}`, `scope` = `before_merge` (this PR) or `backlog` (the file over time), before-merge first. `done` is always false in the heatmap (`pr check` sets it); `command` is a copyable `gh issue create` command or CODEOWNERS line on backlog items; `owners` names suggested owners on review items |
+| `factors.test_coverage.has_test_file` | `true` or `false` when a test sits next to the file by its language's convention; omitted for languages without one |
+| `component` | The crate, package or module the file belongs to |
+| `units` | Runtime units that link the file (see `list units`); omitted when none does |
+| `autonomy` | How far AI agents may act on the file: `{level, label, reason}`, see [Agent autonomy](#agent-autonomy) |
+
+The heatmap `metadata` adds `likely_cutoff` (lowest likelihood counted as likely: top 20% of non-test files) and `impact_threshold` (lowest impact counted as impactful: the top 20% of assessed non-test files, never below `tiers.high`, 61 by default). Heatmaps written before these fields existed load with zeros; run `analyze` again to fill them.
+
+## highstakes list tasks
+
+List backlog items agents may take on, each as a self-contained task: backlog items on files at or above an [autonomy level](#agent-autonomy). Sorted by level (highest first), then path.
+
+```sh
+highstakes list tasks [--level 2] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--level` | `2` | Lowest autonomy level to include, `0`-`3`. The default covers what agents may do unattended (L3) or with one approval (L2) |
+| `--json` | `false` | Output as JSON |
+
+Text output per task: `L<level> <label>  <task>`, then `why:` (the signal), `done when:` (an acceptance hint such as "tests pass and cyclomatic complexity drops below 40" or "CODEOWNERS covers <file>") and the command, if any. Each task names the work an agent does on the file ("Split <file> into smaller files", "Cut the cyclomatic complexity of <file>", "Add tests next to <file>", "Document the invariants of <file> next to the code", "Add a CODEOWNERS line for <file>"), so the instruction and its acceptance agree; issue-filing commands are left out (only the CODEOWNERS line is kept as a command), and items that need a second person, such as spreading ownership, are not tasks. At L0 (assist only, including when `autonomy.max_level` is 0) a file gets only assist tasks: adding tests and documenting invariants, never splitting, refactoring or CODEOWNERS changes. JSON: `{"tasks": [...], "count": N, "min_level": N, "max_level": N}`, each task with `title`, `file`, `action_id`, `signal`, `command`, `acceptance`, `level` and `level_label`. The `assess-impact` item is left out: one `analyze` run with an LLM covers every file. Without an LLM every file is at L1 or below, so the default level lists nothing; the output says to try `--level 1`.
+
+**Exit code 2** for a `--level` outside 0-3 or an invalid config. **Exit code 4** if there is no heatmap.
+
+## highstakes list units
+
+List runtime units: the deployable entry points `analyze` found (Rust bins, Go `main` packages, `package.json` bin and start scripts, Python scripts and `__main__.py`) and what each links through the import graph. Sorted by max impact, then name.
+
+```sh
+highstakes list units [--include-supporting] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--include-supporting` | `false` | Show supporting units too: entry points in a supporting component (`examples`, `scripts`, `tests`, `e2e`, `benchmarks`, ..., plus `tour.supporting` globs) and helper bins (Rust `src/bin/` targets named like tooling: `perf`, `bench`, `gen`, `codegen`, `xtask`, `tool`, `dev`, `debug`, `test`, `fixture`). Hidden ones are counted on the last line |
+| `--json` | `false` | Output as JSON |
+
+Text output per unit: name, kind, entry file and the `file:line` that declares it; max impact (`~` when the file supplying it was not LLM-assessed), Harden now file count and linked file count; `own` components (linked by this unit only), `links units` (another unit's crate linked in-process), `shared` components (linked by two or more units), each declared link (`declared link: -> | <- | <-> <unit>: <label> [evidence]`) and declared placement from `.heatmap/architecture.yaml`, and each inferred placement with its evidence (`none found` when there is none).
+
+JSON: `{"units": [...], "count": N, "supporting_hidden": N, "declared": {"links": [...], "placement": [...]}}`. Each unit has `name`, `kind` (`rust-bin`, `go-main`, `node-bin`, `node-start`, `python-script`, `python-main`), `entry`, `evidence`, `home` (the entry's component), `components` (home first), `shared`, `files`, `lines`, `max_impact`, `impact_assessed`, `fragile_critical`, `supporting` (omitted when false) and `inferred_placement` (each `{kind, detail, evidence}`, kind `dockerfile`, `helm` or `k8s`). The same list is stored in the heatmap `metadata.units`.
+
+A repo with no entry points (a library) prints a note and exits 0; so does a heatmap written before units existed (run `analyze` again). **Exit code 4** if there is no heatmap; **exit code 2** if `.heatmap/architecture.yaml` is invalid. See [How It Works](how-it-works.md#runtime-units) for detection rules and limits.
 
 ## highstakes pr check
 
@@ -77,11 +324,161 @@ highstakes pr check [flags]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--base` | `main` | Base branch to compare against |
+| `--json` | `false` | Output as JSON (same as `--format json`) |
+| `--format` | `text` | `text`, `markdown` (the PR comment the triage workflow posts) or `json`; anything else exits 2 |
+| `--repo` | `$GITHUB_REPOSITORY`, then the origin remote | GitHub `owner/name` the markdown comment links to: prefilled new-issue links and a CODEOWNERS link on the `--base` branch (an edit link to the repo's CODEOWNERS at `.github/`, the root or `docs/`, or a link that creates `.github/CODEOWNERS` with the rule when none exists; a commit base leaves it plain text). Actions the PR already satisfies are never offered as links. Without a repo those actions are plain text; an invalid value exits 2 |
+| `--pr` | from `$GITHUB_REF` (`refs/pull/N/merge` in GitHub Actions) | PR number the markdown comment's issue briefs link back to; without one the link is left out; a negative value exits 2 |
+| `--approvals` | (none) | Comma-separated GitHub logins that approved the PR; a suggested owner among them ticks `senior-review` and `owner-review` items. Only CI knows approvals: the shipped workflow fills it from the GitHub API |
+| `--fail-on` | (none) | Exit 5 when the PR tier is at or above this tier (`critical`, `high`, `medium`, `low`; `critical` gates Harden now files) and at least one **Do before merge** item is still open; once every item is done the PR passes. See [Gate and shadow mode](#gate-and-shadow-mode) |
+| `--strict` | `false` | With `--fail-on`, block on the tier alone, even when every before-merge item is done (the behaviour before items could unblock a PR) |
+| `--signed-off` | `false` | The PR carries the `highstakes:signed-off` label: ticks `senior-review` and `owner-review` items with the signal "signed off with the highstakes:signed-off label". The shipped workflow sets it only after verifying the label: added by someone with write access, on the current head commit (see [CI Integration](ci-integration.md#sign-off-label)) |
+| `--auto-merge-enabled` | `unknown` | Whether auto-merge is on for the PR: `true`, `false` or `unknown` (anything else exits 2). `false` ticks the `no-auto-merge` items ("auto-merge is not enabled on this PR"); `true` keeps them open, reworded "Turn auto-merge off: it is enabled on this PR". The shipped workflow sets it from the PR's `auto_merge` field |
+| `--shadow` | `false` | Compute the `--fail-on` decision (default gate `critical`), append it to `.heatmap/shadow.jsonl`, always exit 0 |
+| `--author` | HEAD commit author | Email or handle excluded from suggested reviewers |
+| `--reviewers` | `3` | Max suggested reviewers; `0` skips the git history lookup |
+
+Uses `git diff --no-renames --numstat` to identify changed files (a rename is its old path deleted plus its new path added), then looks up their scores. The PR tier is the most severe tier among the touched files (so a PROTECT file with a modest heat score still makes the PR HIGH); `heat_score` is the highest heat among them.
+
+A changed file that is not in the heatmap (for example, a file added in this PR) does not default to LOW. It inherits the highest heat score and the most severe tier of scored files in its directory, or the nearest parent directory that has any: files with an LLM-assessed impact contribute their quadrant tier (so a new file next to a Harden now file is CRITICAL even at heat 75), other files are tiered from heat with the repo's `tiers` from `.heatmap/config.yaml`. It is marked `"unscored": true` in `--json` output, and adds an `Unscored new file(s)` circuit breaker signal. Non-code files are exempt and stay LOW: docs (`.md`, `.mdx`, `.rst`, `.txt`), images, fonts and media (`.png`, `.pdf`, `.woff2`, `.mp4`, ...; not `.svg`, which can carry scripts), `.golden` files and known data formats under `testdata/` (`.json`, `.yaml`, `.csv`, `.txt`, `.xml`, images, ...; any other file there, such as a script, source file, library or archive, inherits directory risk because test harnesses run or load it), lock files (`go.sum`, `*.lock`, `package-lock.json`, ...), dependency manifests (`requirements*.txt`, `go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`, `Gemfile`, `pom.xml`, `build.gradle`, ...) and tool config under a leading-dot path, when it is a data file (`.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg`, `.conf`) or a known dotfile (`.gitignore`, `.editorconfig`, `.dockerignore`, `.npmrc`, ...), such as `.golangci.yml` or `.impeccable/config.json`. `.github/`, `.gitlab/` and `.circleci/` stay scored. Executables, libraries, archives and other compiled artifacts (`.wasm`, `.jar`, `.so`, `.dll`, `.exe`, `.pyc`, `.class`, ...) and scripts under dot directories (`.husky/pre-commit`, `.devcontainer/setup.sh`) are not exempt: they run, so they inherit directory risk like any unscored file. Dependency manifests and recognised dependency lock files (`Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Gemfile.lock`) still count as config/infra changes in change risk; `go.sum` and other `*.lock` files do not.
+
+### Verdict and checklist
+
+The verdict is the posture of the most severe changed file: `Harden now`, `Protect`, `Stabilize` or `Routine` (it follows the PR tier, so `--fail-on critical` gates exactly the Harden now verdict). Text output leads with it and the auto-merge line (see [Agent autonomy](#agent-autonomy)), then **Do before merge**: the before-merge actions of the Harden now and Protect files, deduplicated (identical items list every file they apply to and are done only when done for all), then **Worth doing (does not block)**: the before-merge actions of the other files (Stabilize, or unassessed files whose estimate is below Protect), such as refactoring the touched function or regression tests, then each file with both scores, the backlog and the gate decision. Routine files add nothing. Second-reviewer and spread-ownership items only fire in repos with more than one author. The `single-owner` item (add a second reviewer) is always listed under worth doing, even for Harden now and Protect files: nothing in the PR can complete it, so it never blocks.
+
+`pr check` ticks items the PR already satisfies:
+
+| Item | Done when |
+|------|-----------|
+| `regression-tests`, `no-tests`, `stable-interface` | the PR adds or changes a test next to the file (deleting one does not count; a renamed test counts at its new path): a conventional test path (`foo_test.go`, `test_foo.py`, `foo.test.ts`, `FooTest.java`, ...), a test under the file's module directory (Rust `src/proxy/tests/x.rs` for `src/proxy.rs`), `<stem>_*` test files beside it, or a `tests/` sibling naming the file. Tests added inside a Rust file's own `#[cfg(test)]` module are not detected |
+| `codeowners` | the CODEOWNERS file at HEAD (`.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`, the first found) covers the path, last matching rule with owners wins |
+| `senior-review`, `owner-review` | a login in `--approvals` matches one of the item's owners (case and `@` ignored), or `--signed-off` is set (the PR has the `highstakes:signed-off` label) |
+| `no-auto-merge` | `--auto-merge-enabled false` |
+
+Harden now files get one change-dependent item, `smaller-pr` ("Ask for a smaller PR"), when the diff changes more than 500 lines or touches non-test files in 3 or more components. Whether exported symbols changed is not detected.
+
+`--format markdown` renders the PR comment, laid out to act on at a glance: a `<!-- highstakes-triage -->` marker; the verdict heading (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize`, `✅ Routine`); the changed files per posture (`⛔ 1 harden · 🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`, zero counts left out); one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line; **Do before merge (N of M done)**, the checklist of Harden now and Protect items (`[x]` done, `[ ]` open) with an emoji per kind (👀 review or sign-off, 🧪 tests, ✂️ split or smaller PR, 🚫 auto-merge off, 📝 docs or invariants, 👥 ownership); review items name the owners' GitHub handles ("Request a review from @a, @b on `file`") or, without one, "someone who knows `file`", and while open say how to satisfy them: "(a maintainer adds the `highstakes:signed-off` label after reviewing)"; with a gate, a line under the heading gives its state: "⛔ Merge blocked: 2 before-merge items open" (or the `--strict` reason), or "✅ All before-merge items done: ready to merge" when the gate passes because every item is done; a new file that inherits Harden now or Protect (not a test) adds one review item ("Review the new file `path` with a senior owner of its directory"), carrying the review owners of the scored files in its directory (or the nearest parent) so their approval ticks it, and the auto-merge item; a Harden now or Protect file from a heatmap written before actions existed gets the same two items ("run analyze again"), since missing data is not "done"; more generally, every Harden now or Protect file carries a review item and the auto-merge item, added when its own actions lack them (for example when its impact is not AI-assessed); the checklist shows one PR-wide auto-merge item, so a PR of only new files cannot pass the gate unreviewed; a table of at most five non-routine files with a posture emoji, **If it breaks** (what goes wrong, from the AI assessment), **Breaks often?** (🔴 and the strongest signal in a few words, such as "5 recent fixes" or "13 commits in the last 90 days", or 🟢 rarely) and **Next step** (the file's top open action: before merge first, then worth doing, then backlog, plus an "open issue" link when it has one and the budget allows; PR-wide items such as keep auto-merge off and ask for a smaller PR are never a file's step; a file with no open action gets its posture's default: 👀 senior sign-off for Harden now, 👀 owner review for Protect, 🧪 regression tests for Stabilize files with recent fixes, else 🔍 review the change), and one Routine row; a fold that groups the further non-routine files by next step, one line per step ("✂️ refactor: `a.go`, `b.go` (and 12 more)"); **⚡ One-click actions**: "✂️ Ask for a smaller PR" first, once for the whole PR (it replaces the large-diff warning), then up to five links in all, first prefilled GitHub issues for split, complexity, test-gap, invariant and regression-test items, one per file before any second, then CODEOWNERS lines linked to the CODEOWNERS edit page when every owner is an `@handle` (else an instruction to add an `owners` alias), then the circuit breakers as actions (✂️ large diff with its line count: split the PR; 🆕 unscored new files: scored on the next analyze; 🧪 low test ratio: add tests). Each issue is a full brief built without an LLM: **Why it matters** (the AI-assessed consequence and top impact dimensions, or "Impact estimated" when not assessed), **Why now** (the posture in plain words, both scores with the repo cutoffs, up to three recent fix commits with subjects and dates, and the other break signals), **Suggested approach** (2-4 steps per kind: reproduce each recent fix in a test; split into cohesive groups one per PR keeping the public API; pin behavior with tests then extract the most complex functions; add a test file by the language convention covering the exported symbols; write the contract next to the code and check it against the top importers), **Done when** (a checklist: the acceptance plus "tests pass"), **Context** (who to ask, as `@handles` only, else "someone who knows the file"; the number of importers and the top three; the AI autonomy level and what it allows; a link to the PR (`--pr`) and the commit) and the footer "Opened from the HighStakes PR comment". Each issue URL stays under 6,000 characters: a long brief is trimmed (the longest section loses items, then long items are cut), never dropped. Under each issue link, a folded **What's in this issue** shows the brief in five lines (why it matters, why now, suggested approach, done when, who and autonomy), left out when the comment budget runs short; a folded Mermaid quadrant chart of up to 15 scored non-routine files, labelled 1, 2, 3 in table order and placed by rank inside their posture's quadrant (files ranked by likelihood fill columns, by impact within a column, away from the borders), so ties never overlap and a file on a cutoff still sits clearly inside its quadrant, with a legend under it ("1. ⛔ `path`: senior sign-off"); and a folded **Why these actions?** block (covering every non-routine file) with the same two notes (relative signal; evidence for each question), per-file reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items with their files and signals, backlog items with their commands and the gate decision. Links need a repo (`--repo`, `$GITHUB_REPOSITORY` or the origin remote); without one, the actions are plain text. Counts use thousands separators ("43,274 lines"). The comment never contains email addresses: GitHub noreply addresses become `@handles`, and any other address becomes "a top owner" (issue links are scrubbed before encoding). A backlog command that would contain an unmapped email (such as a CODEOWNERS line) is left out and replaced by an instruction to add an `owners` alias, since a redacted rule would not work. Map owners to GitHub handles with the `owners` map in `.heatmap/config.yaml` to name them and get the copyable lines. The whole comment stays under 60,000 characters (GitHub rejects comments over 65,536): on very large PRs the checklist, the further-files fold (at most 50 next-step lines of up to 20 files each), the actions, per-file reasons and backlog are cut where needed, each with a notice; run `highstakes pr check` for the full list.
+
+JSON adds `verdict`, `checklist` (Harden now and Protect items), `worth_doing` (the other before-merge items) and `backlog` (actions with `id`, `text`, `scope`, `signal`, `done`, `files`, and `command` for backlog items), `likely_cutoff` and `impact_threshold`; each `files_changed[]` entry adds `likelihood`, `impact`, `impact_assessed`, `quadrant`, `quadrant_label`, `actions` (its before-merge items with `done`) and `autonomy`. `autonomy_level` (lowest level over the touched files), `auto_merge_allowed` (true only at level 3) and `autonomy_reason` are always present for a non-empty diff.
+
+### Agent autonomy
+
+Every file gets a level saying how far AI agents may act on it without a human:
+
+| Level | Label | Posture | Agents may |
+|-------|-------|---------|------------|
+| 3 | `auto-merge` | Routine | fix, open a PR and merge once CI and AI review pass |
+| 2 | `auto-fix, human merges` | Stabilize | fix and open a PR; a human merges |
+| 1 | `propose only` | Protect | open draft PRs or suggestions; an owner merges |
+| 0 | `assist only` | Harden now | write tests and explanations; changes need a named senior owner |
+
+"How bad?" is AI-assessed and not yet validated by people, so the levels are conservative. A file whose impact is not LLM-assessed is capped at 1 (unknown impact allows no more than proposing), and `autonomy.max_level` in `.heatmap/config.yaml` (default 3) caps every file (see [configuration](configuration.md#agent-autonomy)). `analyze` stores the level per file (`autonomy` in the heatmap). In `pr check`, files missing from the heatmap follow the same rules: unscored new files use their inherited tier and are capped at 1, Markdown and reStructuredText docs (`.md`, `.rst`) are level 3, and every other file HighStakes has not assessed (images, SVG, fonts, testdata, `.mdx`, `.markdown`, `.txt` such as `CMakeLists.txt`) is at most level 1 (lower when it inherits a Harden now tier) because its content is unknown, and dependency manifests, lock files and tool config files are level 1. Binary artifacts and dot-directory scripts count as unscored new files, so they are capped at 1. The PR's level is the lowest over its files; the comment says, for example, `🤖 AI may auto-merge: ❌ no (touches Protect files)`; when several causes give the lowest level, it names the most important: Harden now or Protect files, then impact not AI-assessed, then new, unassessed or config files, then the `autonomy.max_level` cap. `--fail-on` is unaffected; a workflow can read `auto_merge_allowed` from the JSON.
+
+An empty diff prints `No changes detected` (JSON: `{"changes": 0, "tier": "low", "verdict": "Routine"}`) and still goes through the gate: it has no open items, so `--fail-on low` passes it and `--strict --fail-on low` blocks it, and `--shadow` logs its decision. When a gate applies, the JSON adds `decision`, `decision_reason`, `open_items`, `fail_on` and `shadow`.
+
+**Exit code 2** for an invalid `--fail-on` or `--format` (error lists valid values). **Exit code 3** if git diff fails (error includes valid base examples). **Exit code 5** when `--fail-on` blocks the PR.
+
+### Two-axis risk
+
+The tier (the most severe tier among touched files) and importance answer "how important is the code this PR touches". A second, independent number answers "how risky is this change itself". Text output shows the verdict and change risk with its factors; `--json` has all of these:
+
+| JSON field | Meaning |
+|------------|---------|
+| `importance` | 0-100, max impact of touched files; files without an LLM assessment count with their heat |
+| `change_risk` | 0-100, sum of: lines changed (up to 30), new files (5 each, up to 15), config or infra files such as CI workflows, Dockerfiles, Helm, Terraform, dependency manifests and lock files (20), lines deleted from high or critical files (up to 20), low test ratio (up to 15) |
+| `change_risk_level` | `low` (<30), `medium` (30-59), `high` (60+) |
+| `change_risk_factors` | Components worth 5 or more points, in plain words |
+
+A one-line fix to a critical file is high importance, low change risk. A 2,000-line refactor of utilities is the reverse.
+
+### Suggested reviewers
+
+`suggested_reviewers` lists up to `--reviewers` people who own the hottest changed files (top 5, docs skipped), ranked by ownership share times file heat. Ownership comes from `git log --numstat`: lines each author changed in the file, weighted by recency (half-life 180 days), with `.mailmap` applied and bots ignored. The PR author is excluded. Each entry has `handle`, `email`, `score` and `files`. Handles come from the `owners` map in `.heatmap/config.yaml`, or from GitHub noreply addresses; otherwise the email is used. In CI, check out with full history (`fetch-depth: 0`) or owners will be incomplete.
+
+### Gate and shadow mode
+
+`--fail-on high` gates PRs whose tier is high or critical: `pr check` exits 5 while at least one **Do before merge** item (the checklist of the Harden now and Protect files; the smaller-PR ask is not counted) is still open, and passes once every item is done, so working through the checklist unblocks the merge. A PR below the gate always passes. `--strict` blocks on the tier alone, whatever is done. The JSON adds `fail_on`, `decision` (`pass` or `block`), `decision_reason` (`2 before-merge items open`, `all before-merge items done`, `tier high is below --fail-on critical`, or the `--strict` reason) and `open_items` (open checklist items, always present). Text output ends with `Decision: PASS (fail-on critical): all before-merge items done`.
+
+Review items need an owner's approval, but GitHub does not let authors approve their own PRs, so a sole maintainer could never satisfy them. A maintainer with write access adds the `highstakes:signed-off` label after reviewing instead; the shipped workflow re-runs on `labeled` and `unlabeled` and passes `--signed-off` only while a verified sign-off stands for the current head commit (see [CI Integration](ci-integration.md#sign-off-label)). The no-auto-merge items are ticked when CI passes `--auto-merge-enabled false`. Every non-test Harden now or Protect file always carries a review item and the PR-wide auto-merge item, so the gate cannot pass on an empty checklist: they are added when the file's own actions lack them, for new unscored files that inherit a blocking tier, and for files from a heatmap written before actions existed; the review item names the review owners of the nearest directory with scored files, so their approval ticks it. The shipped workflow passes in `--approvals` only approvals of the current head commit. `--shadow` computes the same decision, defaulting the gate to `critical`, but never fails: it prints the decision to stderr, sets `"shadow": true`, and appends one JSON line per run to `.heatmap/shadow.jsonl` (time, base, head, tier, heat, change risk, decision). Run in shadow mode until the decisions match what your reviewers would have done, then switch to `--fail-on`.
+
+## highstakes create codeowners
+
+Generate a CODEOWNERS block for high-stakes paths, with suggested owners from git history.
+
+```sh
+highstakes create codeowners [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-tier` | `high` | Lowest tier to include: `critical`, `high`, `medium`, `low` |
+| `--max-owners` | `2` | Owners per path |
+| `--write` | `false` | Write the block into `--file` instead of only printing it |
+| `--file` | `.github/CODEOWNERS` | File updated by `--write` |
 | `--json` | `false` | Output as JSON |
 
-Uses `git diff --numstat` to identify changed files, then looks up their heat scores. The PR inherits the tier of its highest-scoring file.
+A file is hot when its tier is at or above `--min-tier`, or when its LLM-assessed impact is at or above that tier's threshold (61 for `high`, 86 for `critical`), so stable but impactful code is protected even if it rarely changes. A directory with at least two scored files, all hot, becomes one `/dir/` rule; otherwise each hot file gets its own rule. Owners are ranked the same way as `pr check` reviewers. Paths with no owner in git history are written as comments, so they never clear an earlier rule. GitHub's CODEOWNERS has no documented way to escape characters, so a path containing whitespace or one of `\`, `*`, `?`, `[`, `]` cannot be a rule that matches only that path. Such paths are written as `# cannot express in CODEOWNERS (space in path): <path>` (or `(glob character in path)`) comments, reported on stderr and listed in JSON `unrepresentable`; protect them by hand, for example by owning their directory.
 
-**Exit code 3** if git diff fails (error includes valid base examples).
+The block sits between `# BEGIN highstakes` and `# END highstakes` markers. `--write` replaces that block in place, or appends it to the end of the file, where CODEOWNERS rules take precedence. Lines outside the markers are left alone.
+
+JSON fields: `min_tier`, `entries` (each with `path`, `is_dir`, `tier`, `heat_score`, `files`, `owners`), `unrepresentable` (hot paths left as comments), `block` (the text), `written` (path, empty unless `--write`).
+
+**Exit code 2** for an invalid `--min-tier` (error lists valid values). **Exit code 3** if git history cannot be read. **Exit code 4** if there is no heatmap.
+
+## highstakes create policy
+
+Generate a machine-readable list of paths that AI reviewers must not auto-approve, or with `--agents` the agent autonomy policy.
+
+```sh
+highstakes create policy [flags]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--min-tier` | `high` | Lowest tier to include: `critical`, `high`, `medium`, `low` |
+| `--json` | `false` | Output JSON instead of YAML (same as `--format json`) |
+| `--format` | `yaml` | `yaml` or `json` |
+| `--out` | (stdout) | Write to this file instead, creating its directory |
+| `--agents` | `false` | Emit the agent autonomy policy instead (`--min-tier` is still validated, so an invalid value exits 2, but a valid one does not change the policy) |
+
+Files are selected the same way as `create codeowners`: tier at or above `--min-tier`, or assessed impact at or above that tier's threshold. Prints YAML by default. Fields: `version`, `generated_by`, `min_tier`, `description`, `paths` (globs: `dir/**` for fully hot directories, exact paths otherwise) and `files` (every hot file with `path`, `tier`, `heat_score` and the LLM `reason` when available). Feed `paths` to the path restrictions of Copilot code review, CodeRabbit path instructions, or your own approval bot.
+
+```sh
+highstakes create policy > .github/highstakes-policy.yaml
+```
+
+`--agents` lists, for each [autonomy level](#agent-autonomy), the paths at that level. Levels 3 and 2 list exact files only, so a file added later never inherits an elevated level; at levels 1 and 0 a directory whose scored files all share the level becomes `dir/**` (the highest such directory, never the repo root), so paths never overlap. Any path not listed is `default_level`: 1 (propose only). The YAML opens with a comment header explaining the levels and that default. Fields: `version`, `generated_by`, `how_to_read` (how a bot applies it: match each touched file, the change may go as far as the lowest level, unmatched files count as `default_level`), `cap_rule`, `max_level` (from the config), `default_level` (1, or `max_level` if lower) and `levels` (each `level`, `label`, `meaning`, `paths`, highest level first). Regenerate after `analyze`.
+
+```sh
+highstakes create policy --agents --out .highstakes/autonomy.yaml
+```
+
+**Exit code 2** for an invalid `--min-tier`, `--format` or config. **Exit code 4** if there is no heatmap.
+
+## highstakes create labels
+
+Write a blind CSV sheet for maintainers to rate how bad a bug in each file would be. Score the filled sheet with [`check calibration --labels`](#maintainer-labels).
+
+```sh
+highstakes create labels [--top 20] [--random 20] [--seed 1] [--out FILE] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--top` | `20` | Files HighStakes rates highest on blast radius (on heat when no file has an LLM assessment) |
+| `--random` | `20` | Other non-test files, sampled at random |
+| `--seed` | `1` | Random seed; the same seed and heatmap give the same sheet |
+| `--out` | (stdout) | Write the CSV to this file |
+| `--json` | `false` | Print `ranked_by`, `top`, `random`, `seed`, `files`, `out` and `paths` (sheet order) as JSON |
+
+The sheet has the columns `path`, `maintainer_rating` (blank) and `notes`. Maintainers rate each file from 1 to 5, where 5 means "a bug here would be a serious incident", and leave a row blank when unsure. The two groups are shuffled together and the sheet carries no HighStakes scores, so the raters cannot anchor on them. Test files are never sampled.
+
+```sh
+highstakes create labels --out labels.csv
+# maintainers fill in maintainer_rating, then:
+highstakes check calibration --labels labels.csv
+```
+
+**Exit code 2** for a negative `--top` or `--random`, or both 0. **Exit code 4** if there is no heatmap or it has no non-test files.
 
 ## highstakes incident create
 
@@ -131,7 +528,13 @@ highstakes dashboard [--output <path>] [--no-open]
 | `--output` | `.heatmap/dashboard.html` | Output file path |
 | `--no-open` | `false` | Don't open in browser |
 
-The dashboard has two views: a treemap (visual overview) and a file explorer (hierarchical tree). Both support tier filtering, search, and a detail panel with blast radius reasoning.
+The dashboard opens on the action inbox: before-merge cards (one per Harden now or Protect file: verdict, path, every before-merge step with its signal, and owners; the top 10, plus files tied with the tenth, with **Show all** for the rest) and backlog cards (one per kind of fix across files, ordered by how many Harden now files it covers; open one to see its files and a **Copy** button for one snippet with every CODEOWNERS line or `gh issue create` command; when the clipboard is blocked the snippet is selected for copying by hand). Files without an LLM-assessed impact (`analyze --no-llm`, or no API key) take the posture of their estimated impact against the recorded cutoffs (`likely_cutoff`, `impact_threshold`), and their cards and backlog entries are marked "impact estimated (run with an LLM for an assessment)", with the same note in the inbox intro; LLM-assessed files rank before estimated ones. Heatmaps without recorded cutoffs show only assessed files. Behind tabs (arrow keys, Home and End move between them) are four investigation views: a treemap (visual overview), a file explorer (hierarchical tree), an architecture view and a quadrant view. All support the posture filter (one per tier), the **Agents** filter (L3 to L0, the [autonomy level](#agent-autonomy) recorded by `analyze`; it also filters the inbox), search, and a detail panel with the verdict, both questions with their repo cutoffs and the evidence note, the agent autonomy level with its reason, the before-merge and backlog checklists, and the reasons and impact dimensions folded under **Why**. The page is static: it copies commands and never calls GitHub.
+
+The architecture view draws one node per directory (Go package) in dependency layers, entry points on top. It opens grouped by unit when the heatmap has two or more non-supporting units, else by package. Supporting nodes stay hidden until **Supporting code** is on: supporting components (the same rule as the tour, see below), directories holding only YAML, TOML, JSON or Dockerfiles, and supporting units; the legend counts them. Node size is total lines; colour and shape are the tier of the highest LLM-assessed impact in the directory (the most severe heat tier when nothing there was assessed), and the number is that impact. A dashed outline and an "N likely" badge mark directories with files likely to need fixes. The label names the hottest file. Test files are left out of nodes and edges. Edges come from the import graph: an arrow from A to B with label N means N files in A import a file in B (same-directory imports are not drawn). By default only key edges are drawn, thin and grey: the 15 with the most importing files plus the strongest edge of each node whose impact tier is critical or high (computed in Go over the visible nodes, so the set changes with **Supporting code**). Hovering, focusing or picking a node highlights all of its edges with their labels and fades the rest; **All arrows** draws every edge. Clicking a node lists its files hottest-first in the detail panel; clicking a file there opens its blast radius. Clicking an arrow lists the file-level imports behind it (importer -> imported, with each file's impact; at most 200 per arrow). The layout is computed in the page (layered, with barycenter ordering to reduce crossings; wide layers wrap into rows so the graph keeps the viewport's shape), so the HTML stays self-contained. The `-`, `+`, **Fit** and **1:1** buttons, the mouse wheel and trackpad or touch pinch zoom; drag to pan. The view fits the screen when first opened.
+
+**Group by: Unit** redraws the view by runtime unit (see `list units`): a top row of unit boxes, each holding the components only that unit links, and a band below with the shared libraries, layered by their own imports. Unit boxes are coloured by the max impact of their own files, carry the same fragility marker, and show the inferred placement (Dockerfile name, Helm values key, Kubernetes manifest). Clicking a unit shows its entry point and evidence, placement evidence, totals across everything it links, own components, shared libraries and files with impact, likelihood and quadrant; clicking a shared library shows the units that link it. The hint line counts non-test files no unit links. The toggle is disabled when the heatmap has no units. Supporting units are hidden until **Supporting code** is on (the legend counts them; the button is disabled when there are none). Links declared in `.heatmap/architecture.yaml` draw as dashed arrows labelled "(declared)", with the evidence in the tooltip, and a declared placement replaces the inferred one on the box as "declared: <runs_in>". An invalid `architecture.yaml` makes `dashboard` exit 2.
+
+The quadrant view plots every non-test file with "Will it break?" on x and "How bad if it breaks?" on y. A vertical line marks the likely cutoff and a horizontal line the impact threshold; each quadrant is labelled with its posture and what it asks for. Dot radius runs from 6 to 16px by the square root of lines; colour and shape follow the posture (diamond Harden now, triangle Protect, square Stabilize, circle Routine; an estimated impact takes the quadrant its scores fall in against the cutoffs) and hollow dots have an estimated impact. The axes zoom to the data range padded to tens, widened to keep both cutoffs visible (**Full scale** shows 0 to 100). Files with identical scores are spread up to 24px apart in an order seeded by their path, so the plot is the same on every run. The top five files by how bad (LLM-assessed first), or by will it break when nothing is assessed, are labelled on the plot. Hovering a dot shows its path, both scores and posture; clicking it opens the file in the detail panel.
 
 ## highstakes github install
 
@@ -141,7 +544,7 @@ Generate a GitHub Actions workflow for automated PR triage.
 highstakes github install
 ```
 
-Creates `.github/workflows/heatmap-triage.yml`.
+Creates `.github/workflows/heatmap-triage.yml`, the same workflow this repo runs (installing highstakes with `go install ...@latest`): it posts `pr check --format markdown` as a PR comment, fills `--approvals` from the PR's reviews, `--signed-off` from a verified `highstakes:signed-off` label (write access, current head commit) and `--auto-merge-enabled` from the PR's live auto-merge state, re-runs on reviews and on label changes, and fails the `triage` job while a PR touching Harden now files has before-merge items open (`--fail-on critical`). See [CI Integration](ci-integration.md#github-actions).
 
 ## highstakes agent-context
 
@@ -153,6 +556,89 @@ highstakes agent-context
 
 Designed for AI agents to discover the CLI surface programmatically. The output includes a `schema_version` field for detecting breaking changes.
 
+## highstakes check calibration
+
+Compare heat scores with what actually happened in git history.
+
+```sh
+highstakes check calibration [--since 365d | --holdout <cutoff>] [--events all] [--top 10] [--limit 10] [--json]
+highstakes check calibration --source prs [--repo owner/name] [--since 365d | --holdout <cutoff>] [--top 10] [--limit 10] [--json]
+highstakes check calibration --labels FILE [--top 10] [--json]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--since` | `365d` | Count events in the last N days (format `Nd`) |
+| `--holdout` | (off) | Cutoff as `YYYY-MM-DD` or `Nd` ago. Churn and incident history are recomputed from history up to the cutoff, files that did not exist yet are dropped, and events are counted after it. Cannot be combined with `--since` |
+| `--events` | `all` | Event kinds to count: `all` (reverts, bug fixes, security fixes, incidents), `fixes` (bug-fix and security commits), `reverts`, or `security` (security fixes only). Incidents count only with `all` |
+| `--source` | `commits` | Where events come from: `commits` (commit-message keywords, below) or `prs` (merged GitHub pull requests, see [Pull-request source](#pull-request-source)) |
+| `--repo` | (origin remote) | GitHub `owner/name` for `--source prs`; by default read from the `origin` remote URL |
+| `--labels` | (off) | Compare with maintainer ratings in this CSV instead of git history. Cannot be combined with `--since`, `--holdout`, `--events` or `--source` |
+| `--top` | `10` | K for precision@K and recall@K |
+| `--limit` | `10` | Maximum files per surprise list |
+| `--json` | `false` | Output as JSON |
+
+**Events.** Each non-merge commit in the window is labelled from its message: a revert (subject starts with `Revert` or the body has `This reverts commit`), a bug fix (fix, bug, bugfix, patch, hotfix, repair, correct or resolve, with their plural and past forms, as whole words in the subject, so "debug", "prefix", "dispatch" and "incorrect" do not count), or a security fix (`CVE-` or `GHSA-` anywhere in the message, or `security` as a standalone word or a word starting with `vuln` in the subject). The security keywords do not count in `docs`, `ci`, `test`, `chore`, `build` or `style` commits, nor inside names such as `Content-Security-Policy`, `podSecurityContext`, `SecurityException` or `SECURITY.md`. Every file the commit touched gets one event. Commits touching more than 50 files are skipped as bulk changes. Incidents in `.heatmap/incidents.json` dated in the window add one event to their file.
+
+**Metrics.**
+
+| Metric | Definition |
+|--------|------------|
+| Base rate | Share of scored files with at least one event |
+| Hit rate (per tier) | Share of files in the tier with at least one event; `events/file` is the mean event count |
+| precision@K | Share of the K highest-scoring files with at least one event. Files tied at the K-th score share the remaining slots, so ties give the average over every ordering |
+| recall@K | Share of all files with events that are in the top K |
+| Lift | precision@K divided by the base rate; 1.0 means no better than a random pick |
+| Spearman | Rank correlation between the score and the event count, with average ranks for ties; `n/a` when a side has no variation |
+
+Metrics are reported for `heat`, for the two axes (`likelihood`; `impact`, on LLM-assessed files only when any are assessed, else the estimate) and for `blast_radius` (LLM-assessed files only), `churn`, `complexity` and `centrality` alone. In holdout mode likelihood is recomputed at the cutoff and quadrant tiers are reassigned from it. Surprises list LOW-tier files with the most events and CRITICAL/HIGH files with none.
+
+The report starts with the event kinds counted (`event_filter` in JSON). When fewer than 10 scored files have events it prints a `WARNING` line and sets `too_few_events`: the numbers are then anecdotes, not evidence.
+
+**Security-only mode.** Fix history measures how likely a file is to break; blast radius scores how bad a break would be, so fix counts cannot validate it. `--events security` counts only security fixes, a rough proxy for impact: read the `blast_radius` row first. Security fixes are rare, so widen the window (`--since 1095d`) and expect too few events on young repos.
+
+**Leakage.** In the default (in-sample) mode, churn and incident history come from the same history as the events, so they look better than they are. `--holdout` removes that for churn and incidents. Complexity, centrality, path heuristics and blast radius still come from today's file contents, so some leakage remains.
+
+### Pull-request source
+
+`--source prs` takes events from merged pull requests instead of commit messages, and adds a second comparison for the impact axis. It needs the `gh` CLI, logged in.
+
+1. **PR metadata from GitHub.** Merged PRs in the window (merged after `--since`'s start or the `--holdout` cutoff), via `gh api graphql`, 50 per page: number, title, merge time, merge commit, author, labels, the issues it closes and their labels, review count, distinct approvers and commit count. Each PR is cached in `.heatmap/cache/github/<owner>/<name>/pr-<n>.json`; after a complete run only PRs updated since then are fetched again. A cache written before a field was added (such as the commit count) is refetched once. A run reads at most 1,500 PRs and stops while 200 GraphQL points remain or when GitHub reports a rate limit; it then reports what it has (`fetch.capped`, `fetch.partial` in JSON) and adds a caveat. A partial run is not recorded as complete, so the next run fetches again.
+2. **Files from local git.** Each PR is mapped to the commit that landed it on HEAD's first-parent history: the merge commit GitHub reports, else a subject ending in `(#123)` (squash merge) or starting with `Merge pull request #123`. Files changed come from that commit (merge commits against their first parent). For a rebase merge (a one-parent merge commit whose subject does not name the PR, from a PR with several commits), GitHub reports only the last rebased commit, so the files are the union over that commit and its first-parent ancestors, walking back only while an ancestor's subject matches one of the PR's commit headlines (the last 100 are fetched) and at most up to the PR's commit count. A rebase merge without the PR number in its subject still maps through the merge SHA GitHub reports. Unmapped PRs (PRs merged after HEAD, or whose landed commit is not on HEAD's first-parent history) are left out; the report shows how many mapped.
+3. **Event rules per PR.**
+
+| Evidence | Axis | Rule |
+|---|---|---|
+| Bug fix | fragility | A label matching `bug`, `fix`, `defect` or `regression` (case-insensitive) on the PR or an issue it closes, or a title `fix:` / `fix(scope):` |
+| Revert | fragility | Title starts with `Revert` |
+| Backported | stakes | A commit on a remote release line (branch name after the remote starting with `release`, `backport`, `stable` or `v<digit>`, or ending in `<digit>.x` such as `tokio-1.43.x`), made on the line itself (on its first-parent history but not HEAD's) and dated in the window, says `(cherry picked from commit <sha>)` for the PR's commit, or has a `(#N)` in its subject that is the PR's number or appears in the subject of the PR's commit (fixes landed on the release line first and merged forward as `fix (#N) (#M)`) |
+| Fast revert | stakes | A commit on HEAD says `This reverts commit <sha>` for the PR's commit, or `Reverts [owner/repo]#N`, within 7 days of the merge |
+| Severity label | stakes | A label on the PR or an issue it closes matching `security`, `critical`, `p0`, `p1`, `sev`, `incident`, `cve` or `vulnerab`, unless it also says `low`, `minor` or `trivial` |
+| Review depth | stakes | 2 or more distinct approvers, or 3 or more reviews |
+| CODEOWNERS | stakes | The file is owned in `.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS` (last matching rule wins; a rule with no owners un-owns). A file-level signal, no PR needed |
+
+PRs touching more than 50 files are skipped, as with commits.
+
+4. **Metrics.** The main report (same layout and JSON fields as the commit source, with `source: "prs"`) ranks files against bug-fix and revert PRs: the "Will it break?" check, normally read on the `likelihood` row with `--holdout`. The same window with commit-keyword events follows side by side (`commit_keyword` in JSON). Then blast radius, on LLM-assessed non-test files, is compared with each stakes signal (PR counts per file) with `combined`, the number of distinct stakes signals per file, and with `pr_activity`, a reference row counting every mapped PR (not a stakes signal and not in `combined`; a signal that does no better than it mostly measures activity): Spearman, precision@K, lift, files with events, and `too_few_events` under 10 files. A signal is `n/a` when its data is missing: no release branches in the clone (fetch them), no CODEOWNERS file, or no LLM assessment.
+
+JSON adds `github` (`repo`, `fetch` with `fetched`, `from_cache`, `api_calls`, `capped`, `cap`, `partial`, `partial_reason`; `in_window`, `mapped`, label counts, `backport_branches`, `codeowners_file`), `commit_keyword` (a full commit-source report) and `stakes` (each `name`, `available`, `note`, `files`, `files_with_events`, `too_few_events`, `base_rate`, `precision_at_k`, `recall_at_k`, `lift`, `spearman`).
+
+Caveats: labels follow each project's habits (some never label PRs, so bug fixes rest on `fix:` titles). Review depth and CODEOWNERS reflect how important maintainers judge a file, which is what blast radius should match, but they also rise with code volume and with how often a file changes, so a positive correlation partly measures activity. Compare each with the `pr_activity` row.
+
+### Maintainer labels
+
+`--labels FILE` reads a sheet made by [`create labels`](#highstakes-create-labels) and filled in by maintainers. Rows with a blank rating are skipped; columns are found by header name, so extra columns and any order are fine. For `blast_radius` (LLM-assessed files only) and `heat` it reports, over the rated files in the heatmap:
+
+| Metric | Definition |
+|--------|------------|
+| Spearman | Rank correlation between the score and the 1-5 rating |
+| precision@K | Share of the K highest-scoring rated files with a rating of 4 or 5 |
+| Lift | precision@K divided by the share of rated files with 4 or 5 |
+
+It also prints how many files were rated, how many are in the heatmap, and the rated paths it could not find. Under 10 rated files in the heatmap it prints a `WARNING` (`too_few` in JSON). JSON fields: `rated`, `matched`, `unmatched`, `positives`, `base_rate`, `k`, `too_few`, `signals` (each `name`, `available`, `note`, `files`, `precision_at_k`, `lift`, `spearman`).
+
+**Exit code 2** for invalid flags (bad `--since`/`--holdout` format, a future cutoff, `--top` below 1, both `--since` and `--holdout`, an unknown `--events` or `--source` value (the error lists the valid ones), `--events` with `--source prs`, `--repo` without `--source prs` or not `owner/name`, no `--repo` and no GitHub `origin` remote, `--labels` with a history flag) or a malformed labels CSV (the error names the line: a rating outside 1-5, a duplicate path, a missing `path` or `maintainer_rating` column). **Exit code 3** if git history cannot be read, or, with `--source prs`, the GitHub request fails for a reason other than rate limiting (rate limits give partial results instead). **Exit code 4** if no heatmap or labels file exists.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -162,6 +648,7 @@ Designed for AI agents to discover the CLI surface programmatically. The output 
 | `2` | Invalid input (bad flags, missing required params) |
 | `3` | External dependency failure (git, API) |
 | `4` | Not found (file not in heatmap) |
+| `5` | PR blocked by `pr check --fail-on` |
 
 ## Environment Variables
 

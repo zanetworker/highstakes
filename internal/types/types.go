@@ -19,19 +19,136 @@ type Metadata struct {
 	Branch      string         `json:"branch"`
 	TotalFiles  int            `json:"total_files"`
 	Languages   map[string]int `json:"languages"`
+	// GitHistory is "complete" when churn factors were read from git, or
+	// "unavailable: <reason>" when they could not be (churn is then 0).
+	GitHistory string `json:"git_history,omitempty"`
+	// LikelyCutoff is the lowest likelihood counted as "likely" (top 20% of
+	// non-test files); ImpactThreshold is the lowest impact counted as
+	// "impactful": max(tiers.high, top 20% of assessed non-test files).
+	LikelyCutoff    int `json:"likely_cutoff,omitempty"`
+	ImpactThreshold int `json:"impact_threshold,omitempty"`
+	// Units are the deployable entry points (binaries, scripts) found in the
+	// repo, with the components each links through the import graph.
+	Units []Unit `json:"units,omitempty"`
+}
+
+// Unit is a deployable entry point (a Rust binary, a Go main package, a
+// package.json bin or start script, a Python script) and what it links. It
+// comes from imports and manifests, not from observing what runs.
+type Unit struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`     // rust-bin, go-main, node-bin, node-start, python-script, python-main
+	Entry    string `json:"entry"`    // entry file
+	Evidence string `json:"evidence"` // file:line that declares the entry point
+	Home     string `json:"home"`     // component holding the entry file
+	// Components lists every component the unit links transitively (home
+	// first, then by name); Shared is the subset linked by other units too.
+	Components      []string `json:"components"`
+	Shared          []string `json:"shared"`
+	Files           int      `json:"files"`      // non-test files linked
+	Lines           int      `json:"lines"`      // their total lines
+	MaxImpact       int      `json:"max_impact"` // highest impact among linked files
+	ImpactAssessed  bool     `json:"impact_assessed"`
+	FragileCritical int      `json:"fragile_critical"` // linked files in the fragile-critical quadrant
+	// Supporting marks units around the product: entry points in a
+	// supporting component (examples, scripts, tests, benchmarks, ...) and
+	// helper bins under src/bin/ of a crate that has its own main.
+	Supporting bool `json:"supporting,omitempty"`
+	// InferredPlacement lists deployment hints (Dockerfile entrypoints,
+	// Helm or Kubernetes images) that name this unit. Best effort: a hint
+	// says where the binary is packaged, not that it runs there.
+	InferredPlacement []Placement `json:"inferred_placement,omitempty"`
+}
+
+// DeclaredArchitecture is .heatmap/architecture.yaml: runtime links and
+// placements a human declares because imports and manifests cannot show
+// them (gRPC sessions, sockets, which pod runs what). Outputs mark them
+// "declared" to keep them apart from inferred ones.
+type DeclaredArchitecture struct {
+	Links     []DeclaredLink      `yaml:"links" json:"links"`
+	Placement []DeclaredPlacement `yaml:"placement" json:"placement"`
+}
+
+// DeclaredLink says unit From talks to unit To at runtime (Both: in both
+// directions). Evidence is a file:line backing the claim.
+type DeclaredLink struct {
+	From     string `yaml:"from" json:"from"`
+	To       string `yaml:"to" json:"to"`
+	Label    string `yaml:"label,omitempty" json:"label,omitempty"`
+	Both     bool   `yaml:"both,omitempty" json:"both,omitempty"`
+	Evidence string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// DeclaredPlacement says where a unit runs, e.g. "workload pod". It
+// overrides inferred placement in diagrams.
+type DeclaredPlacement struct {
+	Unit     string `yaml:"unit" json:"unit"`
+	RunsIn   string `yaml:"runs_in" json:"runs_in"`
+	Evidence string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// Placement is one deployment hint for a unit.
+type Placement struct {
+	Kind     string `json:"kind"`     // dockerfile, helm, k8s
+	Detail   string `json:"detail"`   // e.g. "ENTRYPOINT of deploy/docker/Dockerfile.worker"
+	Evidence string `json:"evidence"` // file:line
 }
 
 // FileHeat represents heat data for a single file
 type FileHeat struct {
 	Path               string             `json:"path"`
-	HeatScore          int                `json:"heat_score"` // 0-100
-	Tier               Tier               `json:"tier"`
+	HeatScore          int                `json:"heat_score"` // 0-100; max(likelihood, impact) when impact is assessed
+	Tier               Tier               `json:"tier"`       // from the quadrant when impact is assessed, else from heat
+	// Two axes: Likelihood that the file needs fixes (churn, complexity,
+	// centrality, path keywords, incidents) and Impact if it breaks (LLM
+	// blast radius). Impact is an estimate from centrality and path keywords
+	// when ImpactAssessed is false.
+	Likelihood     int      `json:"likelihood"`         // 0-100
+	Impact         int      `json:"impact"`             // 0-100
+	ImpactAssessed bool     `json:"impact_assessed"`    // impact came from the LLM
+	Quadrant       Quadrant `json:"quadrant,omitempty"` // set only when impact is assessed; stable ID
+	QuadrantLabel  string   `json:"quadrant_label,omitempty"` // human posture for Quadrant: Harden now, Protect, Stabilize, Routine
+	LLMSkipped     string   `json:"llm_skipped,omitempty"` // "sensitive": looks like credentials, never sent to the LLM
 	Language           string             `json:"language,omitempty"`
 	Size               FileSize           `json:"size,omitempty"`
 	Factors            Factors            `json:"factors"`
 	Dependencies       Dependencies       `json:"dependencies,omitempty"`
 	RecentChanges      []Change           `json:"recent_changes,omitempty"`
 	ReviewRequirements ReviewRequirements `json:"review_requirements"`
+	Explanation        *Explanation       `json:"explanation,omitempty"` // why it scores as it does and what to do
+	// Component is the top-level unit of code the file belongs to (crate,
+	// package, module); Units names the runtime units that link the file.
+	Component string   `json:"component,omitempty"`
+	Units     []string `json:"units,omitempty"`
+	// Autonomy is how far AI agents may act on the file (see Autonomy).
+	Autonomy *Autonomy `json:"autonomy,omitempty"`
+}
+
+// Explanation says why a file is impactful and likely to break, and what to
+// do about it. Every reason quotes the file's numbers; it is deterministic
+// (no LLM) and computed after quadrants are applied.
+type Explanation struct {
+	Headline          string   `json:"headline"`    // e.g. "HARDEN NOW (will it break 50, cutoff 33; how bad 92, cutoff 78)"
+	Verdict           string   `json:"verdict,omitempty"` // posture: Harden now, Protect, Stabilize, Routine, or Not assessed
+	ImpactHigh        bool     `json:"impact_high"` // impact at or above the repo impact threshold
+	Likely            bool     `json:"likely"`      // likelihood at or above the repo likely cutoff
+	ImpactReasons     []string `json:"impact_reasons,omitempty"`
+	LikelihoodReasons []string `json:"likelihood_reasons,omitempty"`
+	Actions           []Action `json:"actions,omitempty"` // most important first
+}
+
+// Action is one recommended step; ID is stable for tooling. Scope says
+// whether it belongs to this PR (before_merge) or to the file over time
+// (backlog); Signal is the fact that triggered it.
+type Action struct {
+	ID      string   `json:"id"`
+	Text    string   `json:"text"`
+	Scope   string   `json:"scope,omitempty"`   // before_merge or backlog
+	Signal  string   `json:"signal,omitempty"`  // why it fired
+	Done    bool     `json:"done"`              // pr check: the PR already satisfies it
+	Command string   `json:"command,omitempty"` // backlog: copyable gh command or CODEOWNERS line
+	Owners  []string `json:"owners,omitempty"`  // review actions: suggested owners
+	Files   []string `json:"files,omitempty"`   // pr check checklist: files the action applies to
 }
 
 // Tier represents risk tier
@@ -42,6 +159,16 @@ const (
 	TierHigh     Tier = "high"
 	TierMedium   Tier = "medium"
 	TierLow      Tier = "low"
+)
+
+// Quadrant places a file on the likelihood x impact grid.
+type Quadrant string
+
+const (
+	QuadrantFragileCritical Quadrant = "fragile-critical" // likely and impactful
+	QuadrantProtect         Quadrant = "protect"          // impactful, stable
+	QuadrantWatch           Quadrant = "watch"            // likely, low impact
+	QuadrantLow             Quadrant = "low"              // neither
 )
 
 // FileSize represents file size metrics
@@ -120,6 +247,10 @@ type TestCoverage struct {
 	CoveragePercent       float64 `json:"coverage_percent"`
 	TestCount             int     `json:"test_count"`
 	HasIntegrationTests   bool    `json:"has_integration_tests"`
+	// HasTestFile is whether a test sits next to the file by its language's
+	// convention (foo_test.go, foo.test.ts, test_foo.py, FooTest.java, a
+	// #[cfg(test)] module in Rust); nil when the language has no convention.
+	HasTestFile *bool `json:"has_test_file,omitempty"`
 }
 
 // Complexity measures code complexity
@@ -193,6 +324,41 @@ type PRRisk struct {
 	FilesChanged          []FileChange       `json:"files_changed"`
 	ReviewRequirements    ReviewRequirements `json:"review_requirements"`
 	CircuitBreakerSignals []string           `json:"circuit_breaker_signals,omitempty"`
+
+	// Two-axis view: importance of the touched code vs risk of the change itself.
+	Importance         int        `json:"importance"`  // 0-100, max impact of touched files (heat for files without an LLM assessment)
+	ChangeRisk         int        `json:"change_risk"` // 0-100, size/new files/infra/hot deletions/test ratio
+	ChangeRiskLevel    string     `json:"change_risk_level"`
+	ChangeRiskFactors  []string   `json:"change_risk_factors,omitempty"`
+	SuggestedReviewers []Reviewer `json:"suggested_reviewers,omitempty"`
+	// Verdict is the posture of the most severe changed file (Harden now,
+	// Protect, Stabilize, Routine); Checklist and Backlog are its actions,
+	// deduplicated across files; the cutoffs make file scores readable.
+	Verdict         string   `json:"verdict,omitempty"`
+	Checklist       []Action `json:"checklist,omitempty"`   // before-merge items of Harden now and Protect files
+	WorthDoing      []Action `json:"worth_doing,omitempty"` // before-merge items of other files: worth doing, do not block
+	Backlog         []Action `json:"backlog,omitempty"`
+	LikelyCutoff    int      `json:"likely_cutoff,omitempty"`
+	ImpactThreshold int      `json:"impact_threshold,omitempty"`
+	// AutonomyLevel is the lowest agent autonomy level (0-3) over the
+	// touched files; AutoMergeAllowed is AutonomyLevel 3; AutonomyReason
+	// says why, e.g. "touches Protect files".
+	AutonomyLevel    int    `json:"autonomy_level"`
+	AutoMergeAllowed bool   `json:"auto_merge_allowed"`
+	AutonomyReason   string `json:"autonomy_reason,omitempty"`
+	FailOn             Tier       `json:"fail_on,omitempty"`  // gate tier from --fail-on (or critical in shadow mode)
+	Decision           string     `json:"decision,omitempty"` // "pass" or "block" when a gate is set
+	DecisionReason     string     `json:"decision_reason,omitempty"` // why, e.g. "all before-merge items done"
+	OpenItems          int        `json:"open_items"`                // checklist items still open; the gate blocks while any are
+	Shadow             bool       `json:"shadow,omitempty"`   // decision logged, not enforced
+}
+
+// Reviewer is a suggested reviewer for a PR, ranked by ownership of the hottest changed files
+type Reviewer struct {
+	Handle string   `json:"handle"` // @github-handle when known, else email
+	Email  string   `json:"email"`
+	Score  float64  `json:"score"`
+	Files  []string `json:"files"`
 }
 
 // FileChange represents a changed file in a PR
@@ -203,6 +369,15 @@ type FileChange struct {
 	LinesAdded int   `json:"lines_added"`
 	LinesDeleted int `json:"lines_deleted"`
 	IsNew     bool   `json:"is_new"`
+	Unscored  bool   `json:"unscored,omitempty"` // Not in heatmap; heat inherited from nearest scored directory
+	Actions   []Action `json:"actions,omitempty"` // before-merge actions for non-routine files, with done set
+	// Two axes of the scored file (absent for unscored files).
+	Likelihood     int      `json:"likelihood,omitempty"`
+	Impact         int      `json:"impact,omitempty"`
+	ImpactAssessed bool     `json:"impact_assessed,omitempty"`
+	Quadrant       Quadrant `json:"quadrant,omitempty"`
+	QuadrantLabel  string   `json:"quadrant_label,omitempty"`
+	Autonomy       *Autonomy `json:"autonomy,omitempty"` // pr check: agent autonomy for this file
 }
 
 // Config represents heatmap configuration
@@ -214,6 +389,16 @@ type Config struct {
 	Notifications   NotificationConfig            `yaml:"notifications"`
 	GitHub          GitHubConfig                  `yaml:"github"`
 	Exclude         ExcludeConfig                 `yaml:"exclude"`
+	Owners          map[string]string             `yaml:"owners,omitempty"` // git email -> @github-handle for reviewers and CODEOWNERS
+	Tour            TourConfig                    `yaml:"tour,omitempty"`
+	Autonomy        AutonomyConfig                `yaml:"autonomy,omitempty"`
+}
+
+// TourConfig tunes `get tour`.
+type TourConfig struct {
+	// Supporting adds path.Match globs for supporting components (CI,
+	// deployment, examples) on top of the built-in directory names.
+	Supporting []string `yaml:"supporting,omitempty"`
 }
 
 // ExcludeConfig defines directories and patterns to skip during analysis

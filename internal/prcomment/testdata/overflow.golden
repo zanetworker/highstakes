@@ -1,0 +1,77 @@
+<!-- highstakes-triage -->
+## ⛔ Harden before merge
+
+⛔ 6 harden · ✅ 2 routine
+
+### ✅ Do before merge (0 of 1 done)
+
+- [ ] 👀 Get sign-off from someone who knows `core/h0.go`, `core/h5.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)
+
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ⛔ | `core/h0.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ⛔ | `core/h1.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ⛔ | `core/h2.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ⛔ | `core/h3.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ⛔ | `core/h4.go` | costly (no description; run analyze again) | 🔴 yes | 👀 senior sign-off |
+| ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
+
+<details><summary>📋 1 more file needs action</summary>
+
+- 👀 senior sign-off: `core/h5.go`
+
+</details>
+
+<details><summary>🗺 Where this PR lands</summary>
+
+```mermaid
+quadrantChart
+  title Changed files
+  x-axis Rarely breaks --> Breaks often
+  y-axis Limited damage --> Costly if it breaks
+  quadrant-1 Harden now
+  quadrant-2 Protect
+  quadrant-3 Routine
+  quadrant-4 Stabilize
+  1: [0.83, 0.81]
+  2: [0.83, 0.69]
+  3: [0.75, 0.81]
+  4: [0.75, 0.69]
+  5: [0.66, 0.81]
+  6: [0.66, 0.69]
+```
+
+1. ⛔ `core/h0.go`: senior sign-off
+2. ⛔ `core/h1.go`: senior sign-off
+3. ⛔ `core/h2.go`: senior sign-off
+4. ⛔ `core/h3.go`: senior sign-off
+5. ⛔ `core/h4.go`: senior sign-off
+6. ⛔ `core/h5.go`: senior sign-off
+
+</details>
+
+<details><summary>Why these actions?</summary>
+
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings. Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78 (a score at or above its cutoff counts as high).
+
+**`core/h0.go`** (Harden now)
+- Scores: Will it break? 60 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+- Get sign-off from a senior owner: Harden now
+
+**`core/h1.go`** (Harden now)
+- Scores: Will it break? 59 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+
+**`core/h2.go`** (Harden now)
+- Scores: Will it break? 58 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+
+**`core/h3.go`** (Harden now)
+- Scores: Will it break? 57 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+
+**`core/h4.go`** (Harden now)
+- Scores: Will it break? 56 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+
+**`core/h5.go`** (Harden now)
+- Scores: Will it break? 55 (high, cutoff 33); How bad if it breaks? 90 (high, cutoff 78)
+- Get sign-off from a senior owner: Harden now
+
+</details>

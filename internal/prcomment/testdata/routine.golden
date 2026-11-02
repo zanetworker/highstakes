@@ -1,0 +1,14 @@
+<!-- highstakes-triage -->
+## ✅ Routine
+
+✅ 2 routine
+
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ✅ | 2 files | limited damage | 🟢 rarely | normal review |
+
+<details><summary>Why these actions?</summary>
+
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings. Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78 (a score at or above its cutoff counts as high).
+
+</details>

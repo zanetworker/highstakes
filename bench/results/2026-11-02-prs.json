@@ -1,0 +1,2473 @@
+{
+  "generated_at": "2026-11-01T13:16:08Z",
+  "highstakes": "highstakes version 1.0.0",
+  "source": "prs",
+  "llm_model": "GPT-6 Luna (cached heatmaps from the 2026-11-01 axes run)",
+  "k": 10,
+  "repos": [
+    {
+      "name": "openshell",
+      "tier": "primary",
+      "language": "Rust",
+      "commit": "4d4c15c133d40a50234ce9d2d198e5ba79b9553e",
+      "holdout_cutoff": "2026-09-14",
+      "holdout": {
+        "github": {
+          "repo": "NVIDIA/OpenShell",
+          "in_window": 602,
+          "mapped": 533,
+          "fetched": 0,
+          "from_cache": 602,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 251,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 1,
+          "severity_label": 5,
+          "review_depth": 201,
+          "backport_branches": 3,
+          "codeowners_file": ".github/CODEOWNERS"
+        },
+        "mode": "holdout",
+        "from": "2026-09-14T00:00:00Z",
+        "to": "2026-11-01T14:12:12.903225+01:00",
+        "files": 841,
+        "files_with_events": 254,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3316700584778996,
+            "precision_at_k": 0.8521739130434783,
+            "recall_at_k": 0.03355015405682985,
+            "lift": 2.8215679561793907
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.33538170902501446,
+            "precision_at_k": 0.8521739130434783,
+            "recall_at_k": 0.0339511519140828,
+            "lift": 2.8315260696345055
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.46831077850600245,
+            "precision_at_k": 1,
+            "recall_at_k": 0.03937007874015748,
+            "lift": 3.311023622047244
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.2874181554507965,
+            "precision_at_k": 0.654320987654321,
+            "recall_at_k": 0.025760668805288225,
+            "lift": 2.16647224652474
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.2800454674726873,
+            "precision_at_k": 0.65,
+            "recall_at_k": 0.025590551181102362,
+            "lift": 2.152165354330709
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.35633288038239963,
+            "precision_at_k": 1,
+            "recall_at_k": 0.03937007874015748,
+            "lift": 3.311023622047244
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.33538170902501446,
+            "precision_at_k": 0.8521739130434783,
+            "recall_at_k": 0.0339511519140828,
+            "lift": 2.8315260696345055
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 258,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.33635480054135936,
+              "precision_at_k": 0.8521739130434783,
+              "recall_at_k": 0.03302999662959218,
+              "lift": 2.7778227165487026
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.3400611781613258,
+              "precision_at_k": 0.8521739130434783,
+              "recall_at_k": 0.033418584825234444,
+              "lift": 2.7871099744245527
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.4698686657115744,
+              "precision_at_k": 1,
+              "recall_at_k": 0.03875968992248062,
+              "lift": 3.25968992248062
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.27751578148955164,
+              "precision_at_k": 0.654320987654321,
+              "recall_at_k": 0.02536127859125275,
+              "lift": 2.1328835295243564
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.272716835136152,
+              "precision_at_k": 0.65,
+              "recall_at_k": 0.025193798449612403,
+              "lift": 2.1187984496124033
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.3457435879317624,
+              "precision_at_k": 1,
+              "recall_at_k": 0.03875968992248062,
+              "lift": 3.25968992248062
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.3400611781613258,
+              "precision_at_k": 0.8521739130434783,
+              "recall_at_k": 0.033418584825234444,
+              "lift": 2.7871099744245527
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "NVIDIA/OpenShell",
+          "in_window": 1500,
+          "mapped": 1422,
+          "fetched": 1500,
+          "from_cache": 0,
+          "api_calls": 30,
+          "capped": true,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 598,
+          "revert": 1,
+          "backported": 0,
+          "fast_revert": 2,
+          "severity_label": 19,
+          "review_depth": 490,
+          "backport_branches": 3,
+          "codeowners_file": ".github/CODEOWNERS"
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:11:07.937205+01:00",
+        "to": "2026-11-01T14:11:07.937205+01:00",
+        "files": 1142,
+        "files_with_events": 441,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3149491058011475,
+            "precision_at_k": 0.6666666666666667,
+            "recall_at_k": 0.015117157974300832,
+            "lift": 1.7263794406651551
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.3169337134468298,
+            "precision_at_k": 0.6666666666666667,
+            "recall_at_k": 0.015255530129672007,
+            "lift": 1.731502669717773
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.6190172181143709,
+            "precision_at_k": 1,
+            "recall_at_k": 0.022675736961451247,
+            "lift": 2.5895691609977325
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.28677318116385836,
+            "precision_at_k": 0.7124463519313304,
+            "recall_at_k": 0.016155246075540374,
+            "lift": 1.8449291018267104
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.25831534437020764,
+            "precision_at_k": 0.7,
+            "recall_at_k": 0.015873015873015872,
+            "lift": 1.8126984126984125
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.37164929319183077,
+            "precision_at_k": 1,
+            "recall_at_k": 0.022675736961451247,
+            "lift": 2.5895691609977325
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.3169337134468298,
+            "precision_at_k": 0.6666666666666667,
+            "recall_at_k": 0.015255530129672007,
+            "lift": 1.731502669717773
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 470,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.31916473744795426,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.014184397163120569,
+              "lift": 1.619858156028369
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.3210517673222503,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.01430615164520744,
+              "lift": 1.6237482117310444
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.5982400880680195,
+              "precision_at_k": 1,
+              "recall_at_k": 0.02127659574468085,
+              "lift": 2.429787234042553
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.25389470579204276,
+              "precision_at_k": 0.7167381974248926,
+              "recall_at_k": 0.015249748881380695,
+              "lift": 1.7415213222536754
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.2406827177853735,
+              "precision_at_k": 0.8,
+              "recall_at_k": 0.01702127659574468,
+              "lift": 1.9438297872340426
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.33668168150543587,
+              "precision_at_k": 1,
+              "recall_at_k": 0.02127659574468085,
+              "lift": 2.429787234042553
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.3210517673222503,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.01430615164520744,
+              "lift": 1.6237482117310444
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": true,
+            "note": "3 release/backport branch(es)",
+            "files": 1135,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 1135,
+            "files_with_events": 5,
+            "too_few_events": true,
+            "base_rate": 0.004405286343612335,
+            "spearman": 0.025530388741269595,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 1135,
+            "files_with_events": 68,
+            "too_few_events": false,
+            "base_rate": 0.05991189427312775,
+            "spearman": 0.19323883765520178,
+            "precision_at_k": 0.16666666666666669,
+            "lift": 2.7818627450980395
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 1135,
+            "files_with_events": 679,
+            "too_few_events": false,
+            "base_rate": 0.5982378854625551,
+            "spearman": 0.25019779309049545,
+            "precision_at_k": 0.5833333333333333,
+            "lift": 0.9750859106529208
+          },
+          "codeowners": {
+            "available": true,
+            "note": ".github/CODEOWNERS",
+            "files": 1135,
+            "files_with_events": 82,
+            "too_few_events": false,
+            "base_rate": 0.0722466960352423,
+            "spearman": -0.04871755126001107,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 1135,
+            "files_with_events": 853,
+            "too_few_events": false,
+            "base_rate": 0.7515418502202643,
+            "spearman": 0.22702502714922415,
+            "precision_at_k": 0.8333333333333334,
+            "lift": 1.1088315748339195
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: backported, fast_revert, severity_label, review_depth, codeowners",
+            "files": 1135,
+            "files_with_events": 697,
+            "too_few_events": false,
+            "base_rate": 0.6140969162995594,
+            "spearman": 0.18671914065683154,
+            "precision_at_k": 0.5833333333333333,
+            "lift": 0.9499043519846962
+          }
+        }
+      }
+    },
+    {
+      "name": "openclaw-enterprise",
+      "tier": "primary",
+      "language": "TypeScript",
+      "commit": "20133c2b8bc14ebed5e774ffd20e3d58420d0ffc",
+      "holdout_cutoff": "2026-09-29",
+      "holdout": {
+        "github": {
+          "repo": "openclaw/openclaw-enterprise",
+          "in_window": 1500,
+          "mapped": 1170,
+          "fetched": 1500,
+          "from_cache": 0,
+          "api_calls": 30,
+          "capped": true,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 597,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 0,
+          "severity_label": 37,
+          "review_depth": 37,
+          "backport_branches": 0,
+          "codeowners_file": ".github/CODEOWNERS"
+        },
+        "mode": "holdout",
+        "from": "2026-09-29T00:00:00Z",
+        "to": "2026-11-01T14:13:45.159746+01:00",
+        "files": 427,
+        "files_with_events": 138,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.2211826549292152,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.043478260869565216,
+            "lift": 1.8565217391304345
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.2028883243975507,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.043795620437956206,
+            "lift": 1.8569343065693429
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.4881731818975543,
+            "precision_at_k": 0.9,
+            "recall_at_k": 0.06521739130434782,
+            "lift": 2.784782608695652
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.1934696408798298,
+            "precision_at_k": 0.5641025641025641,
+            "recall_at_k": 0.040876997398736535,
+            "lift": 1.7454477889260496
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.27478111267741034,
+            "precision_at_k": 0.75,
+            "recall_at_k": 0.05434782608695652,
+            "lift": 2.3206521739130435
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.3253621174497995,
+            "precision_at_k": 1,
+            "recall_at_k": 0.07246376811594203,
+            "lift": 3.0942028985507246
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.2028883243975507,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.043795620437956206,
+            "lift": 1.8569343065693429
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 251,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.3780279407974783,
+              "precision_at_k": 0.95,
+              "recall_at_k": 0.037848605577689244,
+              "lift": 1.6161354581673306
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.3658272346887228,
+              "precision_at_k": 0.95,
+              "recall_at_k": 0.038,
+              "lift": 1.6111999999999997
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.509828466912327,
+              "precision_at_k": 0.9,
+              "recall_at_k": 0.035856573705179286,
+              "lift": 1.5310756972111554
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.3158551187577948,
+              "precision_at_k": 0.8803418803418804,
+              "recall_at_k": 0.03507338168692751,
+              "lift": 1.4976333980318046
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.3668220191655442,
+              "precision_at_k": 0.9,
+              "recall_at_k": 0.035856573705179286,
+              "lift": 1.5310756972111554
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.4408533361863862,
+              "precision_at_k": 1,
+              "recall_at_k": 0.0398406374501992,
+              "lift": 1.701195219123506
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.3658272346887228,
+              "precision_at_k": 0.95,
+              "recall_at_k": 0.038,
+              "lift": 1.6111999999999997
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "openclaw/openclaw-enterprise",
+          "in_window": 1500,
+          "mapped": 1170,
+          "fetched": 1500,
+          "from_cache": 0,
+          "api_calls": 30,
+          "capped": true,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 597,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 0,
+          "severity_label": 37,
+          "review_depth": 37,
+          "backport_branches": 0,
+          "codeowners_file": ".github/CODEOWNERS"
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:12:26.97795+01:00",
+        "to": "2026-11-01T14:12:26.97795+01:00",
+        "files": 865,
+        "files_with_events": 310,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.11562938320730032,
+            "precision_at_k": 0.32,
+            "recall_at_k": 0.01032258064516129,
+            "lift": 0.8929032258064517
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.09541268008775458,
+            "precision_at_k": 0.24,
+            "recall_at_k": 0.007766990291262136,
+            "lift": 0.6687378640776699
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5607885037332919,
+            "precision_at_k": 1,
+            "recall_at_k": 0.03225806451612903,
+            "lift": 2.7903225806451615
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.2474427981729845,
+            "precision_at_k": 0.6056910569105691,
+            "recall_at_k": 0.01953842119066352,
+            "lift": 1.6900734329923945
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.19843231890997343,
+            "precision_at_k": 0.75,
+            "recall_at_k": 0.024193548387096774,
+            "lift": 2.092741935483871
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.3934104762662977,
+            "precision_at_k": 1,
+            "recall_at_k": 0.03225806451612903,
+            "lift": 2.7903225806451615
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.09541268008775458,
+            "precision_at_k": 0.24,
+            "recall_at_k": 0.007766990291262136,
+            "lift": 0.6687378640776699
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 541,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.2361158083029,
+              "precision_at_k": 0.5,
+              "recall_at_k": 0.009242144177449169,
+              "lift": 0.7994454713493531
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.21730862368838383,
+              "precision_at_k": 0.45,
+              "recall_at_k": 0.008333333333333333,
+              "lift": 0.7175
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.8464259368215613,
+              "precision_at_k": 1,
+              "recall_at_k": 0.018484288354898338,
+              "lift": 1.5988909426987061
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.31920384265387236,
+              "precision_at_k": 0.8821138211382114,
+              "recall_at_k": 0.016305246231759912,
+              "lift": 1.4104037990472327
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.23598982808652794,
+              "precision_at_k": 0.9,
+              "recall_at_k": 0.0166358595194085,
+              "lift": 1.4390018484288356
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.503937191278284,
+              "precision_at_k": 1,
+              "recall_at_k": 0.018484288354898338,
+              "lift": 1.5988909426987061
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.21730862368838383,
+              "precision_at_k": 0.45,
+              "recall_at_k": 0.008333333333333333,
+              "lift": 0.7175
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": false,
+            "note": "no release or backport branches in the local clone (fetch them to enable)",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 861,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 861,
+            "files_with_events": 92,
+            "too_few_events": false,
+            "base_rate": 0.10685249709639953,
+            "spearman": 0.22607526072719286,
+            "precision_at_k": 0.21000000000000002,
+            "lift": 1.965326086956522
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 861,
+            "files_with_events": 48,
+            "too_few_events": false,
+            "base_rate": 0.05574912891986063,
+            "spearman": -0.04713219951980172,
+            "precision_at_k": 0.06999999999999999,
+            "lift": 1.2556249999999998
+          },
+          "codeowners": {
+            "available": true,
+            "note": ".github/CODEOWNERS",
+            "files": 861,
+            "files_with_events": 861,
+            "too_few_events": false,
+            "base_rate": 1,
+            "spearman": null,
+            "precision_at_k": 1,
+            "lift": 1
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 861,
+            "files_with_events": 453,
+            "too_few_events": false,
+            "base_rate": 0.5261324041811847,
+            "spearman": 0.007616338687491169,
+            "precision_at_k": 0.31,
+            "lift": 0.5892052980132451
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: fast_revert, severity_label, review_depth, codeowners",
+            "files": 861,
+            "files_with_events": 861,
+            "too_few_events": false,
+            "base_rate": 1,
+            "spearman": 0.14020613450022482,
+            "precision_at_k": 1,
+            "lift": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "caddy",
+      "tier": "general",
+      "language": "Go",
+      "commit": "eb04ed52be5e66c467e9e614bd917b8bb4150d1b",
+      "holdout_cutoff": "2026-05-03",
+      "holdout": {
+        "github": {
+          "repo": "caddyserver/caddy",
+          "in_window": 231,
+          "mapped": 222,
+          "fetched": 0,
+          "from_cache": 231,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 125,
+          "revert": 1,
+          "backported": 0,
+          "fast_revert": 2,
+          "severity_label": 0,
+          "review_depth": 92,
+          "backport_branches": 3,
+          "codeowners_file": null
+        },
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-11-01T14:15:05.496301+01:00",
+        "files": 231,
+        "files_with_events": 75,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3725788067631888,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.10666666666666667,
+            "lift": 2.464
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.3574036185370088,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.10666666666666667,
+            "lift": 2.464
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5132584651633064,
+            "precision_at_k": 1,
+            "recall_at_k": 0.13333333333333333,
+            "lift": 3.08
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.5738219044959207,
+            "precision_at_k": 0.648936170212766,
+            "recall_at_k": 0.08652482269503546,
+            "lift": 1.9987234042553192
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.1790365102098148,
+            "precision_at_k": 0.34615384615384615,
+            "recall_at_k": 0.046153846153846156,
+            "lift": 1.0661538461538462
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.5771314122816501,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.10666666666666667,
+            "lift": 2.464
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.3574036185370088,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.10666666666666667,
+            "lift": 2.464
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 55,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.3059285446228756,
+              "precision_at_k": 0.6,
+              "recall_at_k": 0.10909090909090909,
+              "lift": 2.52
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.30789160416835926,
+              "precision_at_k": 0.6,
+              "recall_at_k": 0.10909090909090909,
+              "lift": 2.52
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.36914757786599595,
+              "precision_at_k": 0.6888888888888889,
+              "recall_at_k": 0.12525252525252525,
+              "lift": 2.8933333333333335
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.3668859287240771,
+              "precision_at_k": 0.4148936170212766,
+              "recall_at_k": 0.07543520309477755,
+              "lift": 1.7425531914893617
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.14603363526649113,
+              "precision_at_k": 0.15384615384615385,
+              "recall_at_k": 0.027972027972027972,
+              "lift": 0.6461538461538462
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.3560151294000959,
+              "precision_at_k": 0.4,
+              "recall_at_k": 0.07272727272727272,
+              "lift": 1.6800000000000002
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.30789160416835926,
+              "precision_at_k": 0.6,
+              "recall_at_k": 0.10909090909090909,
+              "lift": 2.52
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "caddyserver/caddy",
+          "in_window": 365,
+          "mapped": 356,
+          "fetched": 0,
+          "from_cache": 365,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 159,
+          "revert": 1,
+          "backported": 0,
+          "fast_revert": 2,
+          "severity_label": 0,
+          "review_depth": 124,
+          "backport_branches": 3,
+          "codeowners_file": null
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:15:02.207109+01:00",
+        "to": "2026-11-01T14:15:02.207109+01:00",
+        "files": 245,
+        "files_with_events": 83,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.4155676908268254,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.0963855421686747,
+            "lift": 2.36144578313253
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.3988556875524156,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.0963855421686747,
+            "lift": 2.36144578313253
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.6879039593261106,
+            "precision_at_k": 1,
+            "recall_at_k": 0.12048192771084337,
+            "lift": 2.9518072289156625
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.5859690904849096,
+            "precision_at_k": 0.6767676767676767,
+            "recall_at_k": 0.08153827430935864,
+            "lift": 1.9976877205792865
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.22121100847121108,
+            "precision_at_k": 0.38461538461538464,
+            "recall_at_k": 0.04633920296570899,
+            "lift": 1.1353104726598702
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.6193844613677738,
+            "precision_at_k": 0.9,
+            "recall_at_k": 0.10843373493975904,
+            "lift": 2.6566265060240966
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.3988556875524156,
+            "precision_at_k": 0.8,
+            "recall_at_k": 0.0963855421686747,
+            "lift": 2.36144578313253
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 77,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.342234182804862,
+              "precision_at_k": 0.7,
+              "recall_at_k": 0.09090909090909091,
+              "lift": 2.227272727272727
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.336948361213257,
+              "precision_at_k": 0.7,
+              "recall_at_k": 0.09090909090909091,
+              "lift": 2.227272727272727
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.5439924848673173,
+              "precision_at_k": 0.9615384615384615,
+              "recall_at_k": 0.12487512487512487,
+              "lift": 3.059440559440559
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.4151894856943995,
+              "precision_at_k": 0.5252525252525253,
+              "recall_at_k": 0.06821461366915912,
+              "lift": 1.6712580348943988
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.1579286097050644,
+              "precision_at_k": 0.19230769230769232,
+              "recall_at_k": 0.024975024975024976,
+              "lift": 0.611888111888112
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.43004175184258386,
+              "precision_at_k": 0.5,
+              "recall_at_k": 0.06493506493506493,
+              "lift": 1.590909090909091
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.336948361213257,
+              "precision_at_k": 0.7,
+              "recall_at_k": 0.09090909090909091,
+              "lift": 2.227272727272727
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": true,
+            "note": "3 release/backport branch(es)",
+            "files": 245,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 245,
+            "files_with_events": 2,
+            "too_few_events": true,
+            "base_rate": 0.00816326530612245,
+            "spearman": 0.09994590857711691,
+            "precision_at_k": 0.1,
+            "lift": 12.25
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 245,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 245,
+            "files_with_events": 112,
+            "too_few_events": false,
+            "base_rate": 0.45714285714285713,
+            "spearman": 0.37151643428219017,
+            "precision_at_k": 0.9,
+            "lift": 1.96875
+          },
+          "codeowners": {
+            "available": false,
+            "note": "no CODEOWNERS file",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 245,
+            "files_with_events": 152,
+            "too_few_events": false,
+            "base_rate": 0.6204081632653061,
+            "spearman": 0.43084253973115655,
+            "precision_at_k": 1,
+            "lift": 1.611842105263158
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: backported, fast_revert, severity_label, review_depth",
+            "files": 245,
+            "files_with_events": 112,
+            "too_few_events": false,
+            "base_rate": 0.45714285714285713,
+            "spearman": 0.30046572132599564,
+            "precision_at_k": 0.9,
+            "lift": 1.96875
+          }
+        }
+      }
+    },
+    {
+      "name": "tokio",
+      "tier": "general",
+      "language": "Rust",
+      "commit": "6470b5e4b8e943ad014383a5bf6a93ba415678a3",
+      "holdout_cutoff": "2026-05-02",
+      "holdout": {
+        "github": {
+          "repo": "tokio-rs/tokio",
+          "in_window": 345,
+          "mapped": 278,
+          "fetched": 0,
+          "from_cache": 345,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 33,
+          "revert": 0,
+          "backported": 9,
+          "fast_revert": 0,
+          "severity_label": 0,
+          "review_depth": 99,
+          "backport_branches": 39,
+          "codeowners_file": null
+        },
+        "mode": "holdout",
+        "from": "2026-05-02T00:00:00Z",
+        "to": "2026-11-01T14:15:13.490529+01:00",
+        "files": 522,
+        "files_with_events": 68,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.29772041122356613,
+            "precision_at_k": 0.5285714285714286,
+            "recall_at_k": 0.07773109243697479,
+            "lift": 4.057563025210085
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.2984983152143497,
+            "precision_at_k": 0.5285714285714286,
+            "recall_at_k": 0.07773109243697479,
+            "lift": 4.057563025210085
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.20770193321641106,
+            "precision_at_k": 0.46896551724137936,
+            "recall_at_k": 0.06896551724137932,
+            "lift": 3.6000000000000005
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.18644700575827836,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.058823529411764705,
+            "lift": 3.0705882352941183
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.10294696342544261,
+            "precision_at_k": 0.2,
+            "recall_at_k": 0.029411764705882353,
+            "lift": 1.5352941176470591
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.21319714141533735,
+            "precision_at_k": 0.5666666666666667,
+            "recall_at_k": 0.08333333333333334,
+            "lift": 4.3500000000000005
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.2984983152143497,
+            "precision_at_k": 0.5285714285714286,
+            "recall_at_k": 0.07773109243697479,
+            "lift": 4.057563025210085
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 55,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.30108394457281706,
+              "precision_at_k": 0.48571428571428577,
+              "recall_at_k": 0.08831168831168833,
+              "lift": 4.609870129870131
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.3011735491234689,
+              "precision_at_k": 0.48571428571428577,
+              "recall_at_k": 0.08831168831168833,
+              "lift": 4.609870129870131
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.2330644582436263,
+              "precision_at_k": 0.6482758620689655,
+              "recall_at_k": 0.11786833855799372,
+              "lift": 6.152727272727272
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.1789363756537164,
+              "precision_at_k": 0.36,
+              "recall_at_k": 0.06545454545454546,
+              "lift": 3.4167272727272726
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.16501412002264612,
+              "precision_at_k": 0.1,
+              "recall_at_k": 0.01818181818181818,
+              "lift": 0.9490909090909091
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.20199063844116905,
+              "precision_at_k": 0.4428571428571429,
+              "recall_at_k": 0.08051948051948052,
+              "lift": 4.203116883116883
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.3011735491234689,
+              "precision_at_k": 0.48571428571428577,
+              "recall_at_k": 0.08831168831168833,
+              "lift": 4.609870129870131
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "tokio-rs/tokio",
+          "in_window": 532,
+          "mapped": 460,
+          "fetched": 0,
+          "from_cache": 532,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 50,
+          "revert": 1,
+          "backported": 11,
+          "fast_revert": 2,
+          "severity_label": 0,
+          "review_depth": 202,
+          "backport_branches": 39,
+          "codeowners_file": null
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:15:09.187136+01:00",
+        "to": "2026-11-01T14:15:09.187136+01:00",
+        "files": 533,
+        "files_with_events": 82,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.33249948290146597,
+            "precision_at_k": 0.5857142857142857,
+            "recall_at_k": 0.07142857142857144,
+            "lift": 3.807142857142857
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.32965512983126444,
+            "precision_at_k": 0.5857142857142857,
+            "recall_at_k": 0.07142857142857144,
+            "lift": 3.807142857142857
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.43355514402367723,
+            "precision_at_k": 0.75,
+            "recall_at_k": 0.09146341463414634,
+            "lift": 4.875
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.19244869942125403,
+            "precision_at_k": 0.4814814814814815,
+            "recall_at_k": 0.05871725383920506,
+            "lift": 3.1296296296296298
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.10922141491515498,
+            "precision_at_k": 0.2,
+            "recall_at_k": 0.024390243902439025,
+            "lift": 1.3
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.23330854690016253,
+            "precision_at_k": 0.7,
+            "recall_at_k": 0.08536585365853659,
+            "lift": 4.55
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.32965512983126444,
+            "precision_at_k": 0.5857142857142857,
+            "recall_at_k": 0.07142857142857144,
+            "lift": 3.807142857142857
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 85,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.32943478722582936,
+              "precision_at_k": 0.5857142857142857,
+              "recall_at_k": 0.06890756302521009,
+              "lift": 3.6727731092436975
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.32724327785100504,
+              "precision_at_k": 0.5857142857142857,
+              "recall_at_k": 0.06890756302521009,
+              "lift": 3.6727731092436975
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.4151991064467605,
+              "precision_at_k": 0.85,
+              "recall_at_k": 0.1,
+              "lift": 5.33
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.1760937068609975,
+              "precision_at_k": 0.5185185185185185,
+              "recall_at_k": 0.06100217864923747,
+              "lift": 3.251416122004357
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.18240628370023731,
+              "precision_at_k": 0.2,
+              "recall_at_k": 0.023529411764705882,
+              "lift": 1.2541176470588236
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.21467242480777315,
+              "precision_at_k": 0.6666666666666666,
+              "recall_at_k": 0.0784313725490196,
+              "lift": 4.1803921568627445
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.32724327785100504,
+              "precision_at_k": 0.5857142857142857,
+              "recall_at_k": 0.06890756302521009,
+              "lift": 3.6727731092436975
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": true,
+            "note": "39 release/backport branch(es)",
+            "files": 533,
+            "files_with_events": 9,
+            "too_few_events": true,
+            "base_rate": 0.016885553470919325,
+            "spearman": 0.13946506901769898,
+            "precision_at_k": 0.05714285714285714,
+            "lift": 3.3841269841269837
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 533,
+            "files_with_events": 7,
+            "too_few_events": true,
+            "base_rate": 0.013133208255159476,
+            "spearman": 0.12449909681585333,
+            "precision_at_k": 0.05714285714285714,
+            "lift": 4.351020408163265
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 533,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 533,
+            "files_with_events": 265,
+            "too_few_events": false,
+            "base_rate": 0.4971857410881801,
+            "spearman": 0.41672053225504235,
+            "precision_at_k": 0.9428571428571428,
+            "lift": 1.896388140161725
+          },
+          "codeowners": {
+            "available": false,
+            "note": "no CODEOWNERS file",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 533,
+            "files_with_events": 335,
+            "too_few_events": false,
+            "base_rate": 0.6285178236397748,
+            "spearman": 0.4567363105023208,
+            "precision_at_k": 1,
+            "lift": 1.591044776119403
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: backported, fast_revert, severity_label, review_depth",
+            "files": 533,
+            "files_with_events": 265,
+            "too_few_events": false,
+            "base_rate": 0.4971857410881801,
+            "spearman": 0.3309783299398795,
+            "precision_at_k": 0.9428571428571428,
+            "lift": 1.896388140161725
+          }
+        }
+      }
+    },
+    {
+      "name": "hono",
+      "tier": "general",
+      "language": "TypeScript",
+      "commit": "17ad0e21f5a91c939eeafa3df05793a8ea60f016",
+      "holdout_cutoff": "2026-05-03",
+      "holdout": {
+        "github": {
+          "repo": "honojs/hono",
+          "in_window": 254,
+          "mapped": 195,
+          "fetched": 0,
+          "from_cache": 254,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 115,
+          "revert": 0,
+          "backported": 1,
+          "fast_revert": 1,
+          "severity_label": 0,
+          "review_depth": 10,
+          "backport_branches": 2,
+          "codeowners_file": null
+        },
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-11-01T14:15:22.603165+01:00",
+        "files": 279,
+        "files_with_events": 66,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.44432166956461006,
+            "precision_at_k": 0.6799999999999999,
+            "recall_at_k": 0.10303030303030303,
+            "lift": 2.874545454545454
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.4439112674433153,
+            "precision_at_k": 0.6799999999999999,
+            "recall_at_k": 0.10303030303030303,
+            "lift": 2.8642424242424243
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.3638578238774515,
+            "precision_at_k": 0.7333333333333333,
+            "recall_at_k": 0.1111111111111111,
+            "lift": 3.0999999999999996
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.5672146529329334,
+            "precision_at_k": 0.8333333333333334,
+            "recall_at_k": 0.12626262626262627,
+            "lift": 3.5227272727272725
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.30438928290671063,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.06060606060606061,
+            "lift": 1.690909090909091
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.590882077769153,
+            "precision_at_k": 0.925,
+            "recall_at_k": 0.14015151515151514,
+            "lift": 3.9102272727272727
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.4439112674433153,
+            "precision_at_k": 0.6799999999999999,
+            "recall_at_k": 0.10303030303030303,
+            "lift": 2.8642424242424243
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 69,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.44746594261665046,
+              "precision_at_k": 0.6799999999999999,
+              "recall_at_k": 0.09855072463768115,
+              "lift": 2.749565217391304
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.4470967138420536,
+              "precision_at_k": 0.6799999999999999,
+              "recall_at_k": 0.09855072463768115,
+              "lift": 2.739710144927536
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.35959163854604764,
+              "precision_at_k": 0.7333333333333333,
+              "recall_at_k": 0.10628019323671498,
+              "lift": 2.9652173913043476
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.5754876140377855,
+              "precision_at_k": 0.8333333333333334,
+              "recall_at_k": 0.12077294685990339,
+              "lift": 3.3695652173913047
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.2950945922960818,
+              "precision_at_k": 0.4,
+              "recall_at_k": 0.057971014492753624,
+              "lift": 1.617391304347826
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.5993429116397991,
+              "precision_at_k": 0.925,
+              "recall_at_k": 0.13405797101449277,
+              "lift": 3.740217391304348
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.4470967138420536,
+              "precision_at_k": 0.6799999999999999,
+              "recall_at_k": 0.09855072463768115,
+              "lift": 2.739710144927536
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "honojs/hono",
+          "in_window": 368,
+          "mapped": 290,
+          "fetched": 0,
+          "from_cache": 368,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 165,
+          "revert": 0,
+          "backported": 1,
+          "fast_revert": 1,
+          "severity_label": 0,
+          "review_depth": 25,
+          "backport_branches": 2,
+          "codeowners_file": null
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:15:18.780022+01:00",
+        "to": "2026-11-01T14:15:18.780022+01:00",
+        "files": 358,
+        "files_with_events": 98,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.41732296899832766,
+            "precision_at_k": 0.8800000000000001,
+            "recall_at_k": 0.08979591836734695,
+            "lift": 3.2146938775510208
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.41721933736898736,
+            "precision_at_k": 0.8800000000000001,
+            "recall_at_k": 0.08979591836734695,
+            "lift": 3.196734693877551
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.5585560560327829,
+            "precision_at_k": 0.8666666666666668,
+            "recall_at_k": 0.08843537414965988,
+            "lift": 3.165986394557824
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.38218141285429047,
+            "precision_at_k": 0.8648648648648649,
+            "recall_at_k": 0.0882515168229454,
+            "lift": 3.1594043022614455
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.25709546080418383,
+            "precision_at_k": 0.4,
+            "recall_at_k": 0.04081632653061224,
+            "lift": 1.4612244897959186
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.4149604250987164,
+            "precision_at_k": 0.9,
+            "recall_at_k": 0.09183673469387756,
+            "lift": 3.2877551020408164
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.41721933736898736,
+            "precision_at_k": 0.8800000000000001,
+            "recall_at_k": 0.08979591836734695,
+            "lift": 3.196734693877551
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 101,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.4197101909686394,
+              "precision_at_k": 0.8800000000000001,
+              "recall_at_k": 0.08712871287128714,
+              "lift": 3.1192079207920793
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.4195434695934649,
+              "precision_at_k": 0.8800000000000001,
+              "recall_at_k": 0.08712871287128714,
+              "lift": 3.101782178217822
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.5492786916901412,
+              "precision_at_k": 0.8666666666666668,
+              "recall_at_k": 0.08580858085808582,
+              "lift": 3.0719471947194723
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.40599865390734785,
+              "precision_at_k": 0.8648648648648649,
+              "recall_at_k": 0.08563018464008564,
+              "lift": 3.0655606101150656
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.2472216145846546,
+              "precision_at_k": 0.4,
+              "recall_at_k": 0.039603960396039604,
+              "lift": 1.417821782178218
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.4399652940711038,
+              "precision_at_k": 0.9,
+              "recall_at_k": 0.0891089108910891,
+              "lift": 3.1900990099009903
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.4195434695934649,
+              "precision_at_k": 0.8800000000000001,
+              "recall_at_k": 0.08712871287128714,
+              "lift": 3.101782178217822
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": true,
+            "note": "2 release/backport branch(es)",
+            "files": 356,
+            "files_with_events": 8,
+            "too_few_events": true,
+            "base_rate": 0.02247191011235955,
+            "spearman": 0.1088822322821407,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 356,
+            "files_with_events": 1,
+            "too_few_events": true,
+            "base_rate": 0.0028089887640449437,
+            "spearman": -0.0005181207528113754,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 356,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 356,
+            "files_with_events": 44,
+            "too_few_events": false,
+            "base_rate": 0.12359550561797752,
+            "spearman": 0.2099958233629761,
+            "precision_at_k": 0.48,
+            "lift": 3.8836363636363638
+          },
+          "codeowners": {
+            "available": false,
+            "note": "no CODEOWNERS file",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 356,
+            "files_with_events": 177,
+            "too_few_events": false,
+            "base_rate": 0.49719101123595505,
+            "spearman": 0.3825911917066321,
+            "precision_at_k": 0.9400000000000001,
+            "lift": 1.890621468926554
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: backported, fast_revert, severity_label, review_depth",
+            "files": 356,
+            "files_with_events": 51,
+            "too_few_events": false,
+            "base_rate": 0.14325842696629212,
+            "spearman": 0.23625422873178872,
+            "precision_at_k": 0.48,
+            "lift": 3.3505882352941176
+          }
+        }
+      }
+    },
+    {
+      "name": "scrapy",
+      "tier": "general",
+      "language": "Python",
+      "commit": "51c10b14fca6d272587a5c23cf3ae8effdff16cd",
+      "holdout_cutoff": "2026-05-03",
+      "holdout": {
+        "github": {
+          "repo": "scrapy/scrapy",
+          "in_window": 631,
+          "mapped": 631,
+          "fetched": 0,
+          "from_cache": 631,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 55,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 0,
+          "severity_label": 0,
+          "review_depth": 103,
+          "backport_branches": 0,
+          "codeowners_file": null
+        },
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-11-01T14:15:32.37637+01:00",
+        "files": 181,
+        "files_with_events": 70,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.38223741826503943,
+            "precision_at_k": 0.5666666666666667,
+            "recall_at_k": 0.08095238095238096,
+            "lift": 1.4652380952380952
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.3691384464683946,
+            "precision_at_k": 0.5666666666666667,
+            "recall_at_k": 0.08095238095238096,
+            "lift": 1.4652380952380952
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.45328787027167833,
+            "precision_at_k": 0.8375,
+            "recall_at_k": 0.11964285714285715,
+            "lift": 2.1655357142857143
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.38188777905661137,
+            "precision_at_k": 0.5714285714285714,
+            "recall_at_k": 0.0816326530612245,
+            "lift": 1.4775510204081632
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.29730995792797094,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.08571428571428572,
+            "lift": 1.5514285714285714
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.4220959691134738,
+            "precision_at_k": 0.8666666666666666,
+            "recall_at_k": 0.1238095238095238,
+            "lift": 2.240952380952381
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.3691384464683946,
+            "precision_at_k": 0.5666666666666667,
+            "recall_at_k": 0.08095238095238096,
+            "lift": 1.4652380952380952
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 69,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.2828627251484561,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.0966183574879227,
+              "lift": 1.748792270531401
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.2752177090642454,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.0966183574879227,
+              "lift": 1.748792270531401
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.3777359122540688,
+              "precision_at_k": 0.725,
+              "recall_at_k": 0.10507246376811594,
+              "lift": 1.9018115942028984
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.2997672803550116,
+              "precision_at_k": 0.5238095238095238,
+              "recall_at_k": 0.0759144237405107,
+              "lift": 1.3740510697032435
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.20398935652796912,
+              "precision_at_k": 0.5,
+              "recall_at_k": 0.07246376811594203,
+              "lift": 1.3115942028985506
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.3300008755214606,
+              "precision_at_k": 0.75,
+              "recall_at_k": 0.10869565217391304,
+              "lift": 1.967391304347826
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.2752177090642454,
+              "precision_at_k": 0.6666666666666667,
+              "recall_at_k": 0.0966183574879227,
+              "lift": 1.748792270531401
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "scrapy/scrapy",
+          "in_window": 738,
+          "mapped": 735,
+          "fetched": 0,
+          "from_cache": 738,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 73,
+          "revert": 1,
+          "backported": 0,
+          "fast_revert": 0,
+          "severity_label": 0,
+          "review_depth": 150,
+          "backport_branches": 0,
+          "codeowners_file": null
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:15:26.436638+01:00",
+        "to": "2026-11-01T14:15:26.436638+01:00",
+        "files": 222,
+        "files_with_events": 78,
+        "too_few_events": false,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": 0.3947716607779667,
+            "precision_at_k": 0.7,
+            "recall_at_k": 0.08974358974358974,
+            "lift": 1.9923076923076921
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": 0.3794448441278074,
+            "precision_at_k": 0.7,
+            "recall_at_k": 0.08974358974358974,
+            "lift": 1.9923076923076921
+          },
+          "churn": {
+            "available": true,
+            "spearman": 0.4626820606658791,
+            "precision_at_k": 1,
+            "recall_at_k": 0.1282051282051282,
+            "lift": 2.846153846153846
+          },
+          "complexity": {
+            "available": true,
+            "spearman": 0.35995962162174494,
+            "precision_at_k": 0.547945205479452,
+            "recall_at_k": 0.07024938531787847,
+            "lift": 1.5595363540569018
+          },
+          "centrality": {
+            "available": true,
+            "spearman": 0.3152309372350672,
+            "precision_at_k": 0.6,
+            "recall_at_k": 0.07692307692307693,
+            "lift": 1.7076923076923076
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": 0.43520099883729013,
+            "precision_at_k": 1,
+            "recall_at_k": 0.1282051282051282,
+            "lift": 2.846153846153846
+          },
+          "impact": {
+            "available": true,
+            "spearman": 0.3794448441278074,
+            "precision_at_k": 0.7,
+            "recall_at_k": 0.08974358974358974,
+            "lift": 1.9923076923076921
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 82,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.28496546413580476,
+              "precision_at_k": 0.8,
+              "recall_at_k": 0.0975609756097561,
+              "lift": 2.1658536585365855
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.27744660180573566,
+              "precision_at_k": 0.8,
+              "recall_at_k": 0.0975609756097561,
+              "lift": 2.1658536585365855
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.4939578190928555,
+              "precision_at_k": 1,
+              "recall_at_k": 0.12195121951219512,
+              "lift": 2.707317073170732
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.3063736277733323,
+              "precision_at_k": 0.547945205479452,
+              "recall_at_k": 0.06682258603407952,
+              "lift": 1.4834614099565653
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.23919193071833414,
+              "precision_at_k": 0.5,
+              "recall_at_k": 0.06097560975609756,
+              "lift": 1.353658536585366
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.38500615892962353,
+              "precision_at_k": 0.9,
+              "recall_at_k": 0.10975609756097561,
+              "lift": 2.4365853658536585
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.27744660180573566,
+              "precision_at_k": 0.8,
+              "recall_at_k": 0.0975609756097561,
+              "lift": 2.1658536585365855
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": false,
+            "note": "no release or backport branches in the local clone (fetch them to enable)",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 222,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 222,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 222,
+            "files_with_events": 142,
+            "too_few_events": false,
+            "base_rate": 0.6396396396396397,
+            "spearman": 0.47849339305875155,
+            "precision_at_k": 1,
+            "lift": 1.5633802816901408
+          },
+          "codeowners": {
+            "available": false,
+            "note": "no CODEOWNERS file",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 222,
+            "files_with_events": 209,
+            "too_few_events": false,
+            "base_rate": 0.9414414414414415,
+            "spearman": 0.5357156917465541,
+            "precision_at_k": 1,
+            "lift": 1.062200956937799
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: fast_revert, severity_label, review_depth",
+            "files": 222,
+            "files_with_events": 142,
+            "too_few_events": false,
+            "base_rate": 0.6396396396396397,
+            "spearman": 0.4025528174889421,
+            "precision_at_k": 1,
+            "lift": 1.5633802816901408
+          }
+        }
+      }
+    },
+    {
+      "name": "commons-lang",
+      "tier": "general",
+      "language": "Java",
+      "commit": "61837eb4472dac790a69f5f34b7b89ddfaf43db0",
+      "holdout_cutoff": "2026-05-03",
+      "holdout": {
+        "github": {
+          "repo": "apache/commons-lang",
+          "in_window": 176,
+          "mapped": 167,
+          "fetched": 0,
+          "from_cache": 176,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 0,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 0,
+          "severity_label": 0,
+          "review_depth": 16,
+          "backport_branches": 2,
+          "codeowners_file": null
+        },
+        "mode": "holdout",
+        "from": "2026-05-03T00:00:00Z",
+        "to": "2026-11-01T14:15:44.543269+01:00",
+        "files": 304,
+        "files_with_events": 0,
+        "too_few_events": true,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "churn": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "complexity": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "centrality": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "impact": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 36,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.3937853652506876,
+              "precision_at_k": 0.27999999999999997,
+              "recall_at_k": 0.07777777777777778,
+              "lift": 2.364444444444444
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.3373863326844797,
+              "precision_at_k": 0.27999999999999997,
+              "recall_at_k": 0.07777777777777778,
+              "lift": 2.364444444444444
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.2405035156927581,
+              "precision_at_k": 0.45,
+              "recall_at_k": 0.125,
+              "lift": 3.8000000000000003
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.43160603904732825,
+              "precision_at_k": 0.5714285714285714,
+              "recall_at_k": 0.15873015873015872,
+              "lift": 4.825396825396825
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.17122084829672135,
+              "precision_at_k": 0.3,
+              "recall_at_k": 0.08333333333333333,
+              "lift": 2.533333333333333
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.44570725955718976,
+              "precision_at_k": 0.611111111111111,
+              "recall_at_k": 0.16975308641975306,
+              "lift": 5.160493827160494
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.3373863326844797,
+              "precision_at_k": 0.27999999999999997,
+              "recall_at_k": 0.07777777777777778,
+              "lift": 2.364444444444444
+            }
+          }
+        }
+      },
+      "in_sample": {
+        "github": {
+          "repo": "apache/commons-lang",
+          "in_window": 238,
+          "mapped": 223,
+          "fetched": 0,
+          "from_cache": 238,
+          "api_calls": 1,
+          "capped": false,
+          "cap": 1500,
+          "partial": false,
+          "bugfix": 0,
+          "revert": 0,
+          "backported": 0,
+          "fast_revert": 1,
+          "severity_label": 0,
+          "review_depth": 24,
+          "backport_branches": 2,
+          "codeowners_file": null
+        },
+        "mode": "in-sample",
+        "from": "2025-11-01T14:15:38.685759+01:00",
+        "to": "2026-11-01T14:15:38.685759+01:00",
+        "files": 312,
+        "files_with_events": 0,
+        "too_few_events": true,
+        "prs": {
+          "heat": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "blast_radius": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "churn": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "complexity": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "centrality": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "likelihood": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          },
+          "impact": {
+            "available": true,
+            "spearman": null,
+            "precision_at_k": 0,
+            "recall_at_k": 0,
+            "lift": 0
+          }
+        },
+        "commit_keyword": {
+          "files_with_events": 66,
+          "too_few_events": false,
+          "signals": {
+            "heat": {
+              "available": true,
+              "spearman": 0.3631432111531543,
+              "precision_at_k": 0.42000000000000004,
+              "recall_at_k": 0.06363636363636364,
+              "lift": 1.9854545454545456
+            },
+            "blast_radius": {
+              "available": true,
+              "spearman": 0.27365562997764203,
+              "precision_at_k": 0.42000000000000004,
+              "recall_at_k": 0.06363636363636364,
+              "lift": 1.9854545454545456
+            },
+            "churn": {
+              "available": true,
+              "spearman": 0.4867208988568127,
+              "precision_at_k": 0.8,
+              "recall_at_k": 0.12121212121212122,
+              "lift": 3.781818181818182
+            },
+            "complexity": {
+              "available": true,
+              "spearman": 0.4438829539673028,
+              "precision_at_k": 0.6571428571428571,
+              "recall_at_k": 0.09956709956709957,
+              "lift": 3.1064935064935066
+            },
+            "centrality": {
+              "available": true,
+              "spearman": 0.17597723769080814,
+              "precision_at_k": 0.5,
+              "recall_at_k": 0.07575757575757576,
+              "lift": 2.3636363636363638
+            },
+            "likelihood": {
+              "available": true,
+              "spearman": 0.45944170250018335,
+              "precision_at_k": 0.7625,
+              "recall_at_k": 0.11553030303030302,
+              "lift": 3.6045454545454545
+            },
+            "impact": {
+              "available": true,
+              "spearman": 0.27365562997764203,
+              "precision_at_k": 0.42000000000000004,
+              "recall_at_k": 0.06363636363636364,
+              "lift": 1.9854545454545456
+            }
+          }
+        },
+        "stakes": {
+          "backported": {
+            "available": true,
+            "note": "2 release/backport branch(es)",
+            "files": 312,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "fast_revert": {
+            "available": true,
+            "note": "reverted within 7 days of merge",
+            "files": 312,
+            "files_with_events": 1,
+            "too_few_events": true,
+            "base_rate": 0.003205128205128205,
+            "spearman": 0.09384439875129848,
+            "precision_at_k": 0.06999999999999999,
+            "lift": 21.84
+          },
+          "severity_label": {
+            "available": true,
+            "note": null,
+            "files": 312,
+            "files_with_events": 0,
+            "too_few_events": true,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "review_depth": {
+            "available": true,
+            "note": "2+ distinct approvers or 3+ reviews",
+            "files": 312,
+            "files_with_events": 14,
+            "too_few_events": false,
+            "base_rate": 0.04487179487179487,
+            "spearman": 0.20585871975943396,
+            "precision_at_k": 0.21000000000000002,
+            "lift": 4.680000000000001
+          },
+          "codeowners": {
+            "available": false,
+            "note": "no CODEOWNERS file",
+            "files": 0,
+            "files_with_events": 0,
+            "too_few_events": false,
+            "base_rate": 0,
+            "spearman": null,
+            "precision_at_k": 0,
+            "lift": 0
+          },
+          "pr_activity": {
+            "available": true,
+            "note": "reference, not a stakes signal: all mapped PRs (activity)",
+            "files": 312,
+            "files_with_events": 81,
+            "too_few_events": false,
+            "base_rate": 0.25961538461538464,
+            "spearman": 0.41887840296298146,
+            "precision_at_k": 0.62,
+            "lift": 2.388148148148148
+          },
+          "combined": {
+            "available": true,
+            "note": "distinct signals per file among: backported, fast_revert, severity_label, review_depth",
+            "files": 312,
+            "files_with_events": 14,
+            "too_few_events": false,
+            "base_rate": 0.04487179487179487,
+            "spearman": 0.20675013416886195,
+            "precision_at_k": 0.21000000000000002,
+            "lift": 4.680000000000001
+          }
+        }
+      }
+    }
+  ]
+}

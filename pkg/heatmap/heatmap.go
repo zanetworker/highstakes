@@ -2,17 +2,24 @@ package heatmap
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/zanetworker/highstakes/internal/analyzer"
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/gitanalyzer"
 	"github.com/zanetworker/highstakes/internal/llm"
+	"github.com/zanetworker/highstakes/internal/ownership"
+	"github.com/zanetworker/highstakes/internal/policy"
 	"github.com/zanetworker/highstakes/internal/scorer"
+	"github.com/zanetworker/highstakes/internal/tour"
 	"github.com/zanetworker/highstakes/internal/types"
+	"github.com/zanetworker/highstakes/internal/units"
 )
 
 const Version = "1.0.0"
@@ -32,11 +39,17 @@ type Generator struct {
 	opts     GenerateOptions
 }
 
-// New creates a new heatmap generator
+// New creates a new heatmap generator. A missing .heatmap/config.yaml means
+// the defaults; an unreadable or invalid one is an error, never a silent
+// fallback (the default autonomy cap is the most permissive).
 func New(repoPath string, opts ...GenerateOptions) (*Generator, error) {
-	config, err := LoadConfig(filepath.Join(repoPath, ".heatmap", "config.yaml"))
+	path := filepath.Join(repoPath, ".heatmap", "config.yaml")
+	config, err := LoadConfig(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		config, err = DefaultConfig(), nil
+	}
 	if err != nil {
-		config = DefaultConfig()
+		return nil, fmt.Errorf("invalid config %s: %w", path, err)
 	}
 
 	var o GenerateOptions
@@ -77,9 +90,11 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 
 	// Run git analysis
 	fmt.Println("  - Analyzing git history...")
+	historyStatus := "complete"
 	gitHistory, err := gitAnalyzer.AnalyzeAll(filePaths, 365)
 	if err != nil {
-		return nil, fmt.Errorf("git analysis: %w", err)
+		fmt.Fprintf(os.Stderr, "  Warning: git history unavailable, change frequency will be 0 for every file: %v\n", err)
+		historyStatus = "unavailable: " + err.Error()
 	}
 
 	// Get git metadata
@@ -88,6 +103,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 
 	// Run LLM analysis if enabled
 	var assessments map[string]*llm.Assessment
+	var sensitive map[string]bool
 	if !g.opts.NoLLM {
 		apiKey := os.Getenv("OPENROUTER_API_KEY")
 		apiURL := ""
@@ -108,16 +124,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				fmt.Fprintf(os.Stderr, "  Warning: LLM init failed: %v (falling back to static)\n", err)
 			} else {
 				var inputs []llm.FileInput
-				for path := range allFiles {
-					if !llm.ShouldAssess(path) {
-						continue
-					}
-					content, err := os.ReadFile(filepath.Join(g.repoPath, path))
-					if err != nil {
-						continue
-					}
-					inputs = append(inputs, llm.FileInput{Path: path, Content: string(content)})
-				}
+				inputs, sensitive = llmInputs(g.repoPath, filePaths)
 				assessments, err = assessor.AssessFiles(inputs)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  Warning: LLM assessment failed: %v\n", err)
@@ -139,6 +146,7 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 			Branch:     branch,
 			TotalFiles: len(allFiles),
 			Languages:  countLanguages(allFiles),
+			GitHistory: historyStatus,
 		},
 		Files:       make(map[string]*types.FileHeat),
 		Incidents:   []types.Incident{},
@@ -148,6 +156,9 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 	// Process each file
 	for path, fileInfo := range allFiles {
 		heat := g.processFile(path, fileInfo, staticAnalyzer, gitHistory)
+		if sensitive[path] {
+			heat.LLMSkipped = "sensitive"
+		}
 
 		// Apply LLM assessment if available
 		if assessment, ok := assessments[path]; ok {
@@ -161,13 +172,29 @@ func (g *Generator) Generate() (*types.Heatmap, error) {
 				CriticalReason:     assessment.CriticalReason,
 				Assessed:           true,
 			}
-			// Recalculate heat score with LLM data
-			heat.HeatScore = scorer.CalculateHeatScore(heat.Factors)
-			heat.Tier = scorer.CalculateTier(heat.HeatScore, g.config.Tiers)
-			heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
+			scoreFile(heat, tour.IsTestFile(path), g.config.Tiers)
 		}
 
 		heatmap.Files[path] = heat
+	}
+	applyAxes(heatmap, g.config.Tiers)
+	maxLevel, _ := g.config.Autonomy.Max() // validated by LoadConfig in New
+	scorer.ApplyAutonomy(heatmap.Files, maxLevel)
+
+	// Owners name reviewers in the actions; without them actions stay generic.
+	owners, err := ownership.FileOwners(g.repoPath, nil, ownership.Options{Aliases: g.config.Owners})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: no owners in explanations: %v\n", err)
+	}
+	// Files an existing CODEOWNERS rule covers get no "add a CODEOWNERS line" action.
+	codeowners, _ := policy.LoadCodeowners(g.repoPath)
+	applyExplanations(heatmap, owners, codeowners.Covers)
+
+	// Units need quadrants (fragile-critical counts); they are optional, so a
+	// failure leaves the heatmap without them.
+	fmt.Println("  - Finding runtime units...")
+	if err := units.Apply(heatmap, os.DirFS(g.repoPath), g.config.Exclude.Dirs, g.config.Tour.Supporting); err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: no runtime units: %v\n", err)
 	}
 
 	// Load existing incidents if any
@@ -242,6 +269,7 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		CoveragePercent: 50.0,
 		TestCount:       0,
 		HasIntegrationTests: false,
+		HasTestFile:         fileInfo.HasTestFile,
 	}
 
 	// Complexity
@@ -252,14 +280,10 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		FunctionCount: fileInfo.FunctionCount,
 	}
 
-	// Calculate aggregate heat score
-	heatScore := scorer.CalculateHeatScore(factors)
-	tier := scorer.CalculateTier(heatScore, g.config.Tiers)
-
 	// Build dependencies
 	deps := types.Dependencies{
 		ImportedBy: make([]types.Dependency, 0, len(fileInfo.ImportedBy)),
-		Imports:    make([]types.Dependency, 0, len(fileInfo.Imports)),
+		Imports:    make([]types.Dependency, 0, len(fileInfo.DependsOn)),
 	}
 
 	for _, imp := range fileInfo.ImportedBy {
@@ -268,6 +292,9 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 			HeatScore: 0, // Will be filled in second pass if needed
 		})
 	}
+	for _, imp := range fileInfo.DependsOn {
+		deps.Imports = append(deps.Imports, types.Dependency{Path: imp})
+	}
 
 	// Recent changes
 	var recentChanges []types.Change
@@ -275,16 +302,48 @@ func (g *Generator) processFile(path string, fileInfo *analyzer.FileInfo, static
 		recentChanges = hist.RecentChanges
 	}
 
-	return &types.FileHeat{
-		Path:               path,
-		HeatScore:          heatScore,
-		Tier:               tier,
-		Language:           fileInfo.Language,
-		Size:               types.FileSize{Lines: fileInfo.Lines, Bytes: fileInfo.Bytes},
-		Factors:            factors,
-		Dependencies:       deps,
-		RecentChanges:      recentChanges,
-		ReviewRequirements: scorer.CalculateReviewRequirements(tier),
+	heat := &types.FileHeat{
+		Path:          path,
+		Language:      fileInfo.Language,
+		Size:          types.FileSize{Lines: fileInfo.Lines, Bytes: fileInfo.Bytes},
+		Factors:       factors,
+		Dependencies:  deps,
+		RecentChanges: recentChanges,
+	}
+	scoreFile(heat, tour.IsTestFile(path), g.config.Tiers)
+	return heat
+}
+
+// scoreFile sets both axes, heat, tier and review requirements from the
+// file's factors. Test files are capped below MEDIUM on every score. The
+// tier is provisional for assessed files: applyAxes replaces it with the
+// quadrant tier once every file is scored.
+func scoreFile(heat *types.FileHeat, isTest bool, tiers types.TierThresholds) {
+	impact, assessed := scorer.CalculateImpact(heat.Factors)
+	heat.Likelihood = scorer.CapTestFile(scorer.CalculateLikelihood(heat.Factors), isTest, tiers)
+	heat.Impact = scorer.CapTestFile(impact, isTest, tiers)
+	heat.ImpactAssessed = assessed
+	heat.HeatScore = scorer.CapTestFile(scorer.CalculateHeatScore(heat.Factors), isTest, tiers)
+	heat.Tier = scorer.CalculateTier(heat.HeatScore, tiers)
+	heat.ReviewRequirements = scorer.CalculateReviewRequirements(heat.Tier)
+}
+
+// applyAxes derives quadrant tiers from the repo-relative likelihood and
+// impact cutoffs and records both effective cutoffs in the metadata.
+func applyAxes(hm *types.Heatmap, tiers types.TierThresholds) {
+	hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold = scorer.ApplyQuadrants(hm.Files, tiers, tour.IsTestFile)
+}
+
+// applyExplanations attaches reasons and actions to every file. It runs
+// after applyAxes because reasons cite the likely cutoff and quadrant.
+// codeowned (may be nil) reports paths an existing CODEOWNERS rule covers.
+func applyExplanations(hm *types.Heatmap, owners map[string][]ownership.Owner, codeowned func(string) bool) {
+	stats := explain.BuildRepoStats(hm, tour.IsTestFile)
+	stats.Codeowned = codeowned
+	stats.SoleAuthor = explain.SoleAuthor(owners)
+	for path, f := range hm.Files {
+		e := explain.Explain(f, stats, owners[path])
+		f.Explanation = &e
 	}
 }
 
@@ -314,6 +373,10 @@ func Save(h *types.Heatmap, path string) error {
 		return fmt.Errorf("marshal JSON: %w", err)
 	}
 
+	// A fresh checkout has no .heatmap/ yet (analyze without init).
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
@@ -331,6 +394,18 @@ func Load(path string) (*types.Heatmap, error) {
 	var heatmap types.Heatmap
 	if err := json.Unmarshal(data, &heatmap); err != nil {
 		return nil, fmt.Errorf("unmarshal JSON: %w", err)
+	}
+	// Older heatmaps stored actions without a scope; scope filters would
+	// hide them all.
+	for _, f := range heatmap.Files {
+		if f == nil || f.Explanation == nil {
+			continue
+		}
+		for i, a := range f.Explanation.Actions {
+			if a.Scope == "" {
+				f.Explanation.Actions[i].Scope = explain.ScopeOf(a.ID)
+			}
+		}
 	}
 
 	return &heatmap, nil
@@ -402,4 +477,30 @@ func containsAny(s string, substrings []string) bool {
 		}
 	}
 	return false
+}
+
+// llmInputs reads the files the LLM should assess. Files that look like
+// credentials, by name or by content, are returned in sensitive instead;
+// a file flagged by name is never read.
+func llmInputs(repoPath string, paths []string) (inputs []llm.FileInput, sensitive map[string]bool) {
+	sensitive = make(map[string]bool)
+	for _, path := range paths {
+		if !llm.ShouldAssess(path) {
+			continue
+		}
+		if llm.SensitivePath(path) {
+			sensitive[path] = true
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(repoPath, path))
+		if err != nil {
+			continue
+		}
+		if llm.SensitiveContent(string(content)) {
+			sensitive[path] = true
+			continue
+		}
+		inputs = append(inputs, llm.FileInput{Path: path, Content: string(content)})
+	}
+	return inputs, sensitive
 }

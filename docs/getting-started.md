@@ -9,7 +9,7 @@
 ## Install
 
 ```sh
-go install github.com/zanetworker/highstakes/cmd/heatmap@latest
+go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 ```
 
 Or build from source:
@@ -17,8 +17,10 @@ Or build from source:
 ```sh
 git clone https://github.com/zanetworker/highstakes
 cd highstakes
-go install ./cmd/heatmap
+go install ./cmd/highstakes
 ```
+
+The binary bundles parsers for every supported language (about 27 MB). Add `-ldflags="-s -w"` to either command to strip debug symbols and get about 19 MB.
 
 ## Set Up
 
@@ -40,7 +42,7 @@ highstakes analyze
 
 `highstakes init` creates a `.heatmap/` directory with a `config.yaml` file. `highstakes analyze` scans the repo, sends source files to the LLM for blast radius assessment, and writes results to `.heatmap/heatmap.json`.
 
-On a 300-file repo this takes about 1-2 minutes and costs roughly $0.15 with the default model (DeepSeek V4 Flash).
+On a 300-file repo this takes about 1-2 minutes and costs roughly $0.12 with the default model (GPT-6 Luna).
 
 ## View Results
 
@@ -51,7 +53,7 @@ Three ways to see the heatmap:
 highstakes dashboard
 
 # Terminal TUI
-heatmap
+highstakes
 
 # CLI queries
 highstakes list --tier high
@@ -61,11 +63,15 @@ highstakes report
 
 ## What to Do With the Results
 
-**HIGH/CRITICAL files**: These need careful human review on every PR that touches them. Set up branch protection or CI gates (see [CI Integration](ci-integration.md)).
+Every file gets a posture from two questions, "Will it break?" and "How bad if it breaks?", each shown with its repo cutoff. `highstakes get <file>` lists what to do before the next merge and what to put on the backlog; `highstakes dashboard` opens on the same actions as an inbox.
 
-**MEDIUM files**: Worth a human glance. One reviewer is sufficient.
+**Harden now** (tier critical): senior owner sign-off, regression and contract tests, auto-merge off on every PR that touches them. Gate them in CI with `pr check --fail-on critical` (see [CI Integration](ci-integration.md)).
 
-**LOW files**: Safe for AI-assisted review or auto-merge. Don't spend senior engineer time here.
+**Protect** (tier high): owner review and no auto-merge; add tests first when none sit next to the file.
+
+**Stabilize** (tier medium): regression tests when fixes recur, refactor what you touch. Never blocks.
+
+**Routine** (tier low): normal review; agents may auto-merge here (autonomy L3) once the impact is AI-assessed. Don't spend senior engineer time here.
 
 ## Next Steps
 

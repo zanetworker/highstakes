@@ -1,9 +1,17 @@
 package llm
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseAssessment_CleanJSON(t *testing.T) {
@@ -123,7 +131,18 @@ func TestShouldAssess(t *testing.T) {
 		{"test_something.py", false},
 		{"generated.pb.go", false},
 		{"README.md", false},
-		{"config.yaml", false},
+		{"config.yaml", true},
+		{".github/workflows/ci.yml", true},
+		{"charts/app/values.yaml", true},
+		{"pyproject.toml", true},
+		{"tsconfig.json", true},
+		{"Dockerfile", true},
+		{"infra/main.tf", true},
+		{"package-lock.json", false},
+		{"pnpm-lock.yaml", false},
+		{"Cargo.lock", false},
+		{"poetry.lock", false},
+		{"deploy/zz_generated.deepcopy.yaml", false},
 		{"go.mod", false},
 		{"go.sum", false},
 		{"src/main.rs", true},
@@ -237,4 +256,309 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestAssessFile_RetryFailures(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+
+	tests := []struct {
+		name      string
+		server    func(calls *int32) *httptest.Server
+		closed    bool
+		wantErr   string
+		wantCalls int32
+	}{
+		{
+			name: "network failure on every attempt returns error",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+			},
+			closed:  true,
+			wantErr: "API request failed after 3 attempts",
+		},
+		{
+			name: "429 on every attempt returns rate limit error",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					atomic.AddInt32(calls, 1)
+					w.WriteHeader(http.StatusTooManyRequests)
+				}))
+			},
+			wantErr:   "rate limited (429) after 3 attempts",
+			wantCalls: 3,
+		},
+		{
+			name: "429 then success recovers",
+			server: func(calls *int32) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if atomic.AddInt32(calls, 1) < 3 {
+						w.WriteHeader(http.StatusTooManyRequests)
+						return
+					}
+					_, _ = w.Write([]byte(okBody))
+				}))
+			},
+			wantCalls: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			srv := tt.server(&calls)
+			if tt.closed {
+				srv.Close()
+			} else {
+				defer srv.Close()
+			}
+			a := &Assessor{apiURL: srv.URL, model: "m", client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+			got, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if got.SecurityImpact != 10 {
+					t.Errorf("SecurityImpact = %d, want 10", got.SecurityImpact)
+				}
+			}
+			if !tt.closed && atomic.LoadInt32(&calls) != tt.wantCalls {
+				t.Errorf("calls = %d, want %d", calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestAssessFiles_CacheKeyedByModel(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	cacheDir := t.TempDir()
+	files := []FileInput{{Path: "x.go", Content: "package x"}}
+
+	newAssessor := func(model string) *Assessor {
+		return &Assessor{apiURL: srv.URL, model: model, cacheDir: cacheDir, concurrency: 1,
+			client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	}
+
+	steps := []struct {
+		name      string
+		model     string
+		wantCalls int32
+	}{
+		{"first run with model A calls the API", "model-a", 1},
+		{"same content and model A hits the cache", "model-a", 0},
+		{"same content with model B misses the cache", "model-b", 1},
+		{"model B is now cached too", "model-b", 0},
+	}
+	for _, st := range steps {
+		t.Run(st.name, func(t *testing.T) {
+			atomic.StoreInt32(&calls, 0)
+			res, err := newAssessor(st.model).AssessFiles(files)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res["x.go"] == nil {
+				t.Fatal("missing assessment for x.go")
+			}
+			if got := atomic.LoadInt32(&calls); got != st.wantCalls {
+				t.Errorf("API calls = %d, want %d", got, st.wantCalls)
+			}
+		})
+	}
+}
+
+func TestAssessFile_RequestsStructuredOutput(t *testing.T) {
+	okBody := `{"choices":[{"message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var got map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got["temperature"] != float64(0) {
+		t.Errorf("temperature = %v, want 0", got["temperature"])
+	}
+	if p, _ := got["provider"].(map[string]interface{}); p["require_parameters"] != true {
+		t.Errorf("provider.require_parameters = %v, want true", got["provider"])
+	}
+	rf, _ := got["response_format"].(map[string]interface{})
+	if rf["type"] != "json_schema" {
+		t.Fatalf("response_format.type = %v, want json_schema", rf["type"])
+	}
+	js, _ := rf["json_schema"].(map[string]interface{})
+	if js["strict"] != true {
+		t.Errorf("json_schema.strict = %v, want true", js["strict"])
+	}
+	schema, _ := js["schema"].(map[string]interface{})
+	if schema["additionalProperties"] != false {
+		t.Errorf("additionalProperties = %v, want false", schema["additionalProperties"])
+	}
+	var required []string
+	for _, r := range schema["required"].([]interface{}) {
+		required = append(required, r.(string))
+	}
+	sort.Strings(required)
+	want := []string{"availability_impact", "blast_radius_summary", "critical_reason", "data_impact", "security_impact", "user_impact"}
+	if !reflect.DeepEqual(required, want) {
+		t.Errorf("required = %v, want %v", required, want)
+	}
+}
+
+func TestCacheKey_IncludesPromptVersion(t *testing.T) {
+	if PromptVersion == "1" {
+		t.Error("PromptVersion must be bumped: the request now asks for structured output, so old cached answers are stale")
+	}
+}
+
+// routingServer mimics OpenRouter: requests that carry a rejected parameter get
+// the 404 "No endpoints found that can handle the requested parameters".
+func routingServer(t *testing.T, rejected ...string) (*httptest.Server, *int32) {
+	t.Helper()
+	okBody := `{"choices":[{"finish_reason":"stop","message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, p := range rejected {
+			if _, ok := body[p]; ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"message":"No endpoints found that can handle the requested parameters.","code":404}}`))
+				return
+			}
+		}
+		_, _ = w.Write([]byte(okBody))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+func TestAssessFile_FallsBackOnUnsupportedParameters(t *testing.T) {
+	tests := []struct {
+		name          string
+		rejected      []string
+		wantFirst     int32 // requests for the first file
+		wantSecond    int32 // requests for the next file: the working variant is remembered
+		wantErrSubstr string
+	}{
+		{"all supported (DeepSeek-like)", nil, 1, 1, ""},
+		{"no temperature (GLM-like)", []string{"temperature"}, 2, 1, ""},
+		{"no temperature or reasoning (Haiku-like)", []string{"temperature", "reasoning"}, 3, 1, ""},
+		{"nothing works", []string{"response_format"}, 3, 3, "requested parameters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, calls := routingServer(t, tt.rejected...)
+			a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+				client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+
+			for i, want := range []int32{tt.wantFirst, tt.wantSecond} {
+				atomic.StoreInt32(calls, 0)
+				_, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+				if tt.wantErrSubstr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+						t.Fatalf("file %d: err = %v, want %q", i, err, tt.wantErrSubstr)
+					}
+				} else if err != nil {
+					t.Fatalf("file %d: %v", i, err)
+				}
+				if got := atomic.LoadInt32(calls); got != want {
+					t.Errorf("file %d: requests = %d, want %d", i, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAssessFile_FirstVariantDisablesReasoning(t *testing.T) {
+	var got map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"security_impact\":1,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := got["reasoning"].(map[string]interface{}); r["effort"] != "none" {
+		t.Errorf("reasoning = %v, want effort none", got["reasoning"])
+	}
+	if got["max_tokens"] != float64(4096) {
+		t.Errorf("max_tokens = %v, want 4096 (room for models that reason anyway)", got["max_tokens"])
+	}
+}
+
+func TestAssessFile_TruncatedByReasoning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":null,"reasoning":"thinking..."}}]}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	_, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"})
+	if err == nil || !strings.Contains(err.Error(), "token limit") {
+		t.Errorf("err = %v, want a token limit error", err)
+	}
+}
+
+func TestAssessFile_FallsBackWhenReasoningIsMandatory(t *testing.T) {
+	okBody := `{"choices":[{"finish_reason":"stop","message":{"content":"{\"security_impact\":10,\"data_impact\":0,\"availability_impact\":0,\"user_impact\":0,\"blast_radius_summary\":\"s\",\"critical_reason\":\"r\"}"}}]}`
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if _, ok := body["reasoning"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}`))
+			return
+		}
+		_, _ = w.Write([]byte(okBody))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "m", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err != nil {
+		t.Fatalf("err = %v, want fallback to the variant without reasoning", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Errorf("requests = %d, want 3", got)
+	}
+}
+
+func TestAssessFile_OtherBadRequestsDoNotFallBack(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid model ID","code":400}}`))
+	}))
+	defer srv.Close()
+	a := &Assessor{apiURL: srv.URL, model: "nope", cacheDir: t.TempDir(), concurrency: 1,
+		client: &http.Client{Timeout: time.Second}, retryDelay: time.Millisecond}
+	if _, err := a.assessFile(FileInput{Path: "x.go", Content: "package x"}); err == nil || !strings.Contains(err.Error(), "Invalid model ID") {
+		t.Errorf("err = %v, want the original 400", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("requests = %d, want 1 (no fallback for unrelated errors)", got)
+	}
 }

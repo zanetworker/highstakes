@@ -1,0 +1,88 @@
+<!-- highstakes-triage -->
+## ⛔ Harden before merge
+
+⛔ 1 harden · 🛡 2 protect · ✅ 2 routine
+
+🤖 AI may auto-merge: ❌ no (touches Harden now files)
+
+### ✅ Do before merge (1 of 3 done)
+
+⛔ Merge blocked: 2 before-merge items open
+
+- [ ] 👀 Get sign-off from @ana, @bo on `net/proxy.rs` (a maintainer adds the `highstakes:signed-off` label after reviewing)
+- [x] 🧪 Add regression tests around the recent fix (`net/proxy.rs`)
+- [ ] 🚫 Keep auto-merge off
+
+|    | File | If it breaks | Breaks often? | Next step |
+|---|---|---|---|---|
+| ⛔ | `net/proxy.rs` | Core egress proxy that enforces network policy. | 🔴 55 commits in the last 90 days | 👀 senior sign-off · [📝 open issue](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=%23%23+Why+it+matters%0A-+Core+egress+proxy+that+enforces+network+policy.%0A%0A%23%23+Why+now%0A-+Harden+now%3A+likely+to+break+and+costly+if+it+does%0A-+Will+it+break%3F+50+%28high%2C+cutoff+33%29%3B+How+bad+if+it+breaks%3F+92+%28high%2C+cutoff+78%29%0A-+55+commits+in+the+last+90+days+%28top+1%25+of+this+repo%29%0A-+11+files+import+it+%28top+1%25%29%0A%0A%23%23+Suggested+approach%0A1.+Identify+cohesive+groups+of+functions+%28functions+that+share+data+or+callers%29%0A2.+Move+one+group+per+PR+into+a+new+file+in+the+same+package%0A3.+Keep+the+public+API+unchanged+so+importers+need+no+edits%0A4.+Run+the+tests+after+each+move%0A%0A%23%23+Done+when%0A-+%5B+%5D+the+functions+of+net%2Fproxy.rs+are+spread+over+smaller+files%0A-+%5B+%5D+tests+pass%0A%0A%23%23+Context%0A-+Review+by%3A+%40ana%2C+%40bo%0A-+No+file+imports+it%0A%0A_Opened+from+the+HighStakes+PR+comment_%0A) |
+| 🛡 | `net/policy.rs` | security 80 | 🟢 rarely | 👀 owner review |
+| 🛡 | `net/new\|file.rs` | new file: treated like its directory (protect) | 🆕 new file | 👀 owner review |
+| ✅ | 2 other files | limited damage | 🟢 rarely | normal review |
+
+### ⚡ One-click actions
+
+- [📝 Open issue: Split net/proxy.rs into smaller files](https://github.com/acme/net/issues/new?title=Split+net%2Fproxy.rs+into+smaller+files&body=%23%23+Why+it+matters%0A-+Core+egress+proxy+that+enforces+network+policy.%0A%0A%23%23+Why+now%0A-+Harden+now%3A+likely+to+break+and+costly+if+it+does%0A-+Will+it+break%3F+50+%28high%2C+cutoff+33%29%3B+How+bad+if+it+breaks%3F+92+%28high%2C+cutoff+78%29%0A-+55+commits+in+the+last+90+days+%28top+1%25+of+this+repo%29%0A-+11+files+import+it+%28top+1%25%29%0A%0A%23%23+Suggested+approach%0A1.+Identify+cohesive+groups+of+functions+%28functions+that+share+data+or+callers%29%0A2.+Move+one+group+per+PR+into+a+new+file+in+the+same+package%0A3.+Keep+the+public+API+unchanged+so+importers+need+no+edits%0A4.+Run+the+tests+after+each+move%0A%0A%23%23+Done+when%0A-+%5B+%5D+the+functions+of+net%2Fproxy.rs+are+spread+over+smaller+files%0A-+%5B+%5D+tests+pass%0A%0A%23%23+Context%0A-+Review+by%3A+%40ana%2C+%40bo%0A-+No+file+imports+it%0A%0A_Opened+from+the+HighStakes+PR+comment_%0A)
+  <details><summary>What's in this issue</summary>
+
+  - **Why it matters:** Core egress proxy that enforces network policy.
+  - **Why now:** Harden now: likely to break and costly if it does; Will it break? 50 (high, cutoff 33); How bad if it breaks? 92 (high, cutoff 78); 55 commits in the last 90 days (top 1% of this repo); 11 files import it (top 1%)
+  - **Suggested approach:** 1. Identify cohesive groups of functions (functions that share data or callers) 2. Move one group per PR into a new file in the same package 3. Keep the public API unchanged so importers need no edits 4. Run the tests after each move
+  - **Done when:** the functions of net/proxy.rs are spread over smaller files; tests pass
+  - **Who / autonomy:** @ana, @bo
+
+  </details>
+
+<details><summary>🗺 Where this PR lands</summary>
+
+```mermaid
+quadrantChart
+  title Changed files
+  x-axis Rarely breaks --> Breaks often
+  y-axis Limited damage --> Costly if it breaks
+  quadrant-1 Harden now
+  quadrant-2 Protect
+  quadrant-3 Routine
+  quadrant-4 Stabilize
+  1: [0.75, 0.75]
+  2: [0.25, 0.75]
+```
+
+1. ⛔ `net/proxy.rs`: senior sign-off
+2. 🛡 `net/policy.rs`: owner review
+
+</details>
+
+<details><summary>Why these actions?</summary>
+
+Scores are a relative signal within this repo, not a probability. Will it break? is validated on bug-fix history; How bad if it breaks? is AI-assessed, not yet checked against maintainer ratings. Scores and repo cutoffs: Will it break? 33, How bad if it breaks? 78 (a score at or above its cutoff counts as high).
+
+**`net/proxy.rs`** (Harden now)
+- Scores: Will it break? 50 (high, cutoff 33); How bad if it breaks? 92 (high, cutoff 78)
+- Break signals: 55 commits in the last 90 days (top 1% of this repo); 11 files import it (top 1%)
+- Break cost: security 92 · availability 85; "Core egress proxy."
+- Get sign-off from a senior owner (@ana, @bo): Harden now: likely to break and costly when it does
+- Add regression tests around the recent fix: recent fix: "fix: align checks" (2026-10-28)
+- Keep auto-merge off: Harden now files never auto-merge
+
+**`net/policy.rs`** (Protect)
+- Scores: Will it break? 5 (low, cutoff 33); How bad if it breaks? 80 (high, cutoff 78)
+- Break signals: no notable churn, complexity, importers or fixes
+- Break cost: security 80
+- Keep auto-merge off: Harden now files never auto-merge
+
+**`net/new|file.rs`** (Protect)
+- New file: not scored yet, so it takes the tier of its directory
+
+**Suggested reviewers:** @ana, @bo
+
+**Worth doing (does not block)**
+- Refactor the function you touch: cyclomatic 40 across 12 functions (`ui/busy.go`): complexity in the top 5% of this repo
+
+**Backlog** (the file over time, not this PR)
+- Split it into smaller files (`net/proxy.rs`): 479 functions in one file (top 1%)
+  `gh issue create --title 'Split net/proxy.rs' --body 'x'`
+
+Gate: block at --fail-on critical (2 before-merge items open).
+
+</details>

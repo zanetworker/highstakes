@@ -7,8 +7,11 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/zanetworker/highstakes/internal/types"
 )
@@ -16,6 +19,7 @@ import (
 // Analyzer analyzes a codebase to extract dependency and complexity metrics
 type Analyzer struct {
 	repoPath    string
+	modulePath  string // Go module path from go.mod, empty if none
 	files       map[string]*FileInfo
 	excludeDirs map[string]bool
 	excludeGlob []string
@@ -28,11 +32,18 @@ type FileInfo struct {
 	Lines           int
 	Bytes           int
 	ImportedBy      []string
-	Imports         []string
+	Imports         []string // import specifiers as written (Go/Python) or resolved paths
+	DependsOn       []string // repo files this file imports, resolved; inverse of ImportedBy
 	ExportedSymbols int
 	Cyclomatic      int
 	Cognitive       int
 	FunctionCount   int
+	HasTestFile     *bool // nil when the language has no test-file convention
+
+	// parsed holds the tree-sitter result until imports are resolved.
+	parsed *parseResult
+	// importsResolved marks Imports as exact repo paths (tree-sitter languages).
+	importsResolved bool
 }
 
 // New creates a new analyzer for the given repository path
@@ -51,18 +62,36 @@ func New(repoPath string, excludeDirs []string, excludePatterns []string) *Analy
 
 // Analyze scans the repository and builds dependency graph
 func (a *Analyzer) Analyze() error {
+	a.modulePath = readModulePath(a.repoPath)
+
 	// First pass: discover all files
 	if err := a.discoverFiles(); err != nil {
 		return fmt.Errorf("discover files: %w", err)
 	}
 
-	// Second pass: analyze each file
-	for path := range a.files {
-		if err := a.analyzeFile(path); err != nil {
-			// Log error but continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to analyze %s: %v\n", path, err)
-		}
+	// Second pass: analyze each file (parse once per file, in parallel)
+	paths := make(chan string)
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range paths {
+				if err := a.analyzeFile(path); err != nil {
+					// Log error but continue
+					fmt.Fprintf(os.Stderr, "Warning: failed to analyze %s: %v\n", path, err)
+				}
+			}
+		}()
 	}
+	for path := range a.files {
+		paths <- path
+	}
+	close(paths)
+	wg.Wait()
+
+	// Map tree-sitter import specs to repo files now that every file is known
+	a.resolveImports()
 
 	// Third pass: build reverse dependencies (imported_by)
 	a.buildReverseDependencies()
@@ -109,81 +138,132 @@ func (a *Analyzer) CalculateDependencyCentrality(path string) types.DependencyCe
 	}
 }
 
-// discoverFiles walks the repo and discovers all source files
+// discoverFiles finds the source files to analyze. In a git repo it takes
+// the files git knows about (tracked, plus untracked ones not ignored), so
+// .gitignored files such as local credentials are never read; elsewhere it
+// walks the directory tree.
 func (a *Analyzer) discoverFiles() error {
+	if paths, ok := gitListFiles(a.repoPath); ok {
+		for _, rel := range paths {
+			if a.excludedPath(rel) {
+				continue
+			}
+			stat, err := os.Stat(filepath.Join(a.repoPath, rel))
+			if err != nil || !stat.Mode().IsRegular() {
+				continue // deleted from the worktree, or a submodule
+			}
+			a.addFile(rel, stat.Size())
+		}
+		return nil
+	}
 	return filepath.WalkDir(a.repoPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip hidden directories and common excludes
 		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") {
+			if path != a.repoPath && a.excludedDir(d.Name()) {
 				return filepath.SkipDir
-			}
-			if a.excludeDirs[name] {
-				return filepath.SkipDir
-			}
-			for _, pat := range a.excludeGlob {
-				if matched, _ := filepath.Match(pat, name); matched {
-					return filepath.SkipDir
-				}
 			}
 			return nil
 		}
 
-		// Only analyze source files
-		lang := detectLanguage(path)
-		if lang == "" {
-			return nil
-		}
-
-		// Get relative path
 		relPath, err := filepath.Rel(a.repoPath, path)
 		if err != nil {
 			return err
 		}
-
-		// Get file size
 		stat, err := os.Stat(path)
 		if err != nil {
 			return err
 		}
-
-		// Count lines
-		lines, err := countLines(path)
-		if err != nil {
-			lines = 0 // Best effort
-		}
-
-		a.files[relPath] = &FileInfo{
-			Path:     relPath,
-			Language: lang,
-			Lines:    lines,
-			Bytes:    int(stat.Size()),
-			Imports:  []string{},
-			ImportedBy: []string{},
-		}
-
+		a.addFile(relPath, stat.Size())
 		return nil
 	})
+}
+
+// gitListFiles returns the repo-relative paths git tracks or would track
+// (untracked but not ignored). ok is false when repoPath is not in a git
+// work tree or git is unavailable.
+func gitListFiles(repoPath string) (paths []string, ok bool) {
+	out, err := exec.Command("git", "-C", repoPath, "ls-files", "--cached", "--others", "--exclude-standard", "-z").Output()
+	if err != nil {
+		return nil, false
+	}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, filepath.FromSlash(p))
+		}
+	}
+	return paths, true
+}
+
+// excludedDir reports whether a directory name is skipped: hidden ones
+// (except .github), configured exclude dirs and exclude patterns.
+func (a *Analyzer) excludedDir(name string) bool {
+	if strings.HasPrefix(name, ".") && name != ".github" {
+		return true
+	}
+	if a.excludeDirs[name] {
+		return true
+	}
+	for _, pat := range a.excludeGlob {
+		if matched, _ := filepath.Match(pat, name); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// excludedPath reports whether any directory of a repo-relative file path
+// is excluded.
+func (a *Analyzer) excludedPath(rel string) bool {
+	dir := filepath.Dir(rel)
+	if dir == "." {
+		return false
+	}
+	for _, name := range strings.Split(dir, string(filepath.Separator)) {
+		if a.excludedDir(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// addFile records a source file; files in no known language are ignored.
+func (a *Analyzer) addFile(relPath string, size int64) {
+	lang := detectLanguage(relPath)
+	if lang == "" {
+		return
+	}
+	lines, err := countLines(filepath.Join(a.repoPath, relPath))
+	if err != nil {
+		lines = 0 // Best effort
+	}
+	a.files[relPath] = &FileInfo{
+		Path:       relPath,
+		Language:   lang,
+		Lines:      lines,
+		Bytes:      int(size),
+		Imports:    []string{},
+		ImportedBy: []string{},
+	}
 }
 
 // analyzeFile performs deep analysis on a single file
 func (a *Analyzer) analyzeFile(relPath string) error {
 	info := a.files[relPath]
 	absPath := filepath.Join(a.repoPath, relPath)
+	if found, known := HasTestFile(a.repoPath, relPath); known {
+		info.HasTestFile = &found
+	}
 
 	switch info.Language {
 	case "Go":
 		return a.analyzeGoFile(absPath, info)
-	case "TypeScript", "JavaScript":
-		return a.analyzeJSFile(absPath, info)
 	case "Python":
 		return a.analyzePythonFile(absPath, info)
-	case "Rust", "C", "C++", "Java", "Ruby", "C#":
-		return a.analyzeGenericFile(absPath, info)
+	case "TypeScript", "JavaScript", "Rust", "C", "C++", "Java", "Ruby", "C#", "Kotlin":
+		return a.analyzeTreeSitterFile(absPath, info)
 	default:
 		return nil
 	}
@@ -200,8 +280,8 @@ func (a *Analyzer) analyzeGoFile(absPath string, info *FileInfo) error {
 	// Extract imports
 	for _, imp := range node.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
-		// Only track local imports (relative paths or same module)
-		if strings.HasPrefix(importPath, ".") || !strings.Contains(importPath, "/") {
+		// Only track imports of packages in the same module
+		if _, ok := a.goImportDir(importPath); ok {
 			info.Imports = append(info.Imports, importPath)
 		}
 	}
@@ -243,6 +323,28 @@ func (a *Analyzer) analyzeGoFile(absPath string, info *FileInfo) error {
 		return true
 	})
 
+	return nil
+}
+
+// analyzeTreeSitterFile parses a file once with tree-sitter. Files the parser cannot
+// handle (oversized, parser failure) fall back to the line heuristics.
+func (a *Analyzer) analyzeTreeSitterFile(absPath string, info *FileInfo) error {
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return err
+	}
+	res, err := parseSource(info.Language, info.Path, content)
+	if err != nil {
+		if info.Language == "TypeScript" || info.Language == "JavaScript" {
+			return a.analyzeJSFile(absPath, info)
+		}
+		return a.analyzeGenericFile(absPath, info)
+	}
+	info.Cyclomatic = res.Cyclomatic
+	info.Cognitive = res.Cognitive
+	info.FunctionCount = res.Functions
+	info.ExportedSymbols = res.Exported
+	info.parsed = res
 	return nil
 }
 
@@ -419,33 +521,93 @@ func (a *Analyzer) analyzeGenericFile(absPath string, info *FileInfo) error {
 	return nil
 }
 
+// readModulePath returns the module path declared in repoPath/go.mod, or "".
+func readModulePath(repoPath string) string {
+	content, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "module" {
+			return strings.Trim(fields[1], `"`)
+		}
+	}
+	return ""
+}
+
+// goImportDir maps a same-module Go import path to its repo-relative directory.
+func (a *Analyzer) goImportDir(importPath string) (string, bool) {
+	if a.modulePath == "" {
+		return "", false
+	}
+	if importPath == a.modulePath {
+		return ".", true
+	}
+	if rest, ok := strings.CutPrefix(importPath, a.modulePath+"/"); ok {
+		return filepath.FromSlash(rest), true
+	}
+	return "", false
+}
+
+// resolveImport returns the repo files an import refers to.
+func (a *Analyzer) resolveImport(importer *FileInfo, imp string) []string {
+	if importer.importsResolved {
+		if _, ok := a.files[imp]; ok {
+			return []string{imp}
+		}
+		return nil
+	}
+	if importer.Language == "Go" {
+		dir, ok := a.goImportDir(imp)
+		if !ok {
+			return nil
+		}
+		// A Go import names a package: every non-test file in that directory.
+		var targets []string
+		for p, f := range a.files {
+			if f.Language == "Go" && filepath.Dir(p) == dir && !strings.HasSuffix(p, "_test.go") {
+				targets = append(targets, p)
+			}
+		}
+		return targets
+	}
+
+	candidates := []string{
+		imp + ".py",
+		imp + ".ts",
+		imp + ".js",
+		filepath.Join(imp, "__init__.py"),
+	}
+	for _, candidate := range candidates {
+		if _, ok := a.files[candidate]; ok {
+			return []string{candidate}
+		}
+	}
+	// Fallback: match on a whole path-segment suffix (e.g. src/foo/bar.py for foo/bar)
+	for _, candidate := range candidates {
+		for p := range a.files {
+			if strings.HasSuffix(p, "/"+candidate) {
+				return []string{p}
+			}
+		}
+	}
+	return nil
+}
+
 // buildReverseDependencies builds the imported_by graph
 func (a *Analyzer) buildReverseDependencies() {
+	seen := make(map[[2]string]bool)
 	for path, info := range a.files {
 		for _, imp := range info.Imports {
-			// Try multiple resolution strategies
-			candidates := []string{
-				imp + ".py",
-				imp + ".go",
-				imp + ".ts",
-				imp + ".js",
-				imp + "/__init__.py",
-				filepath.Join(imp, "__init__.py"),
-			}
-
-			for _, candidate := range candidates {
-				if _, ok := a.files[candidate]; ok {
-					a.files[candidate].ImportedBy = append(a.files[candidate].ImportedBy, path)
-					break
+			for _, target := range a.resolveImport(info, imp) {
+				key := [2]string{target, path}
+				if target == path || seen[key] {
+					continue
 				}
-			}
-
-			// Fallback: substring match for partial imports
-			for otherPath := range a.files {
-				if otherPath != path && strings.Contains(otherPath, imp) {
-					a.files[otherPath].ImportedBy = append(a.files[otherPath].ImportedBy, path)
-					break
-				}
+				seen[key] = true
+				a.files[target].ImportedBy = append(a.files[target].ImportedBy, path)
+				info.DependsOn = append(info.DependsOn, target)
 			}
 		}
 	}
@@ -453,13 +615,16 @@ func (a *Analyzer) buildReverseDependencies() {
 
 // detectLanguage returns the programming language based on file extension
 func detectLanguage(path string) string {
+	if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+		return "Dockerfile"
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".go":
 		return "Go"
-	case ".ts", ".tsx":
+	case ".ts", ".tsx", ".mts", ".cts":
 		return "TypeScript"
-	case ".js", ".jsx":
+	case ".js", ".jsx", ".mjs", ".cjs":
 		return "JavaScript"
 	case ".py":
 		return "Python"
@@ -469,12 +634,22 @@ func detectLanguage(path string) string {
 		return "Ruby"
 	case ".rs":
 		return "Rust"
-	case ".cpp", ".cc", ".cxx":
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx":
 		return "C++"
-	case ".c":
+	case ".c", ".h":
 		return "C"
+	case ".kt", ".kts":
+		return "Kotlin"
 	case ".cs":
 		return "C#"
+	case ".yaml", ".yml":
+		return "YAML"
+	case ".toml":
+		return "TOML"
+	case ".json":
+		return "JSON"
+	case ".tf":
+		return "Terraform"
 	default:
 		return ""
 	}
@@ -521,23 +696,51 @@ func calculateCyclomatic(fn *ast.FuncDecl) int {
 	return complexity
 }
 
-// calculateCognitive computes cognitive complexity for a Go function
-// Simplified version - production would need full cognitive complexity rules
+// calculateCognitive computes cognitive complexity for a Go function with the
+// same rules as the tree-sitter walker: branches, loops and switches cost
+// 1 + nesting and nest their bodies, else-if costs 1 flat, closures nest
+// without an increment, and nesting drops again when a block ends.
 func calculateCognitive(fn *ast.FuncDecl) int {
-	cognitive := 0
-	nestingLevel := 0
+	if fn.Body == nil {
+		return 0
+	}
+	return cognitiveIn(fn.Body, 0)
+}
 
-	ast.Inspect(fn, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt:
-			cognitive += 1 + nestingLevel
-			nestingLevel++
+func cognitiveIn(root ast.Node, nesting int) int {
+	total := 0
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil || n == root {
+			return true
+		}
+		switch n := n.(type) {
+		case *ast.IfStmt:
+			total += 1 + nesting + cognitiveIf(n, nesting)
+			return false
+		case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			total += 1 + nesting + cognitiveIn(n, nesting+1)
+			return false
 		case *ast.FuncLit:
-			// Nested functions add cognitive load
-			cognitive += 1 + nestingLevel
+			total += cognitiveIn(n.Body, nesting+1)
+			return false
 		}
 		return true
 	})
+	return total
+}
 
-	return cognitive
+// cognitiveIf scores an if statement's parts; an else-if chain costs 1 per link.
+func cognitiveIf(n *ast.IfStmt, nesting int) int {
+	total := 0
+	if n.Init != nil {
+		total += cognitiveIn(n.Init, nesting+1)
+	}
+	total += cognitiveIn(n.Cond, nesting+1) + cognitiveIn(n.Body, nesting+1)
+	switch e := n.Else.(type) {
+	case *ast.IfStmt:
+		total += 1 + cognitiveIf(e, nesting)
+	case *ast.BlockStmt:
+		total += cognitiveIn(e, nesting+1)
+	}
+	return total
 }

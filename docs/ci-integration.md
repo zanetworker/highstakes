@@ -4,92 +4,60 @@ Code Heatmap can run in any CI system to automatically assess PR risk and gate m
 
 ## GitHub Actions
 
-### Quick Setup
+### Setup
 
-```sh
-highstakes github install
-```
+Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/highstakes/blob/main/.github/workflows/heatmap-triage.yml) into your repo. Each run:
 
-This creates `.github/workflows/heatmap-triage.yml`. Commit and push to activate.
+1. Runs `highstakes init` only when `.heatmap/config.yaml` is missing (a committed config is kept), then `highstakes analyze` (cached by file content).
+2. Collects the reviewers whose latest review is an approval, with `gh api repos/<repo>/pulls/<n>/reviews`.
+3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --repo <owner/name> --auto-merge-enabled <true|false> [--signed-off]`, which renders the comment in Go and exits 5 when the PR changes a Harden now file and **Do before merge** items are still open.
+4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
+5. Fails the `triage` job when `pr check` exited 5.
 
-### Manual Setup
-
-Create `.github/workflows/heatmap-triage.yml`:
+The workflow also runs on `pull_request_review`, so an owner's approval of the current head commit ticks the checklist on the next run (an approval of an earlier commit does not), on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`. The auto-merge state is read live from the API (`gh api repos/$REPO/pulls/$PR`), not from the event payload, since it may have changed since the run was queued. `SIGNED_OFF` must come from the workflow's **Verify sign-off** step (copy it from `highstakes github install`): passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core step:
 
 ```yaml
-name: Code Heatmap Triage
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  contents: read
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-
-      - name: Install highstakes
-        run: go install github.com/zanetworker/highstakes/cmd/highstakes@latest
-
-      - name: Analyze
+      - name: Assess PR risk
+        id: risk
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: highstakes init && highstakes analyze
-
-      - name: Check PR risk
-        run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-
-      - name: Post comment
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
-            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let body = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
-            body += '| File | Score | Tier | Lines |\n|------|-------|------|-------|\n';
-            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
-              body += '| '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' '+f.tier+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
-            body += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
-            if (risk.review_requirements.requires_senior) body += ' (senior)';
-            body += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number});
-            const existing = comments.data.find(c => c.body.includes('Code Heatmap:'));
-            if (existing) await github.rest.issues.updateComment({
-              owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body});
-            else await github.rest.issues.createComment({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body});
+          BASE: origin/${{ github.event.pull_request.base.ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
+          REPO: ${{ github.repository }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # from the Verify sign-off step: never the label alone
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          # Live auto-merge state, not the event snapshot.
+          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
+          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
+          signed=
+          if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
+
+### Sign-off label
+
+Review items ask for an owner's approval, but GitHub does not let authors approve their own PRs, so a sole maintainer could never tick them. A maintainer with write access reviews the change and adds the label `highstakes:signed-off` to the PR; the run that the labeling triggers ticks the sign-off and owner-review items ("signed off with the highstakes:signed-off label"). Create the label once in **Issues > Labels**. The label is a sign-off for one commit, not a standing pass:
+
+- **Who:** only the run triggered by adding the label can sign, and only when the person who added it has write, maintain or admin access (triage collaborators can add labels too, so it checks).
+- **Which commit:** that run records a `highstakes/signed-off/pr-<number>` success status on the PR's head at the moment of labeling (scoped to the PR, so another PR on the same commit cannot borrow it). The status names the label event it was minted for (who added the label, and when), and every run trusts the label only when the current head carries that status from the workflow's own bot (`github-actions[bot]`) for the latest addition, and the person behind it still has write access. A sign-off from an earlier addition never stands in for a newer one. After a push the new head has no such status, so it is unsigned whatever order the runs finish in; commenters cannot forge the status.
+- **Withdrawal:** GitHub's label history decides whether the label still stands (the latest add or remove wins). Removing it reopens the items, and the workflow records a newer failing status; only the latest status for the head counts.
+- **New pushes:** a push also removes the label, so new commits need a fresh review and the label added again. The sign-off check runs before the analysis, so a failed analysis cannot leave a stale label in place.
+- **Auto-merge:** the run reads the PR's auto-merge state live from the API, not from the event that queued it, and reads it again before the gate passes; if it changed during the run, the gate fails and the run triggered by the change decides. The same goes for the sign-off label: before posting the comment the run checks the head, the auto-merge state and the latest label change again, and before passing it checks the auto-merge state, the latest label change and the approvals again; a run that saw an older state leaves the comment or the decision to the newer run (a run for an older head only affects that commit's check). GitHub can still merge between the last run and the merge itself, and a workflow cannot block that, so to really forbid auto-merge on these PRs, turn off **Allow auto-merge** in the repository settings or require a review in branch protection.
+
+This needs `issues: write` and `statuses: write` in the workflow permissions.
+
+The comment is built to act on at a glance. It leads with the verdict (`⛔ Harden before merge`, `🛡 Protect before merge`, `🔧 Stabilize` or `✅ Routine`), the changed files per posture (`🛡 1 protect · 🔧 26 stabilize · ✅ 135 routine`) and one `🤖 AI may auto-merge: ✅ yes|❌ no (<reason>)` line from the [agent autonomy](cli-reference.md#agent-autonomy) levels. Then come **Do before merge (N of M done)**, a checklist of the Harden now and Protect files' items with an emoji per kind (👀 review, 🧪 tests, ✂️ split, 🚫 auto-merge off, 📝 docs, 👥 ownership; `[x]` for items the PR already satisfies: a test next to the risky file changed, a suggested owner approved, the sign-off label is on, auto-merge is off) with the gate's state under the heading (`⛔ Merge blocked: 2 before-merge items open` or `✅ All before-merge items done: ready to merge`), a short file table in plain words (posture emoji, File, If it breaks, Breaks often? as 🔴 with the strongest signal or 🟢 rarely, and Next step), a fold that groups further files by next step, **⚡ One-click actions** (a smaller-PR ask once for the whole PR; prefilled GitHub issues for split, complexity, test and invariant work, each a full brief with why it matters, why now, a suggested approach, a done-when checklist and context, previewed in a folded **What's in this issue** under the link; a CODEOWNERS edit link; and the circuit breakers as things to do), a folded Mermaid quadrant chart of where the PR lands (numbered points with a legend), and a folded **Why these actions?** block with the reasons, repo cutoffs, suggested reviewers, **Worth doing (does not block)** items and the backlog. `--repo "$REPO"` makes the issue and CODEOWNERS actions links; without a repo they stay plain text. The issues link back to the PR, whose number `pr check` reads from `$GITHUB_REF` in Actions (pass `--pr N` elsewhere). See the [CLI reference](cli-reference.md#verdict-and-checklist).
 
 ### Secrets
 
 Add `OPENROUTER_API_KEY` in **Settings > Secrets and variables > Actions > New repository secret**.
 
-### Block Merge on High-Risk PRs
+### Block Merge on Harden Now Files
 
-Add a gate step after the PR check:
-
-```yaml
-      - name: Gate on risk tier
-        run: |
-          TIER=$(jq -r .tier pr-risk.json)
-          if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-            echo "::error::PR touches $TIER-tier files. Requires senior review."
-            exit 1
-          fi
-```
-
-Then in **Settings > Branches > Branch protection rules**, add `triage` as a required status check. PRs touching critical or high files cannot merge until a senior reviewer approves.
+The shipped workflow already gates with `--fail-on critical`: exit 5 while a PR that changes Harden now files has open **Do before merge** items. Working through the checklist (tests next to the file, sign-off by approval or label, auto-merge off) unblocks it. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to gate Protect files too, `--strict` to block on the tier alone whatever is done, or `--shadow` to log decisions without failing while you calibrate.
 
 ## GitLab CI
 
@@ -100,14 +68,10 @@ heatmap:
   image: golang:1.25
   script:
     - go install github.com/zanetworker/highstakes/cmd/highstakes@latest
-    - highstakes init && highstakes analyze
-    - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --json > risk.json
-    - |
-      TIER=$(jq -r .tier risk.json)
-      if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-        echo "PR touches $TIER-tier files. Requires senior review."
-        exit 1
-      fi
+    - '[ -f .heatmap/config.yaml ] || highstakes init'
+    - highstakes analyze
+    # Markdown for a merge request note; exit 5 fails the job while a Harden now file has open before-merge items.
+    - highstakes pr check --base origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --format markdown --fail-on critical > risk.md
   variables:
     OPENROUTER_API_KEY: $OPENROUTER_API_KEY
   rules:
@@ -124,22 +88,15 @@ go install github.com/zanetworker/highstakes/cmd/highstakes@latest
 
 # Analyze (cached, only re-assesses changed files)
 export OPENROUTER_API_KEY="$YOUR_KEY"
-highstakes init && highstakes analyze
+[ -f .heatmap/config.yaml ] || highstakes init
+highstakes analyze
 
-# Check PR risk
+# The PR comment body; exit 5 while a Harden now file has open before-merge items
+highstakes pr check --base origin/main --format markdown --fail-on critical > comment.md
+
+# Or read the JSON: verdict, checklist (each with done) and backlog
 highstakes pr check --base origin/main --json > risk.json
-
-# Read results
-TIER=$(jq -r .tier risk.json)
-SCORE=$(jq -r .heat_score risk.json)
-FILES=$(jq -r '.files_changed | length' risk.json)
-echo "PR risk: $TIER (score $SCORE), $FILES files changed"
-
-# Gate
-if [ "$TIER" = "critical" ] || [ "$TIER" = "high" ]; then
-  echo "Requires human review"
-  exit 1
-fi
+jq -r '.verdict, (.checklist[] | "\(if .done then "[x]" else "[ ]" end) \(.text)")' risk.json
 ```
 
 ## Caching in CI

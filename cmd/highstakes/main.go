@@ -1,7 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/highstakes/internal/dashboard"
 	"github.com/zanetworker/highstakes/internal/incidents"
+	"github.com/zanetworker/highstakes/internal/policy"
+	"github.com/zanetworker/highstakes/internal/prcomment"
+	"github.com/zanetworker/highstakes/internal/prdata"
 	"github.com/zanetworker/highstakes/internal/prscore"
 	"github.com/zanetworker/highstakes/internal/scorer"
 	"github.com/zanetworker/highstakes/internal/tui"
@@ -26,7 +31,8 @@ var version = "1.0.0"
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -100,6 +106,9 @@ var analyzeCmd = &cobra.Command{
 		model, _ := cmd.Flags().GetString("model")
 		concurrency, _ := cmd.Flags().GetInt("concurrency")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		if _, err := loadConfigOrDefault(); err != nil {
+			return err // invalid config exits 2, as in every other command
+		}
 
 		gen, err := heatmap.New(cwd, heatmap.GenerateOptions{
 			NoLLM:         noLLM,
@@ -145,7 +154,7 @@ var analyzeCmd = &cobra.Command{
 
 var scoreCmd = &cobra.Command{
 	Use:   "get <file>",
-	Short: "Get heat score and reasoning for a file",
+	Short: "Get a file's verdict, both questions with repo cutoffs, and what to do",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
@@ -174,17 +183,30 @@ var scoreCmd = &cobra.Command{
 		}
 
 		if jsonOut {
-			return printJSON(file)
+			// The file's JSON with the repo cutoffs its scores read against.
+			return printJSON(struct {
+				*types.FileHeat
+				LikelyCutoff    int `json:"likely_cutoff"`
+				ImpactThreshold int `json:"impact_threshold"`
+			}{file, hm.Metadata.LikelyCutoff, hm.Metadata.ImpactThreshold})
 		}
 
-		printFileScore(file)
+		printFileScore(file, hm.Metadata)
 		return nil
 	},
 }
 
-func printFileScore(file *types.FileHeat) {
+func printFileScore(file *types.FileHeat, md types.Metadata) {
+	if block := explanationBlock(file, md.LikelyCutoff, md.ImpactThreshold); block != "" {
+		fmt.Print(block)
+		return
+	}
+
+	// Heatmaps written before explanations existed.
 	fmt.Printf("%s  %s %s  (score: %d)\n\n",
 		file.Path, tierEmoji(file.Tier), strings.ToUpper(string(file.Tier)), file.HeatScore)
+
+	fmt.Println(axesLines(file))
 
 	// Blast radius reasoning (the key insight)
 	br := file.Factors.BlastRadius
@@ -216,9 +238,13 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Printf("  Complexity:             %d (cyclomatic: %d)\n",
 		file.Factors.Complexity.Score,
 		file.Factors.Complexity.Cyclomatic)
+	fmt.Println()
+	printReview(file.ReviewRequirements)
+}
 
-	req := file.ReviewRequirements
-	fmt.Printf("\nReview: %d reviewers", req.MinReviewers)
+// printReview prints the tier's review requirements on one line.
+func printReview(req types.ReviewRequirements) {
+	fmt.Printf("Review: %d reviewers", req.MinReviewers)
 	if req.RequiresSenior {
 		fmt.Print(" (senior)")
 	}
@@ -234,15 +260,29 @@ func printFileScore(file *types.FileHeat) {
 	fmt.Println()
 }
 
+// axesLines states a file's two axes as questions, one line each.
+func axesLines(f *types.FileHeat) string {
+	impact := fmt.Sprintf("%-22s %d  (LLM blast radius)", types.AxisImpact, f.Impact)
+	if !f.ImpactAssessed {
+		impact = fmt.Sprintf("%-22s ~%d (estimate from centrality and path keywords; analyze with an LLM to assess)", types.AxisImpact, f.Impact)
+	}
+	lines := fmt.Sprintf("%-22s %d  (churn, complexity, centrality, incidents)", types.AxisLikelihood, f.Likelihood) + "\n" + impact
+	if l := f.Quadrant.Label(); l != "" {
+		lines += "\n" + l
+	}
+	return lines + "\n"
+}
+
 // --- list ---
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List files by heat score",
+	Short: "List files by heat, likelihood or impact",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		tier, _ := cmd.Flags().GetString("tier")
 		limit, _ := cmd.Flags().GetInt("limit")
+		sortBy, _ := cmd.Flags().GetString("sort")
 
 		hm, err := loadHeatmap()
 		if err != nil {
@@ -255,14 +295,7 @@ var listCmd = &cobra.Command{
 			return cliError(2, "--tier must be one of: critical, high, medium, low (got: %q)", tier)
 		}
 
-		type entry struct {
-			Path    string `json:"path"`
-			Score   int    `json:"heat_score"`
-			Tier    string `json:"tier"`
-			Reason  string `json:"reason,omitempty"`
-		}
-
-		var files []entry
+		var files []listEntry
 		for path, f := range hm.Files {
 			if tier != "" && string(f.Tier) != tier {
 				continue
@@ -271,10 +304,13 @@ var listCmd = &cobra.Command{
 			if f.Factors.BlastRadius.Assessed && f.Factors.BlastRadius.Summary != "" {
 				reason = f.Factors.BlastRadius.Summary
 			}
-			files = append(files, entry{path, f.HeatScore, string(f.Tier), reason})
+			files = append(files, listEntry{path, f.HeatScore, string(f.Tier), reason,
+				f.Likelihood, f.Impact, f.ImpactAssessed, f.Quadrant})
 		}
 
-		sort.Slice(files, func(i, j int) bool { return files[i].Score > files[j].Score })
+		if err := sortListEntries(files, sortBy); err != nil {
+			return cliError(2, "--sort: %v", err)
+		}
 
 		if limit > 0 && len(files) > limit {
 			files = files[:limit]
@@ -290,7 +326,11 @@ var listCmd = &cobra.Command{
 
 		for _, f := range files {
 			emoji := tierEmoji(types.Tier(f.Tier))
-			line := fmt.Sprintf("%s %3d  %-50s", emoji, f.Score, f.Path)
+			estimate := " "
+			if !f.ImpactAssessed {
+				estimate = "~"
+			}
+			line := fmt.Sprintf("%s %3d  L %3d  I%s%3d  %-50s", emoji, f.Score, f.Likelihood, estimate, f.Impact, f.Path)
 			if f.Reason != "" {
 				line += "  " + f.Reason
 			}
@@ -299,6 +339,48 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// listEntry is one row of `list`. Fields after Reason were added with the
+// two axes; the earlier ones keep their JSON names.
+type listEntry struct {
+	Path           string         `json:"path"`
+	Score          int            `json:"heat_score"`
+	Tier           string         `json:"tier"`
+	Reason         string         `json:"reason,omitempty"`
+	Likelihood     int            `json:"likelihood"`
+	Impact         int            `json:"impact"`
+	ImpactAssessed bool           `json:"impact_assessed"`
+	Quadrant       types.Quadrant `json:"quadrant,omitempty"`
+}
+
+// sortListEntries orders entries by heat, likelihood or impact (descending,
+// ties by path).
+func sortListEntries(files []listEntry, by string) error {
+	key := map[string]func(listEntry) int{
+		"heat":       func(e listEntry) int { return e.Score },
+		"likelihood": func(e listEntry) int { return e.Likelihood },
+		"impact":     func(e listEntry) int { return e.Impact },
+	}[by]
+	if key == nil {
+		return fmt.Errorf("invalid value %q. Valid values: heat, likelihood, impact", by)
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if a, b := key(files[i]), key(files[j]); a != b {
+			return a > b
+		}
+		return files[i].Path < files[j].Path
+	})
+	return nil
+}
+
+// configuredTiers returns the tier thresholds from .heatmap/config.yaml, or the
+// defaults when the file is missing, unreadable or sets no tiers.
+func configuredTiers() types.TierThresholds {
+	if cfg, err := heatmap.LoadConfig(filepath.Join(".heatmap", "config.yaml")); err == nil && cfg.Tiers.Critical > 0 {
+		return cfg.Tiers
+	}
+	return scorer.DefaultTierThresholds()
 }
 
 // --- pr ---
@@ -314,17 +396,51 @@ var prCheckCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		base, _ := cmd.Flags().GetString("base")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		format, _ := cmd.Flags().GetString("format")
+		shadow, _ := cmd.Flags().GetBool("shadow")
+		failOn, _ := cmd.Flags().GetString("fail-on")
+		strict, _ := cmd.Flags().GetBool("strict")
+		signedOff, _ := cmd.Flags().GetBool("signed-off")
+		autoMergeFlag, _ := cmd.Flags().GetString("auto-merge-enabled")
+		authorFlag, _ := cmd.Flags().GetString("author")
+		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
+		approvals, _ := cmd.Flags().GetStringSlice("approvals")
+		repoFlag, _ := cmd.Flags().GetString("repo")
+		prFlag, _ := cmd.Flags().GetInt("pr")
+
+		if jsonOut {
+			format = "json"
+		}
+		if format != "text" && format != "markdown" && format != "json" {
+			return cliError(2, "--format must be one of: text, markdown, json (got: %q)", format)
+		}
+
+		autoMerge, err := parseAutoMerge(autoMergeFlag)
+		if err != nil {
+			return cliError(2, "%v", err)
+		}
+		repo, err := commentRepo(repoFlag, os.Getenv("GITHUB_REPOSITORY"), func() (prdata.Repo, error) { return prdata.OriginRepo(".") })
+		if err != nil {
+			return cliError(2, "%v", err)
+		}
+		pr, err := prNumber(prFlag, os.Getenv("GITHUB_REF"))
+		if err != nil {
+			return cliError(2, "%v", err)
+		}
 
 		hm, err := loadHeatmap()
 		if err != nil {
 			return err
 		}
 
-		out, err := exec.Command("git", "diff", "--numstat", base+"...HEAD").Output()
+		// --no-renames: a rename is its old path deleted plus its new path added,
+		// so every path is a real one (no "a => b" forms).
+		out, err := exec.Command("git", "diff", "--no-renames", "--numstat", base+"...HEAD").Output()
 		if err != nil {
 			return cliError(3, "git diff failed against base %q: %v. Valid bases: main, origin/main, HEAD~N", base, err)
 		}
 
+		added, removed := diffPaths(base, "A"), diffPaths(base, "D")
 		var changes []prscore.FileChange
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if line == "" {
@@ -334,64 +450,60 @@ var prCheckCmd = &cobra.Command{
 			if len(parts) < 3 {
 				continue
 			}
-			added, _ := strconv.Atoi(parts[0])
+			linesAdded, _ := strconv.Atoi(parts[0])
 			deleted, _ := strconv.Atoi(parts[1])
 			changes = append(changes, prscore.FileChange{
-				Path: parts[2], LinesAdded: added, LinesDeleted: deleted,
+				Path: parts[2], LinesAdded: linesAdded, LinesDeleted: deleted, IsNew: added[parts[2]], Deleted: removed[parts[2]],
 			})
 		}
 
-		if len(changes) == 0 {
-			if jsonOut {
-				return printJSON(map[string]interface{}{"changes": 0, "tier": "low"})
+		// An empty diff scores LOW and still goes through the gate and shadow log.
+		risk := prscore.CalculatePRRisk(pr, changes, hm, configuredTiers())
+		applyAutonomy(&risk, hm)
+		addReviewers(&risk, prAuthor(authorFlag), maxReviewers)
+		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
+		change := buildChange(changes, hm, approvals, codeowners.Covers)
+		change.SignedOff, change.AutoMerge = signedOff, autoMerge
+		attachPRActions(&risk, hm, change)
+		gateErr := applyGate(&risk, failOn, shadow, strict)
+		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
+			return gateErr
+		}
+		if shadow {
+			if err := appendShadowLog(shadowLogPath, base, &risk); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 			}
+			fmt.Fprintf(os.Stderr, "shadow: tier=%s change_risk=%s decision=%s (not enforced, logged to %s)\n",
+				risk.Tier, risk.ChangeRiskLevel, risk.Decision, shadowLogPath)
+		}
+
+		switch {
+		case format == "markdown":
+			fmt.Print(prcomment.Render(&risk, hm, prcomment.Links{Repo: repo, Base: linkBase(base), Codeowners: codeownersPath(), SHA: headSHA()}))
+			return gateErr
+		case format == "json" && len(changes) == 0:
+			empty := map[string]interface{}{"changes": 0, "tier": risk.Tier, "verdict": risk.Verdict}
+			if risk.Decision != "" {
+				empty["decision"], empty["fail_on"], empty["shadow"] = risk.Decision, risk.FailOn, risk.Shadow
+				empty["decision_reason"], empty["open_items"] = risk.DecisionReason, risk.OpenItems
+			}
+			if err := printJSON(empty); err != nil {
+				return err
+			}
+			return gateErr
+		case format == "json":
+			if err := printJSON(risk); err != nil {
+				return err
+			}
+			return gateErr
+		case len(changes) == 0:
 			fmt.Println("No changes detected against", base)
-			return nil
+			printDecision(&risk)
+			return gateErr
 		}
 
-		risk := prscore.CalculatePRRisk(0, changes, hm, scorer.DefaultTierThresholds())
-
-		if jsonOut {
-			return printJSON(risk)
-		}
-
-		sort.Slice(risk.FilesChanged, func(i, j int) bool {
-			return risk.FilesChanged[i].HeatScore > risk.FilesChanged[j].HeatScore
-		})
-
-		fmt.Printf("PR Risk: %s %s (score: %d)\n\n", tierEmoji(risk.Tier), strings.ToUpper(string(risk.Tier)), risk.HeatScore)
-
-		for _, fc := range risk.FilesChanged {
-			icon := " "
-			if fc.Tier == "critical" || fc.Tier == "high" {
-				icon = "!"
-			}
-			reason := ""
-			if f, ok := hm.Files[fc.Path]; ok && f.Factors.BlastRadius.Summary != "" {
-				reason = "  " + f.Factors.BlastRadius.Summary
-			}
-			fmt.Printf(" %s %s %3d %-45s +%d/-%d%s\n",
-				icon, tierEmoji(fc.Tier), fc.HeatScore, fc.Path,
-				fc.LinesAdded, fc.LinesDeleted, reason)
-		}
-
-		if len(risk.CircuitBreakerSignals) > 0 {
-			fmt.Println("\nCircuit Breakers:")
-			for _, s := range risk.CircuitBreakerSignals {
-				fmt.Printf("  - %s\n", s)
-			}
-		}
-
-		req := risk.ReviewRequirements
-		fmt.Printf("\nReview: %d reviewers", req.MinReviewers)
-		if req.RequiresSenior {
-			fmt.Print(" (senior)")
-		}
-		if req.RequiresSecurityScan {
-			fmt.Print(", security scan")
-		}
-		fmt.Printf(", ~%d min\n", req.EstimatedReviewTimeMinutes)
-		return nil
+		printPRText(&risk)
+		return gateErr
 	},
 }
 
@@ -576,8 +688,12 @@ var dashboardCmd = &cobra.Command{
 		if output == "" {
 			output = filepath.Join(".heatmap", "dashboard.html")
 		}
+		decl, err := loadDeclared(hm)
+		if err != nil {
+			return err
+		}
 
-		if err := dashboard.Generate(hm, output); err != nil {
+		if err := dashboard.Generate(hm, decl, output); err != nil {
 			return err
 		}
 
@@ -598,111 +714,239 @@ var agentContextCmd = &cobra.Command{
 	Use:   "agent-context",
 	Short: "Machine-readable description of all commands and flags",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := map[string]interface{}{
-			"schema_version": "1",
-			"cli_version":    version,
-			"commands": map[string]interface{}{
-				"init": map[string]interface{}{
-					"description": "Initialize heatmap in current repository",
-					"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
-				},
-				"analyze": map[string]interface{}{
-					"description": "Analyze repository and generate heatmap with LLM blast radius assessment",
-					"flags": map[string]interface{}{
-						"--json":        flagDef("bool", false, "Output as JSON"),
-						"--no-llm":      flagDef("bool", false, "Skip LLM, use static heuristics only"),
-						"--force":       flagDef("bool", false, "Re-assess all files (ignore cache)"),
-						"--model":       flagDef("string", "deepseek/deepseek-v4-flash", "OpenRouter model ID"),
-						"--concurrency": flagDef("int", 10, "Parallel LLM requests"),
-					},
-				},
-				"get": map[string]interface{}{
-					"description": "Get heat score and blast radius reasoning for a file",
-					"args":        "file_path (required)",
-					"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
-				},
-				"list": map[string]interface{}{
-					"description": "List files sorted by heat score",
-					"flags": map[string]interface{}{
-						"--json":  flagDef("bool", false, "Output as JSON"),
-						"--tier":  flagDef("enum", "", "Filter by tier. Values: critical, high, medium, low"),
-						"--limit": flagDef("int", 0, "Max files to return (0 = all)"),
-					},
-				},
-				"pr": map[string]interface{}{
-					"description": "Assess pull request risk",
-					"subcommands": map[string]interface{}{
-						"check": map[string]interface{}{
-							"description": "Score current diff against a base branch",
-							"flags": map[string]interface{}{
-								"--json": flagDef("bool", false, "Output as JSON"),
-								"--base": flagDef("string", "main", "Base branch"),
-							},
-						},
-					},
-				},
-				"incident": map[string]interface{}{
-					"description": "Manage production incident records",
-					"subcommands": map[string]interface{}{
-						"create": map[string]interface{}{
-							"description": "Record a new incident",
-							"flags": map[string]interface{}{
-								"--json":        flagDef("bool", false, "Output as JSON"),
-								"--file":        flagDef("string", "", "File path (required)"),
-								"--severity":    flagDef("enum", "", "Values: critical, high, medium, low (required)"),
-								"--description": flagDef("string", "", "What happened (required)"),
-								"--date":        flagDef("string", "", "YYYY-MM-DD (default: today)"),
-							},
-						},
-						"list": map[string]interface{}{
-							"description": "List recorded incidents",
-							"flags": map[string]interface{}{
-								"--json": flagDef("bool", false, "Output as JSON"),
-								"--file": flagDef("string", "", "Filter by file path"),
-							},
-						},
-					},
-				},
-				"report": map[string]interface{}{
-					"description": "Generate heat distribution report with reasoning",
-					"flags": map[string]interface{}{
-						"--json":  flagDef("bool", false, "Output full heatmap as JSON"),
-						"--limit": flagDef("int", 10, "Max files per tier"),
-					},
-				},
-				"github": map[string]interface{}{
-					"description": "GitHub integration",
-					"subcommands": map[string]interface{}{
-						"install": map[string]interface{}{
-							"description": "Install GitHub Action for automated PR triage",
-						},
-					},
-				},
-			},
-			"environment": map[string]interface{}{
-				"OPENROUTER_API_KEY": "Required for LLM blast radius analysis. Get from openrouter.ai",
-			},
-			"models": []string{
-				"deepseek/deepseek-v4-flash (default, cheapest)",
-				"deepseek/deepseek-v4-pro (best accuracy/cost)",
-				"z-ai/glm-5.2 (frontier open-weights)",
-				"openai/gpt-5.4-mini (safest JSON)",
-				"google/gemini-3-flash (fastest)",
-				"anthropic/claude-haiku-4.5 (best reasoning)",
-			},
-			"exit_codes": map[string]interface{}{
-				"0": "Success",
-				"1": "Internal error",
-				"2": "Invalid input (bad flags, missing required params)",
-				"3": "External dependency failure (git, API)",
-				"4": "Not found (file not in heatmap)",
-			},
-		}
-		return printJSON(ctx)
+		return printJSON(agentContext())
 	},
 }
 
+// agentContext describes every command and flag for agent callers.
+// TestAgentContext_CoversEveryCommandAndFlag keeps it in step with rootCmd.
+func agentContext() map[string]interface{} {
+	return map[string]interface{}{
+		"schema_version": "1",
+		"cli_version":    version,
+		"commands": map[string]interface{}{
+			"init": map[string]interface{}{
+				"description": "Initialize heatmap in current repository",
+				"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+			},
+			"analyze": map[string]interface{}{
+				"description": "Analyze repository and generate heatmap with LLM blast radius assessment",
+				"flags": map[string]interface{}{
+					"--json":        flagDef("bool", false, "Output as JSON"),
+					"--no-llm":      flagDef("bool", false, "Skip LLM, use static heuristics only"),
+					"--force":       flagDef("bool", false, "Re-assess all files (ignore cache)"),
+					"--model":       flagDef("string", "openai/gpt-6-luna", "OpenRouter model ID"),
+					"--concurrency": flagDef("int", 10, "Parallel LLM requests"),
+				},
+			},
+			"get": map[string]interface{}{
+				"description": "Get a file's verdict (Harden now, Protect, Stabilize, Routine), Will it break? and How bad if it breaks? with repo cutoffs, before-merge and backlog actions (JSON: explanation.actions with scope, signal, command; likely_cutoff, impact_threshold)",
+				"args":        "file_path (required)",
+				"flags":       map[string]interface{}{"--json": flagDef("bool", false, "Output as JSON")},
+				"subcommands": map[string]interface{}{
+					"tour": map[string]interface{}{
+						"description": "Reading path with file:line anchors: product sections ranked by importance (max impact, fragile-critical stops, max heat), each section's dependencies emitted before it; supporting sections last; files by impact then centrality",
+						"flags": map[string]interface{}{
+							"--json":               flagDef("bool", false, "Output as JSON (schema version 1); same as --format json"),
+							"--format":             flagDef("enum", "text", "Values: text, json, walkthrough (show-me step-through data)"),
+							"--out":                flagDef("string", "", "Write to this file instead of stdout"),
+							"--limit":              flagDef("int", 0, "Keep the N most impactful files (0 = all); ignored with --per-component"),
+							"--per-component":      flagDef("int", 0, "Keep the N most important files of each component, one section per component (0 = off)"),
+							"--min-impact":         flagDef("int", 0, "Skip files whose impact is below this, and components left without files (0-100)"),
+							"--components":         flagDef("string", "", "Only these components, comma-separated (e.g. crates/core,internal/api)"),
+							"--include-supporting": flagDef("bool", false, "Add supporting components (examples, scripts, .github, docs, deploy, tests, vendor; tour.supporting in config) in a final part"),
+							"--focus":              flagDef("string", "", "Only files under this repo-relative directory or file"),
+						},
+					},
+					"architecture": map[string]interface{}{
+						"description": "Generated architecture diagram of runtime units: SeeCode spec or plain JSON, with declared links from .heatmap/architecture.yaml and top files per box as evidence",
+						"flags": map[string]interface{}{
+							"--format":             flagDef("enum", "seecode", "Values: seecode, json"),
+							"--json":               flagDef("bool", false, "Same as --format json"),
+							"--max-nodes":          flagDef("int", 9, "Most boxes (2-24); the rest fold into one other-units box"),
+							"--out":                flagDef("string", "", "Write to this file instead of stdout"),
+							"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
+						},
+					},
+				},
+			},
+			"list": map[string]interface{}{
+				"description": "List files sorted by heat score",
+				"flags": map[string]interface{}{
+					"--json":  flagDef("bool", false, "Output as JSON"),
+					"--tier":  flagDef("enum", "", "Filter by tier. Values: critical, high, medium, low"),
+					"--limit": flagDef("int", 0, "Max files to return (0 = all)"),
+					"--sort":  flagDef("enum", "heat", "Values: heat, likelihood, impact"),
+				},
+				"subcommands": map[string]interface{}{
+					"tasks": map[string]interface{}{
+						"description": "Backlog items on files at or above an agent autonomy level, as self-contained tasks (JSON: tasks[] with title, file, action_id, signal, command, acceptance, level, level_label; count, min_level, max_level). Levels: 3 auto-merge, 2 auto-fix with a human merging, 1 propose only, 0 assist only; files without an LLM-assessed impact are capped at 1, and autonomy.max_level caps all",
+						"flags": map[string]interface{}{
+							"--json":  flagDef("bool", false, "Output as JSON"),
+							"--level": flagDef("int", 2, "Lowest autonomy level to include. Values: 0, 1, 2, 3"),
+						},
+					},
+					"units": map[string]interface{}{
+						"description": "Runtime units (binaries, scripts) with linked components, max impact, fragile-critical count and inferred placement (file:line evidence)",
+						"flags": map[string]interface{}{
+							"--json":               flagDef("bool", false, "Output as JSON"),
+							"--include-supporting": flagDef("bool", false, "Include examples, scripts, tests and helper bins"),
+						},
+					},
+				},
+			},
+			"pr": map[string]interface{}{
+				"description": "Assess pull request risk",
+				"subcommands": map[string]interface{}{
+					"check": map[string]interface{}{
+						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist of Harden now and Protect files with done items, worth-doing items that do not block (JSON worth_doing), backlog, and agent autonomy (JSON autonomy_level: lowest level over touched files; auto_merge_allowed: true only at level 3; autonomy_reason; files_changed[].autonomy)",
+						"flags": map[string]interface{}{
+							"--json":               flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--format":             flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
+							"--approvals":          flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
+							"--repo":               flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
+							"--pr":                 flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
+							"--base":               flagDef("string", "main", "Base branch"),
+							"--fail-on":            flagDef("enum", "", "Exit 5 when tier >= this and before-merge items are open (JSON open_items, decision_reason). Values: critical, high, medium, low"),
+							"--strict":             flagDef("bool", false, "With --fail-on, block on tier alone even when every before-merge item is done"),
+							"--signed-off":         flagDef("bool", false, "PR has the highstakes:signed-off label (added by a maintainer with write access); ticks sign-off and owner-review items"),
+							"--auto-merge-enabled": flagDef("enum", "unknown", "Values: true, false, unknown; false ticks the no-auto-merge items, true asks to turn it off"),
+							"--shadow":             flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
+							"--author":             flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
+							"--reviewers":          flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+						},
+					},
+				},
+			},
+			"create": map[string]interface{}{
+				"description": "Create review artifacts from the heatmap",
+				"subcommands": map[string]interface{}{
+					"codeowners": map[string]interface{}{
+						"description": "CODEOWNERS block for high-stakes paths with owners from git history",
+						"flags": map[string]interface{}{
+							"--json":       flagDef("bool", false, "Output as JSON"),
+							"--write":      flagDef("bool", false, "Update the marked block in --file"),
+							"--file":       flagDef("string", ".github/CODEOWNERS", "CODEOWNERS path for --write"),
+							"--min-tier":   flagDef("enum", "high", "Values: critical, high, medium, low"),
+							"--max-owners": flagDef("int", 2, "Owners per path"),
+						},
+					},
+					"labels": map[string]interface{}{
+						"description": "Blind CSV sheet (path, maintainer_rating, notes) for maintainers to rate 1-5 how bad a bug in each file would be; feed it to check calibration --labels",
+						"flags": map[string]interface{}{
+							"--json":   flagDef("bool", false, "Output the sampled paths and settings as JSON"),
+							"--top":    flagDef("int", 20, "Files HighStakes rates highest on blast radius"),
+							"--random": flagDef("int", 20, "Randomly sampled other non-test files"),
+							"--seed":   flagDef("int", 1, "Random seed; the same seed gives the same sheet"),
+							"--out":    flagDef("string", "", "Write the CSV to this file (default stdout)"),
+						},
+					},
+					"policy": map[string]interface{}{
+						"description": "No-auto-approve path policy for AI reviewers (YAML; JSON with --json). With --agents: the agent autonomy policy, path globs per level (3 auto-merge, 2 auto-fix with a human merging, 1 propose only, 0 assist only) with how_to_read, cap_rule, max_level and default_level; a change may go as far as the lowest level among its files",
+						"flags": map[string]interface{}{
+							"--json":     flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--min-tier": flagDef("enum", "high", "Values: critical, high, medium, low (ignored with --agents)"),
+							"--agents":   flagDef("bool", false, "Emit the agent autonomy policy instead of the review policy"),
+							"--format":   flagDef("enum", "yaml", "Values: yaml, json"),
+							"--out":      flagDef("string", "", "Write to this file instead of stdout (e.g. .highstakes/autonomy.yaml)"),
+						},
+					},
+				},
+			},
+			"incident": map[string]interface{}{
+				"description": "Manage production incident records",
+				"subcommands": map[string]interface{}{
+					"create": map[string]interface{}{
+						"description": "Record a new incident",
+						"flags": map[string]interface{}{
+							"--json":        flagDef("bool", false, "Output as JSON"),
+							"--file":        flagDef("string", "", "File path (required)"),
+							"--severity":    flagDef("enum", "", "Values: critical, high, medium, low (required)"),
+							"--description": flagDef("string", "", "What happened (required)"),
+							"--date":        flagDef("string", "", "YYYY-MM-DD (default: today)"),
+						},
+					},
+					"list": map[string]interface{}{
+						"description": "List recorded incidents",
+						"flags": map[string]interface{}{
+							"--json": flagDef("bool", false, "Output as JSON"),
+							"--file": flagDef("string", "", "Filter by file path"),
+						},
+					},
+				},
+			},
+			"check": map[string]interface{}{
+				"description": "Check how well the heatmap matches reality",
+				"subcommands": map[string]interface{}{
+					"calibration": map[string]interface{}{
+						"description": "Compare heat scores with reverts, bug fixes, security fixes and incidents in git history, or with merged GitHub pull requests (--source prs)",
+						"flags": map[string]interface{}{
+							"--json":    flagDef("bool", false, "Output as JSON"),
+							"--top":     flagDef("int", 10, "K for precision@K and recall@K"),
+							"--since":   flagDef("string", "365d", "Event window in days (Nd)"),
+							"--holdout": flagDef("string", "", "Cutoff YYYY-MM-DD or Nd: score with history before it, count events after it"),
+							"--limit":   flagDef("int", 10, "Max files per surprise list"),
+							"--events":  flagDef("enum", "all", "Event kinds to count. Values: all, fixes, reverts, security"),
+							"--labels":  flagDef("string", "", "Compare with maintainer ratings in this CSV (from create labels) instead of git history"),
+							"--source":  flagDef("enum", "commits", "Where events come from. Values: commits (commit-message keywords), prs (merged GitHub PRs via gh: bug-fix/revert PRs vs likelihood, backports, fast reverts, severity labels, review depth and CODEOWNERS vs blast radius; cached in .heatmap/cache/github/)"),
+							"--repo":    flagDef("string", "", "GitHub owner/name for --source prs (default: from the origin remote)"),
+						},
+					},
+				},
+			},
+			"dashboard": map[string]interface{}{
+				"description": "Generate the static HTML dashboard (action inbox by default; treemap, explorer, architecture, quadrant tabs) and open it in the browser",
+				"flags": map[string]interface{}{
+					"--output":  flagDef("string", "", "Output path (default: .heatmap/dashboard.html)"),
+					"--no-open": flagDef("bool", false, "Don't open in browser"),
+				},
+			},
+			"agent-context": map[string]interface{}{
+				"description": "Machine-readable description of all commands and flags (this document)",
+			},
+			"report": map[string]interface{}{
+				"description": "Generate heat distribution report with reasoning",
+				"flags": map[string]interface{}{
+					"--json":  flagDef("bool", false, "Output full heatmap as JSON"),
+					"--limit": flagDef("int", 10, "Max files per tier"),
+				},
+			},
+			"github": map[string]interface{}{
+				"description": "GitHub integration",
+				"subcommands": map[string]interface{}{
+					"install": map[string]interface{}{
+						"description": "Write .github/workflows/heatmap-triage.yml: posts pr check --format markdown as a PR comment, fills --approvals from reviews, --signed-off from the highstakes:signed-off label and --auto-merge-enabled from the PR, re-runs on reviews and label changes, fails while Harden now files have open before-merge items (--fail-on critical)",
+					},
+				},
+			},
+		},
+		"environment": map[string]interface{}{
+			"OPENROUTER_API_KEY": "Required for LLM blast radius analysis. Get from openrouter.ai",
+		},
+		"models": []string{
+			"openai/gpt-6-luna (default, best impact ranking on the benchmark)",
+			"z-ai/glm-5.3-flash (cheapest, slower)",
+			"deepseek/deepseek-v4.1-flash (open weights, self-hostable)",
+			"anthropic/claude-haiku-5.5 (fewest failed calls)",
+		},
+		"exit_codes": map[string]interface{}{
+			"0": "Success",
+			"1": "Internal error",
+			"2": "Invalid input (bad flags, missing required params)",
+			"3": "External dependency failure (git, API)",
+			"4": "Not found (file not in heatmap)",
+			"5": "PR blocked by pr check --fail-on",
+		},
+	}
+}
+
 // --- github ---
+
+// triageWorkflow is the workflow `github install` writes: the repo's own
+// heatmap-triage.yml, installing highstakes from the module instead of ./.
+//
+//go:embed triage-workflow.yml
+var triageWorkflow string
 
 var githubCmd = &cobra.Command{
 	Use:   "github",
@@ -718,65 +962,8 @@ var githubInstallCmd = &cobra.Command{
 			return err
 		}
 
-		workflow := `name: Code Heatmap Triage
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  contents: read
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Install heatmap
-        run: go install github.com/zanetworker/highstakes/cmd/heatmap@latest
-
-      - name: Analyze
-        run: highstakes init && highstakes analyze --json
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-
-      - name: Check PR
-        run: highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-
-      - name: Comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const risk = JSON.parse(require('fs').readFileSync('pr-risk.json','utf8'));
-            const e = {critical:'🔥🔥🔥',high:'🔥🔥',medium:'🔥',low:'🟢'};
-            let b = '## '+e[risk.tier]+' Code Heatmap: '+risk.tier.toUpperCase()+'\n\n';
-            b += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
-            for (const f of risk.files_changed.sort((a,b)=>b.heat_score-a.heat_score))
-              b += '| '+(f.tier==='critical'||f.tier==='high'?'⚠️':'✓')+' '+f.path+' | '+f.heat_score+' | '+e[f.tier]+' | +'+f.lines_added+'/-'+f.lines_deleted+' |\n';
-            if (risk.circuit_breaker_signals?.length) {
-              b += '\n### Circuit Breakers\n';
-              risk.circuit_breaker_signals.forEach(s => b += '- '+s+'\n');
-            }
-            b += '\n**Review:** '+risk.review_requirements.min_reviewers+' reviewers';
-            if (risk.review_requirements.requires_senior) b += ' (senior)';
-            b += ', ~'+risk.review_requirements.estimated_review_time_minutes+' min';
-            b += ', auto-merge: '+(risk.review_requirements.auto_merge?'✅':'❌')+'\n';
-            const comments = await github.rest.issues.listComments({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number});
-            const existing = comments.data.find(c=>c.body.includes('Code Heatmap:'));
-            const method = existing ? 'updateComment' : 'createComment';
-            const params = {owner:context.repo.owner,repo:context.repo.repo,...(existing?{comment_id:existing.id}:{issue_number:context.issue.number}),body:b};
-            await github.rest.issues[method](params);
-`
-
 		workflowPath := filepath.Join(workflowDir, "heatmap-triage.yml")
-		if err := os.WriteFile(workflowPath, []byte(workflow), 0644); err != nil {
+		if err := os.WriteFile(workflowPath, []byte(triageWorkflow), 0644); err != nil {
 			return err
 		}
 
@@ -837,6 +1024,15 @@ func cliError(code int, format string, args ...interface{}) error {
 	return &exitError{code: code, msg: fmt.Sprintf(format, args...)}
 }
 
+// exitCode maps an error to the documented exit code (1 when unclassified).
+func exitCode(err error) int {
+	var e *exitError
+	if errors.As(err, &e) {
+		return e.code
+	}
+	return 1
+}
+
 // --- command registration ---
 
 func init() {
@@ -849,7 +1045,7 @@ func init() {
 
 	analyzeCmd.Flags().Bool("no-llm", false, "Skip LLM analysis, use static heuristics only")
 	analyzeCmd.Flags().Bool("force", false, "Re-assess all files (ignore cache)")
-	analyzeCmd.Flags().String("model", "", "OpenRouter model (default: deepseek/deepseek-v4-flash)")
+	analyzeCmd.Flags().String("model", "", "OpenRouter model (default: openai/gpt-6-luna)")
 	analyzeCmd.Flags().Int("concurrency", 10, "Parallel LLM requests")
 	analyzeCmd.Flags().Bool("json", false, "Output as JSON")
 	rootCmd.AddCommand(analyzeCmd)
@@ -860,10 +1056,25 @@ func init() {
 	listCmd.Flags().Bool("json", false, "Output as JSON")
 	listCmd.Flags().String("tier", "", "Filter by tier: critical, high, medium, low")
 	listCmd.Flags().Int("limit", 0, "Max files to return (0 = all)")
+	listCmd.Flags().String("sort", "heat", "Sort by: heat, likelihood, impact")
+	listUnitsCmd.Flags().Bool("json", false, "Output as JSON")
+	listUnitsCmd.Flags().Bool("include-supporting", false, "Include supporting units (examples, scripts, tests, helper bins under src/bin/)")
+	listCmd.AddCommand(listUnitsCmd)
 	rootCmd.AddCommand(listCmd)
 
 	prCheckCmd.Flags().String("base", "main", "Base branch to compare against")
 	prCheckCmd.Flags().Bool("json", false, "Output as JSON")
+	prCheckCmd.Flags().String("fail-on", "", "Exit 5 when the PR tier is at or above this tier and before-merge items are open: critical, high, medium, low")
+	prCheckCmd.Flags().Bool("strict", false, "With --fail-on, block on the tier alone, even when every before-merge item is done")
+	prCheckCmd.Flags().Bool("signed-off", false, "The PR carries the highstakes:signed-off label (CI fills it); ticks sign-off and owner-review items")
+	prCheckCmd.Flags().String("auto-merge-enabled", "unknown", "Whether auto-merge is on for the PR (CI fills it): true, false, unknown; false ticks the no-auto-merge item")
+	prCheckCmd.Flags().Bool("shadow", false, "Log tier and decision to .heatmap/shadow.jsonl but always exit 0 (gate defaults to critical)")
+	prCheckCmd.Flags().String("author", "", "PR author email or handle to exclude from reviewers (default: HEAD commit author)")
+	prCheckCmd.Flags().Int("reviewers", 3, "Max suggested reviewers (0 disables ownership lookup)")
+	prCheckCmd.Flags().String("format", "text", "Output format: text, markdown (the PR comment), json")
+	prCheckCmd.Flags().String("repo", "", "GitHub owner/name the markdown comment links to for one-click issues and CODEOWNERS edits (default: $GITHUB_REPOSITORY, then the origin remote)")
+	prCheckCmd.Flags().Int("pr", 0, "PR number the markdown comment's issues link back to (default: from $GITHUB_REF refs/pull/N/merge in GitHub Actions)")
+	prCheckCmd.Flags().StringSlice("approvals", nil, "GitHub logins that approved the PR (CI fills it); ticks owner-review items when a suggested owner approved")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)
 
@@ -890,4 +1101,19 @@ func init() {
 
 	githubCmd.AddCommand(githubInstallCmd)
 	rootCmd.AddCommand(githubCmd)
+}
+
+// headSHA is the short HEAD commit the comment's issues name, or "" outside git.
+func headSHA() string {
+	out, err := exec.Command("git", "rev-parse", "--short=12", "HEAD").Output()
+	if err != nil {
+		return "" // optional context: the issues leave the commit out
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// codeownersPath is the repo's CODEOWNERS file relative to the root, or "".
+func codeownersPath() string {
+	_, rel := policy.LoadCodeowners(".")
+	return rel
 }

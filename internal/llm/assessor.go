@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,8 +17,11 @@ import (
 )
 
 const (
-	DefaultModel  = "deepseek/deepseek-v4-flash"
+	DefaultModel  = "openai/gpt-6-luna"
 	DefaultAPIURL = "https://openrouter.ai/api/v1/chat/completions"
+
+	// PromptVersion is part of the cache key; bump it when buildPrompt changes.
+	PromptVersion = "3"
 )
 
 // Assessment holds the LLM's blast radius evaluation for a single file
@@ -54,6 +58,8 @@ type Assessor struct {
 	cacheDir    string
 	concurrency int
 	client      *http.Client
+	retryDelay  time.Duration // base backoff unit between retries
+	variant     int32         // index into requestVariants that last worked (atomic)
 }
 
 // Config holds assessor configuration
@@ -95,6 +101,7 @@ func NewAssessor(cfg Config) (*Assessor, error) {
 		cacheDir:    cfg.CacheDir,
 		concurrency: cfg.Concurrency,
 		client:      &http.Client{Timeout: 60 * time.Second},
+		retryDelay:  time.Second,
 	}, nil
 }
 
@@ -118,8 +125,11 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	// Count cached files first
 	var toAssess []FileInput
 	for _, f := range files {
-		hash := contentHash(f.Content)
-		if c, ok := a.loadCache(hash); ok {
+		// Credentials never reach a prompt, even if the caller passes them.
+		if SensitivePath(f.Path) || SensitiveContent(f.Content) {
+			continue
+		}
+		if c, ok := a.loadCache(a.cacheKey(f.Content)); ok {
 			mu.Lock()
 			results[f.Path] = c
 			mu.Unlock()
@@ -135,9 +145,9 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 	}
 
 	for _, f := range toAssess {
-		hash := contentHash(f.Content)
+		key := a.cacheKey(f.Content)
 		wg.Add(1)
-		go func(file FileInput, h string) {
+		go func(file FileInput, key string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -151,8 +161,8 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 				return
 			}
 
-			assessment.ContentHash = h
-			a.saveCache(h, assessment)
+			assessment.ContentHash = contentHash(file.Content)
+			a.saveCache(key, assessment)
 
 			mu.Lock()
 			results[file.Path] = assessment
@@ -162,7 +172,7 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 			if n%10 == 0 || int(n) == needAssess {
 				fmt.Fprintf(os.Stderr, "  [%d/%d] assessed\n", n, needAssess)
 			}
-		}(f, hash)
+		}(f, key)
 	}
 
 	wg.Wait()
@@ -172,6 +182,32 @@ func (a *Assessor) AssessFiles(files []FileInput) (map[string]*Assessment, error
 
 	return results, nil
 }
+
+// assessmentSchema is the structured-output contract for one assessment.
+var assessmentSchema = func() map[string]interface{} {
+	score := map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 100}
+	text := map[string]interface{}{"type": "string"}
+	return map[string]interface{}{
+		"type": "json_schema",
+		"json_schema": map[string]interface{}{
+			"name":   "blast_radius_assessment",
+			"strict": true,
+			"schema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"security_impact":      score,
+					"data_impact":          score,
+					"availability_impact":  score,
+					"user_impact":          score,
+					"blast_radius_summary": text,
+					"critical_reason":      text,
+				},
+				"required":             []string{"security_impact", "data_impact", "availability_impact", "user_impact", "blast_radius_summary", "critical_reason"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}()
 
 // assessFile sends a single file to the LLM via OpenRouter
 func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
@@ -183,23 +219,74 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 
 	prompt := buildPrompt(file.Path, content)
 
-	// OpenAI-compatible request (works for all OpenRouter models)
-	reqBody := map[string]interface{}{
-		"model":      a.model,
-		"max_tokens": 1024,
+	// Try the strictest request the model's providers accept, starting from
+	// the variant that last worked; a variant is remembered once it succeeds.
+	start := int(atomic.LoadInt32(&a.variant))
+	var lastErr error
+	for v := start; v < len(requestVariants); v++ {
+		assessment, err := a.request(requestVariants[v](a.model, prompt))
+		if errors.Is(err, errUnsupportedParams) {
+			lastErr = err
+			continue
+		}
+		if err == nil && v != start {
+			atomic.StoreInt32(&a.variant, int32(v))
+		}
+		return assessment, err
+	}
+	return nil, lastErr
+}
+
+// errUnsupportedParams marks OpenRouter's 404 when no provider for the model
+// supports every requested parameter.
+var errUnsupportedParams = errors.New("no provider supports the requested parameters")
+
+// requestVariants go from strictest to most permissive. All ask for the JSON
+// schema and route only to providers that honour every parameter. Reasoning is
+// off where possible (it can use the whole token budget, leaving no answer);
+// temperature 0 keeps answers repeatable. Providers differ per model: DeepSeek
+// takes all three, GLM rejects temperature, Haiku and GPT Luna reject both.
+var requestVariants = []func(model, prompt string) map[string]interface{}{
+	func(model, prompt string) map[string]interface{} {
+		b := baseRequest(model, prompt)
+		b["temperature"] = 0
+		b["reasoning"] = map[string]interface{}{"effort": "none"}
+		return b
+	},
+	func(model, prompt string) map[string]interface{} {
+		b := baseRequest(model, prompt)
+		b["reasoning"] = map[string]interface{}{"effort": "none"}
+		return b
+	},
+	baseRequest,
+}
+
+// baseRequest is an OpenAI-compatible request (works for all OpenRouter
+// models). max_tokens leaves room for models that reason anyway.
+func baseRequest(model, prompt string) map[string]interface{} {
+	return map[string]interface{}{
+		"model":           model,
+		"max_tokens":      4096,
+		"response_format": assessmentSchema,
+		"provider":        map[string]interface{}{"require_parameters": true},
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
 	}
+}
 
+// request sends one request body with retries and parses the assessment.
+func (a *Assessor) request(reqBody map[string]interface{}) (*Assessment, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
 	}
 
 	// Retry with backoff
+	const maxAttempts = 3
 	var resp *http.Response
-	for attempt := 0; attempt < 3; attempt++ {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		req, err := http.NewRequest("POST", a.apiURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -210,33 +297,41 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 		req.Header.Set("HTTP-Referer", "https://github.com/zanetworker/highstakes")
 		req.Header.Set("X-Title", "HighStakes")
 
-		resp, err = a.client.Do(req)
+		r, err := a.client.Do(req)
 		if err != nil {
-			time.Sleep(time.Duration(attempt+1) * time.Second)
+			lastErr = fmt.Errorf("API request failed after %d attempts: %w", maxAttempts, err)
+			time.Sleep(time.Duration(attempt+1) * a.retryDelay)
 			continue
 		}
-		if resp.StatusCode == 429 {
-			resp.Body.Close()
-			time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+		if r.StatusCode == http.StatusTooManyRequests {
+			r.Body.Close()
+			lastErr = fmt.Errorf("API rate limited (429) after %d attempts", maxAttempts)
+			time.Sleep(time.Duration(attempt+1) * 2 * a.retryDelay)
 			continue
 		}
+		resp = r
 		break
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("API request failed: %w", err)
+	if resp == nil {
+		return nil, lastErr
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
+		if (resp.StatusCode == http.StatusNotFound && strings.Contains(string(respBody), "requested parameters")) ||
+			(resp.StatusCode == http.StatusBadRequest && strings.Contains(string(respBody), "cannot be disabled")) {
+			return nil, fmt.Errorf("%w: %s", errUnsupportedParams, string(respBody))
+		}
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// OpenAI-compatible response format
 	var apiResp struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -249,8 +344,12 @@ func (a *Assessor) assessFile(file FileInput) (*Assessment, error) {
 	if len(apiResp.Choices) == 0 {
 		return nil, fmt.Errorf("empty response")
 	}
+	choice := apiResp.Choices[0]
+	if choice.Message.Content == "" && choice.FinishReason == "length" {
+		return nil, fmt.Errorf("no answer: the model hit the token limit (likely spent on reasoning)")
+	}
 
-	return parseAssessment(apiResp.Choices[0].Message.Content)
+	return parseAssessment(choice.Message.Content)
 }
 
 func buildPrompt(path, content string) string {
@@ -417,6 +516,12 @@ func contentHash(content string) string {
 	return fmt.Sprintf("%x", h[:16])
 }
 
+// cacheKey identifies an assessment by content, model and prompt version,
+// so switching models or prompts never reuses a stale assessment.
+func (a *Assessor) cacheKey(content string) string {
+	return contentHash(a.model + "\x00" + PromptVersion + "\x00" + content)
+}
+
 func (a *Assessor) cachePath(hash string) string {
 	return filepath.Join(a.cacheDir, hash+".json")
 }
@@ -463,9 +568,21 @@ func ShouldAssess(path string) bool {
 		return false
 	}
 
+	if strings.HasPrefix(base, "zz_generated") {
+		return false
+	}
+
+	// Lock files are generated; config files (YAML, TOML, JSON, Dockerfile, Terraform) are assessed.
+	lockFiles := map[string]bool{
+		"package-lock.json": true, "pnpm-lock.yaml": true, "yarn.lock": true,
+		"npm-shrinkwrap.json": true, "composer.lock": true,
+	}
+	if lockFiles[base] {
+		return false
+	}
+
 	skipExts := map[string]bool{
-		".md": true, ".yaml": true, ".yml": true, ".toml": true,
-		".json": true, ".lock": true, ".sum": true, ".mod": true,
+		".md": true, ".lock": true, ".sum": true, ".mod": true,
 	}
 
 	return !skipExts[ext]

@@ -1,10 +1,17 @@
 name: HighStakes Triage
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # labeled/unlabeled re-run on the highstakes:signed-off label;
+    # auto_merge_* re-run when auto-merge is turned on or off.
+    types: [opened, synchronize, reopened, labeled, unlabeled, auto_merge_enabled, auto_merge_disabled]
+  # Re-run on reviews so owner approvals tick the checklist.
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   pull-requests: write
+  issues: write # remove the sign-off label after a new push
+  statuses: write # record a sign-off as a commit status on the reviewed commit
   contents: read
 
 jobs:
@@ -14,6 +21,86 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      # The highstakes:signed-off label counts only when someone with write
+      # access added it, and only for the commit it was given on. The run that
+      # the labeling itself triggered records a highstakes/signed-off/pr-<number>
+      # success status on the head of that moment; every other run trusts the
+      # label only when the current head carries that status from the
+      # workflow's own bot, so a push leaves the new head unsigned whatever the
+      # order of runs. GitHub's label history decides whether the label still
+      # stands (the latest add or remove wins); a withdrawn label gets a newer
+      # failing status. Runs before the analysis, so a failed analysis cannot
+      # leave a stale label in place.
+      - name: Verify sign-off
+        id: signoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          SENDER: ${{ github.event.sender.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
+        run: |
+          signed=false
+          ctx="highstakes/signed-off/pr-$PR"
+          has_label=false
+          if gh api "repos/$REPO/issues/$PR/labels" --paginate --jq '.[].name' | grep -qx 'highstakes:signed-off'; then has_label=true; fi
+          # Latest add or remove of the label: "<event> <actor> <time>".
+          label_state() {
+            gh api "repos/$REPO/issues/$PR/events" --paginate \
+              --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == "highstakes:signed-off") | "\(.event) \(.actor.login) \(.created_at)"' | tail -n1
+          }
+          last=$(label_state)
+          read -r last_event last_actor last_at <<< "$last"
+          # A push removes a label added before it (one added on the new head
+          # while this run waited is kept).
+          if [ "$ACTION" = "synchronize" ] && [ "$has_label" = true ] && [[ "$last_at" < "$PUSHED_AT" ]]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/highstakes:signed-off" >/dev/null || true
+            has_label=false
+            last=$(label_state)
+            read -r last_event last_actor last_at <<< "$last"
+            echo "New commits pushed: the sign-off no longer applies; review again and re-add the label."
+          fi
+          stands=false
+          if [ "$has_label" = true ] && [ "$last_event" = "labeled" ]; then stands=true; fi
+          # The status names the label event it was minted for, so an older
+          # sign-off on this commit never stands in for a newer label.
+          want="success github-actions[bot] Signed off by $last_actor at $last_at"
+          latest() {
+            gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate \
+              --jq 'first(.[] | select(.context == "highstakes/signed-off/pr-'"$PR"'")) | "\(.state) \(.creator.login) \(.description)"' | head -n1
+          }
+          perm=none
+          if [ "$stands" = true ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$last_actor/permission" --jq .permission 2>/dev/null || echo none)
+            case "$perm" in
+              admin|maintain|write) ;;
+              *) stands=false; echo "Sign-off label added by $last_actor (permission: $perm) does not count: write access is required." ;;
+            esac
+          fi
+          # Only a labeling run signs, and only the commit that was head then.
+          if [ "$ACTION" = "labeled" ] && [ "$LABEL" = "highstakes:signed-off" ] && [ "$stands" = true ] && [ "$(latest)" != "$want" ]; then
+            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=success -f context="$ctx" \
+              -f description="Signed off by $last_actor at $last_at" >/dev/null || true
+          fi
+          status=$(latest)
+          if [ "$stands" = true ] && [ "$status" = "$want" ]; then
+            signed=true
+          elif [ "$stands" = true ]; then
+            echo "The sign-off label was not added on this commit: review again and re-add it."
+          fi
+          # Not signed: make sure no success status lingers on the head, unless
+          # the label changed meanwhile (the newer run decides).
+          if [ "$signed" = false ] && [[ "$status" == "success github-actions[bot] "* ]] && [ "$(label_state)" = "$last" ]; then
+            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f state=failure -f context="$ctx" \
+              -f description="Sign-off withdrawn" >/dev/null || true
+          fi
+          # What the assessment saw, so later steps can tell when it went stale.
+          echo "label_state=$last" >> "$GITHUB_OUTPUT"
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v6
         with:
@@ -32,84 +119,119 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          highstakes init
+          if [ ! -f .heatmap/config.yaml ]; then highstakes init; fi
           highstakes analyze
 
+      # Each reviewer's latest review counts; logins whose latest review is an
+      # approval of the assessed head commit tick the owner-review items (an
+      # approval of an earlier commit does not cover new pushes).
+      - name: Collect approvals
+        id: approvals
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          logins=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq '.[] | [.user.login, .state, .commit_id] | @tsv' \
+            | awk -F'\t' -v head="$HEAD_SHA" '$2 != "COMMENTED" { last[$1] = $2; sha[$1] = $3 } END { for (u in last) if (last[u] == "APPROVED" && sha[u] == head) print u }' \
+            | sort | paste -sd, -)
+          echo "logins=$logins" >> "$GITHUB_OUTPUT"
+
+      # Exit 5 means the PR changes a Harden now file (--fail-on critical) and
+      # before-merge items are still open. A maintainer with write access adds
+      # the highstakes:signed-off label after reviewing to tick sign-off items
+      # (authors cannot approve their own PRs). Both events carry pull_request.
       - name: Assess PR risk
         id: risk
+        env:
+          BASE: origin/${{ github.event.pull_request.base.ref }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
+          REPO: ${{ github.repository }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          highstakes pr check --base origin/${{ github.base_ref }} --json > pr-risk.json
-          echo "tier=$(jq -r .tier pr-risk.json)" >> $GITHUB_OUTPUT
-          echo "score=$(jq -r .heat_score pr-risk.json)" >> $GITHUB_OUTPUT
-
-      - name: Gate on risk tier
-        run: |
-          TIER=$(jq -r .tier pr-risk.json)
-          if [ "$TIER" = "critical" ]; then
-            echo "::error::PR touches critical-tier files. Requires senior review before merge."
-            exit 1
-          fi
+          set +e
+          # Live state, not the event snapshot: auto-merge may have changed
+          # since this run was queued.
+          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
+          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
+          signed=
+          if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
         uses: actions/github-script@v9
         if: always()
+        env:
+          ASSESSED_AUTO: ${{ steps.risk.outputs.auto_merge }}
+          ASSESSED_LABELS: ${{ steps.signoff.outputs.label_state }}
         with:
           script: |
             const fs = require('fs');
-            if (!fs.existsSync('pr-risk.json')) return;
-            const risk = JSON.parse(fs.readFileSync('pr-risk.json', 'utf8'));
-
-            const tierEmoji = {
-              critical: '🔥🔥🔥',
-              high: '🔥🔥',
-              medium: '🔥',
-              low: '🟢'
-            };
-
-            let body = '## ' + (tierEmoji[risk.tier] || '🟢') + ' HighStakes: ' + risk.tier.toUpperCase() + '\n\n';
-            body += '| File | Heat | Tier | Lines |\n|------|------|------|-------|\n';
-
-            const sorted = risk.files_changed.sort((a, b) => b.heat_score - a.heat_score);
-            for (const f of sorted) {
-              const icon = (f.tier === 'critical' || f.tier === 'high') ? '⚠️' : '✓';
-              body += '| ' + icon + ' ' + f.path + ' | ' + f.heat_score + ' | ' + (tierEmoji[f.tier] || '🟢') + ' ' + f.tier.toUpperCase() + ' | +' + f.lines_added + '/-' + f.lines_deleted + ' |\n';
+            if (!fs.existsSync('pr-comment.md')) return;
+            const body = fs.readFileSync('pr-comment.md', 'utf8');
+            if (!body.trim()) return;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            // A run for an older head or auto-merge state must not overwrite a newer one.
+            const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: issue_number });
+            const LIVE_HEAD = live.head.sha;
+            const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number });
+            const marks = events.filter(e => (e.event === 'labeled' || e.event === 'unlabeled') && e.label && e.label.name === 'highstakes:signed-off');
+            const m = marks[marks.length - 1];
+            const LABEL_STATE = m ? `${m.event} ${m.actor.login} ${m.created_at}` : '';
+            if (LIVE_HEAD !== context.payload.pull_request.head.sha ||
+                String(live.auto_merge !== null) !== process.env.ASSESSED_AUTO ||
+                LABEL_STATE !== process.env.ASSESSED_LABELS) {
+              core.info('PR changed during this run; the newer run posts the comment.');
+              return;
             }
-
-            if (risk.circuit_breaker_signals && risk.circuit_breaker_signals.length > 0) {
-              body += '\n### ⚠️ Circuit Breaker Signals\n';
-              for (const s of risk.circuit_breaker_signals) {
-                body += '- ' + s + '\n';
-              }
-            }
-
-            body += '\n### Review Requirements\n';
-            body += '- **Reviewers**: ' + risk.review_requirements.min_reviewers;
-            if (risk.review_requirements.requires_senior) body += ' (senior)';
-            body += '\n';
-            if (risk.review_requirements.requires_security_scan) body += '- **Security Scan**: Required\n';
-            body += '- **Auto-Merge**: ' + (risk.review_requirements.auto_merge ? '✅ Allowed' : '❌ Blocked') + '\n';
-            body += '- **Est. Review Time**: ' + risk.review_requirements.estimated_review_time_minutes + ' min\n';
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const existing = comments.data.find(c => c.body.includes('HighStakes:'));
-
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            // The marker is written by `highstakes pr check --format markdown`.
+            const existing = comments.find(c => c.body.includes('<!-- highstakes-triage -->') || c.body.includes('HighStakes:'));
             if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: body
-              });
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+      - name: Gate on Harden now files
+        if: always()
+        env:
+          CODE: ${{ steps.risk.outputs.code }}
+          ASSESSED: ${{ steps.risk.outputs.auto_merge }}
+          LABEL_STATE: ${{ steps.signoff.outputs.label_state }}
+          APPROVALS: ${{ steps.approvals.outputs.logins }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$CODE" ]; then echo "::error::The HighStakes check did not finish; see the steps above."; exit 1; fi
+          now=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
+          if [ "$now" != "$ASSESSED" ]; then
+            echo "::error::Auto-merge changed during this run (was $ASSESSED, now $now); the run it triggered decides."
+            exit 1
+          fi
+          labels=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+            --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == "highstakes:signed-off") | "\(.event) \(.actor.login) \(.created_at)"' | tail -n1)
+          if [ "$labels" != "$LABEL_STATE" ]; then
+            echo "::error::The sign-off label changed during this run; the run it triggered decides."
+            exit 1
+          fi
+          now_approvals=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --jq '.[] | [.user.login, .state, .commit_id] | @tsv' \
+            | awk -F'\t' -v head="$HEAD_SHA" '$2 != "COMMENTED" { last[$1] = $2; sha[$1] = $3 } END { for (u in last) if (last[u] == "APPROVED" && sha[u] == head) print u }' \
+            | sort | paste -sd, -)
+          if [ "$now_approvals" != "$APPROVALS" ]; then
+            echo "::error::Reviews changed during this run; the run they triggered decides."
+            exit 1
+          fi
+          case "$CODE" in
+            0) exit 0 ;;
+            5) echo "::error::This PR changes Harden now files with before-merge items open. Work through 'Do before merge' in the HighStakes comment." ;;
+            *) echo "::error::highstakes pr check failed (exit $CODE)." ;;
+          esac
+          exit 1

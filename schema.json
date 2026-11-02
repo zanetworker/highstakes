@@ -41,6 +41,23 @@
           "additionalProperties": {
             "type": "integer"
           }
+        },
+        "git_history": {
+          "type": "string",
+          "description": "\"complete\" when churn factors were read from git, or \"unavailable: <reason>\" (churn is then 0)"
+        },
+        "likely_cutoff": {
+          "type": "integer",
+          "description": "Lowest likelihood counted as likely (top 20% of non-test files)"
+        },
+        "impact_threshold": {
+          "type": "integer",
+          "description": "Lowest impact counted as impactful: max(tiers.high, top 20% of assessed non-test files)"
+        },
+        "units": {
+          "type": "array",
+          "description": "Runtime units (binaries, scripts) found from imports and manifests",
+          "items": {"$ref": "#/definitions/Unit"}
         }
       }
     },
@@ -79,12 +96,61 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 100,
-          "description": "Aggregate heat score (0-100)"
+          "description": "max(likelihood, impact) when impact is assessed, otherwise the likelihood (kept for compatibility)"
         },
         "tier": {
           "type": "string",
           "enum": ["critical", "high", "medium", "low"],
-          "description": "Risk tier"
+          "description": "Risk tier: from the quadrant when impact is assessed, else from heat_score"
+        },
+        "likelihood": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How likely the file is to need fixes (churn, complexity, centrality, path keywords, incidents; no LLM)"
+        },
+        "impact": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Damage if the file breaks: LLM blast radius when impact_assessed, else an estimate from centrality and path keywords"
+        },
+        "impact_assessed": {
+          "type": "boolean",
+          "description": "Whether impact came from the LLM"
+        },
+        "quadrant": {
+          "type": "string",
+          "enum": ["fragile-critical", "protect", "watch", "low"],
+          "description": "Likelihood x impact quadrant, a stable machine ID; present only when impact is assessed. Read quadrant_label for the human posture"
+        },
+        "quadrant_label": {
+          "type": "string",
+          "enum": ["Harden now", "Protect", "Stabilize", "Routine"],
+          "description": "Posture for the quadrant: fragile-critical = Harden now, protect = Protect, watch = Stabilize, low = Routine"
+        },
+        "llm_skipped": {
+          "type": "string",
+          "enum": ["sensitive"],
+          "description": "Why the file was not sent to the LLM; sensitive means its name or content looks like credentials"
+        },
+        "component": {
+          "type": "string",
+          "description": "Top-level unit of code the file belongs to (crate, package, module)"
+        },
+        "units": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Names of the runtime units that link the file"
+        },
+        "autonomy": {
+          "type": "object",
+          "description": "How far AI agents may act on the file: 3 auto-merge (Routine), 2 auto-fix, human merges (Stabilize), 1 propose only (Protect), 0 assist only (Harden now). Capped at 1 when impact is not LLM-assessed and at autonomy.max_level from .heatmap/config.yaml. Conservative: How bad? is AI-assessed, not human-validated",
+          "properties": {
+            "level": {"type": "integer", "minimum": 0, "maximum": 3},
+            "label": {"type": "string", "enum": ["auto-merge", "auto-fix, human merges", "propose only", "assist only"]},
+            "reason": {"type": "string", "description": "The posture behind the level and any cap applied"}
+          }
         },
         "language": {
           "type": "string",
@@ -240,6 +306,10 @@
                 },
                 "has_integration_tests": {
                   "type": "boolean"
+                },
+                "has_test_file": {
+                  "type": "boolean",
+                  "description": "A test sits next to the file by its language's convention; omitted for languages without one"
                 }
               }
             },
@@ -350,7 +420,65 @@
               "description": "Estimated review time in minutes"
             }
           }
+        },
+        "explanation": {
+          "type": "object",
+          "description": "Why the file is impactful and likely to break, and what to do (deterministic rules, see docs/how-it-works.md)",
+          "properties": {
+            "headline": {"type": "string"},
+            "verdict": {"type": "string", "description": "Harden now, Protect, Stabilize, Routine, or Not assessed"},
+            "impact_high": {"type": "boolean"},
+            "likely": {"type": "boolean"},
+            "impact_reasons": {"type": "array", "items": {"type": "string"}},
+            "likelihood_reasons": {"type": "array", "items": {"type": "string"}},
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string"},
+                  "text": {"type": "string"},
+                  "scope": {"type": "string", "enum": ["before_merge", "backlog"], "description": "before_merge: this PR; backlog: the file over time"},
+                  "signal": {"type": "string", "description": "The fact that triggered the action"},
+                  "done": {"type": "boolean", "description": "Set by pr check when the PR already satisfies the action; always false in the heatmap"},
+                  "command": {"type": "string", "description": "Backlog items: a copyable gh command or CODEOWNERS line"},
+                  "owners": {"type": "array", "items": {"type": "string"}, "description": "Review actions: suggested owners"},
+                  "files": {"type": "array", "items": {"type": "string"}, "description": "pr check checklist: files the action applies to"}
+                }
+              }
+            }
+          }
         }
+      }
+    },
+    "Unit": {
+      "type": "object",
+      "description": "A deployable entry point and the components it links (from imports and manifests, not from observing what runs)",
+      "required": ["name", "kind", "entry", "home", "components", "shared"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "description": "rust-bin, go-main, node-bin, node-start, python-script, python-main"},
+        "entry": {"type": "string", "description": "Entry file"},
+        "evidence": {"type": "string", "description": "file:line that declares the entry point"},
+        "home": {"type": "string", "description": "Component holding the entry file"},
+        "components": {"type": "array", "items": {"type": "string"}, "description": "Every component linked transitively, home first"},
+        "shared": {"type": "array", "items": {"type": "string"}, "description": "Linked components other units link too"},
+        "files": {"type": "integer", "description": "Non-test files linked"},
+        "lines": {"type": "integer", "description": "Their total lines"},
+        "max_impact": {"type": "integer", "description": "Highest impact among linked files"},
+        "impact_assessed": {"type": "boolean", "description": "Whether the file supplying max_impact was LLM-assessed; false means max_impact is an estimate"},
+        "fragile_critical": {"type": "integer", "description": "Linked files in the fragile-critical quadrant"},
+        "supporting": {"type": "boolean", "description": "Unit around the product (examples, scripts, tests, helper bins)"},
+        "inferred_placement": {"type": "array", "items": {"$ref": "#/definitions/Placement"}}
+      }
+    },
+    "Placement": {
+      "type": "object",
+      "description": "Deployment hint that names a unit (where the binary is packaged, not proof that it runs there)",
+      "properties": {
+        "kind": {"type": "string", "enum": ["dockerfile", "helm", "k8s"]},
+        "detail": {"type": "string", "description": "e.g. ENTRYPOINT of deploy/docker/Dockerfile.worker"},
+        "evidence": {"type": "string", "description": "file:line"}
       }
     },
     "Incident": {

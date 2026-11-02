@@ -1,0 +1,97 @@
+package units
+
+import (
+	"testing"
+
+	"github.com/zanetworker/highstakes/internal/types"
+)
+
+func TestMarkSupporting(t *testing.T) {
+	u := func(name, kind, entry, home string) types.Unit {
+		return types.Unit{Name: name, Kind: kind, Entry: entry, Home: home}
+	}
+	tests := []struct {
+		name  string
+		units []types.Unit
+		globs []string
+		want  map[string]bool
+	}{
+		{
+			name: "product crate main is product",
+			units: []types.Unit{
+				u("sbx", KindRustBin, "crates/sbx/src/main.rs", "crates/sbx"),
+			},
+			want: map[string]bool{"sbx": false},
+		},
+		{
+			name: "entry in an examples component is supporting",
+			units: []types.Unit{
+				u("demo", KindRustBin, "examples/demo/src/main.rs", "examples/demo"),
+				u("tool", KindGoMain, "scripts/tool/main.go", "scripts"),
+			},
+			want: map[string]bool{"demo": true, "tool": true},
+		},
+		{
+			name: "tooling bin next to the crate main is supporting, runtime bin stays product",
+			units: []types.Unit{
+				u("sbx", KindRustBin, "crates/sbx/src/main.rs", "crates/sbx"),
+				u("seccomp-perf", KindRustBin, "crates/sbx/src/bin/seccomp-perf.rs", "crates/sbx"),
+				u("openshell-vm-init", KindRustBin, "crates/sbx/src/bin/openshell-vm-init.rs", "crates/sbx"),
+			},
+			want: map[string]bool{"sbx": false, "seccomp-perf": true, "openshell-vm-init": false},
+		},
+		{
+			name: "tooling words in the bin path or name mark it supporting",
+			units: []types.Unit{
+				u("bench_alloc", KindRustBin, "crates/x/src/bin/bench_alloc.rs", "crates/x"),
+				u("codegen", KindRustBin, "crates/x/src/bin/codegen/main.rs", "crates/x"),
+				u("xtask", KindRustBin, "src/bin/xtask.rs", "."),
+				u("run", KindRustBin, "crates/dev-tools/src/bin/run.rs", "crates/dev-tools"),
+				u("gateway", KindRustBin, "crates/x/src/bin/gateway.rs", "crates/x"),
+				u("generator", KindRustBin, "crates/x/src/bin/generator.rs", "crates/x"),
+			},
+			want: map[string]bool{"bench_alloc": true, "codegen": true, "xtask": true, "run": true, "gateway": false, "generator": false},
+		},
+		{
+			name: "src/bin bins of a crate without a main stay product",
+			units: []types.Unit{
+				u("a", KindRustBin, "crates/runner/src/bin/a.rs", "crates/runner"),
+				u("b", KindRustBin, "crates/runner/src/bin/b.rs", "crates/runner"),
+			},
+			want: map[string]bool{"a": false, "b": false},
+		},
+		{
+			name:  "tooling words outside src/bin do not hide a unit",
+			units: []types.Unit{u("perf", KindGoMain, "cmd/perf/main.go", "cmd")},
+			want:  map[string]bool{"perf": false},
+		},
+		{
+			name: "root crate helper bin (boundary: no directory prefix)",
+			units: []types.Unit{
+				u("app", KindRustBin, "src/main.rs", "."),
+				u("gen", KindRustBin, "src/bin/gen.rs", "."),
+			},
+			want: map[string]bool{"app": false, "gen": true},
+		},
+		{
+			name:  "config glob marks a component supporting",
+			units: []types.Unit{u("bench", KindGoMain, "tools/bench/main.go", "tools")},
+			globs: []string{"tools"},
+			want:  map[string]bool{"bench": true},
+		},
+		{name: "no units", units: nil, want: map[string]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			MarkSupporting(tt.units, tt.globs)
+			if len(tt.units) != len(tt.want) {
+				t.Fatalf("got %d units, want %d", len(tt.units), len(tt.want))
+			}
+			for _, x := range tt.units {
+				if x.Supporting != tt.want[x.Name] {
+					t.Errorf("%s: supporting = %v, want %v", x.Name, x.Supporting, tt.want[x.Name])
+				}
+			}
+		})
+	}
+}

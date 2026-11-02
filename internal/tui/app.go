@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/highstakes/internal/explain"
 	"github.com/zanetworker/highstakes/internal/types"
 )
 
@@ -458,6 +459,56 @@ func (m Model) renderFileDetail(heat *types.FileHeat, width int) string {
 	b.WriteString(tierStyle(heat.Tier).Render(
 		fmt.Sprintf("  %s %s %d", tierIcon(heat.Tier), tierLabel(heat.Tier), heat.HeatScore)))
 	b.WriteString("\n")
+
+	// The verdict, then the two axes as questions.
+	b.WriteString("\n")
+	if label := heat.Quadrant.Label(); label != "" {
+		b.WriteString(labelStyle.Render(strings.ToUpper(label)))
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "  %-22s %d\n", types.AxisLikelihood, heat.Likelihood)
+	if heat.ImpactAssessed {
+		fmt.Fprintf(&b, "  %-22s %d\n", types.AxisImpact, heat.Impact)
+	} else {
+		fmt.Fprintf(&b, "  %-21s ~%d (estimate)\n", types.AxisImpact, heat.Impact)
+	}
+
+	// Why impact, why likely, what to do (shared with get and the dashboard)
+	if e := heat.Explanation; e != nil {
+		impactTitle, likelyTitle := explain.Titles(*e, heat.ImpactAssessed)
+		for _, sec := range []struct {
+			title string
+			lines []string
+		}{{impactTitle, e.ImpactReasons}, {likelyTitle, e.LikelihoodReasons}} {
+			if len(sec.lines) == 0 {
+				continue
+			}
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render(strings.ToUpper(sec.title)))
+			b.WriteString("\n")
+			for _, l := range sec.lines {
+				fmt.Fprintf(&b, "  %s\n", l)
+			}
+		}
+		for _, sec := range []struct{ title, scope string }{
+			{"DO BEFORE THE NEXT MERGE", types.ScopeBeforeMerge}, {"PUT ON THE BACKLOG", types.ScopeBacklog},
+		} {
+			first := true
+			for _, a := range e.Actions {
+				if a.Scope != sec.scope {
+					continue
+				}
+				if first {
+					b.WriteString("\n" + labelStyle.Render(sec.title) + "\n")
+					first = false
+				}
+				fmt.Fprintf(&b, "  [ ] %s\n", a.Text)
+				if a.Command != "" {
+					fmt.Fprintf(&b, "      %s\n", a.Command)
+				}
+			}
+		}
+	}
 
 	// Blast radius (the key insight, matches dashboard)
 	br := heat.Factors.BlastRadius
