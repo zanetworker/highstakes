@@ -480,3 +480,18 @@ func TestOneClick_SkipsDoneActions(t *testing.T) {
 		t.Errorf("one-click offers work the PR already did:\n%s", out)
 	}
 }
+
+func TestChecklistLine_ReviewHints(t *testing.T) {
+	owner := checklistLine(types.Action{ID: "owner-review", Text: "Review", Files: []string{"a.go"}})
+	if !strings.Contains(owner, "any maintainer approves") || !strings.Contains(owner, "highstakes:signed-off") {
+		t.Errorf("open owner review hint = %q, want a maintainer approval or the label", owner)
+	}
+	senior := checklistLine(types.Action{ID: "senior-review", Text: "Sign off", Owners: []string{"@ana"}, Files: []string{"a.go"}})
+	if strings.Contains(senior, "any maintainer approves") || !strings.Contains(senior, "highstakes:signed-off") {
+		t.Errorf("open senior sign-off hint = %q, want only the owner or the label", senior)
+	}
+	done := checklistLine(types.Action{ID: "owner-review", Text: "Review", Done: true, Files: []string{"a.go"}})
+	if strings.Contains(done, "approves") {
+		t.Errorf("done item still shows how to satisfy it: %q", done)
+	}
+}

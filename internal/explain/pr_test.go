@@ -255,3 +255,29 @@ func TestChecklist_SingleOwnerNeverBlocks(t *testing.T) {
 		t.Errorf("worth doing = %+v, want the single-owner item (no PR step can complete it)", worth)
 	}
 }
+
+func TestSatisfied_MaintainerApprovals(t *testing.T) {
+	owner := types.Action{ID: "owner-review", Owners: []string{"@ana"}}
+	unowned := types.Action{ID: "owner-review"}
+	senior := types.Action{ID: "senior-review", Owners: []string{"@ana"}}
+	tests := []struct {
+		name string
+		a    types.Action
+		c    Change
+		want bool
+	}{
+		{"owner review: any maintainer's approval ticks it", owner, Change{MaintainerApprovals: []string{"bob"}}, true},
+		{"owner review with no owner known: a maintainer ticks it", unowned, Change{MaintainerApprovals: []string{"bob"}}, true},
+		{"owner review: an approval without write access does not", unowned, Change{Approvals: []string{"carl"}}, false},
+		{"owner review: no approvals", owner, Change{}, false},
+		{"senior sign-off: a maintainer who is not an owner does not tick it", senior, Change{MaintainerApprovals: []string{"bob"}, Approvals: []string{"bob"}}, false},
+		{"senior sign-off: the named owner still does", senior, Change{Approvals: []string{"ana"}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := satisfied(tt.a, "core/h.go", tt.c); got != tt.want {
+				t.Errorf("satisfied() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

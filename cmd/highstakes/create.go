@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/highstakes/internal/ownership"
@@ -59,7 +60,7 @@ var createCodeownersCmd = &cobra.Command{
 				return cliError(3, "read git history for owners: %v", err)
 			}
 		}
-		block, rows, unrepresentable := policy.Codeowners(entries, owners, maxOwners)
+		block, rows, unrepresentable, unmapped := policy.Codeowners(entries, owners, maxOwners)
 
 		written := ""
 		if write {
@@ -81,6 +82,7 @@ var createCodeownersCmd = &cobra.Command{
 				"min_tier":        minTier,
 				"entries":         rows,
 				"unrepresentable": unrepresentable,
+				"unmapped_owners": unmapped,
 				"block":           block,
 				"written":         written,
 			})
@@ -91,6 +93,10 @@ var createCodeownersCmd = &cobra.Command{
 		}
 		if len(unrepresentable) > 0 {
 			fmt.Fprintf(os.Stderr, "%d hot paths contain a space or glob character CODEOWNERS cannot express; left as comments\n", len(unrepresentable))
+		}
+		if len(unmapped) > 0 {
+			fmt.Fprintf(os.Stderr, "%d owners have no GitHub handle and were left out (emails are never written): map them under owners: in .heatmap/config.yaml, e.g. %q: \"@handle\"\n  %s\n",
+				len(unmapped), unmapped[0], strings.Join(unmapped, "\n  "))
 		}
 		if written != "" {
 			fmt.Fprintf(os.Stderr, "Updated %s (%d paths)\n", written, len(rows))

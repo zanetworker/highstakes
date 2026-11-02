@@ -372,7 +372,7 @@ highstakes pr check --shadow                            # Log the decision, neve
 ### Review Policy
 
 ```sh
-highstakes create codeowners                            # Print a CODEOWNERS block for HIGH/CRITICAL paths
+highstakes create codeowners                            # Print a CODEOWNERS block for HIGH/CRITICAL paths (@handles only)
 highstakes create codeowners --write                    # Update the marked block in .github/CODEOWNERS
 highstakes create policy > .github/highstakes-policy.yaml   # No-auto-approve paths for AI reviewers
 highstakes create policy --json --min-tier critical
@@ -417,27 +417,37 @@ Run `highstakes github install` to generate the workflow, or add it manually:
 Copy [`.github/workflows/heatmap-triage.yml`](.github/workflows/heatmap-triage.yml). It runs `init` only when `.heatmap/config.yaml` is missing, analyzes (cached by file content), collects the reviewers whose latest review is an approval, then:
 
 ```yaml
+      - name: Verify sign-off
+        id: signoff
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
+        run: highstakes pr signoff --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA" --action "$ACTION" --label "$LABEL" --pushed-at "$PUSHED_AT" >> "$GITHUB_OUTPUT"
+
+      - name: Read PR state
+        id: state
+        run: highstakes pr state --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      # ... analyze ...
+
       - name: Assess PR risk
         id: risk
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
-          APPROVALS: ${{ steps.approvals.outputs.logins }}
-          REPO: ${{ github.repository }}
-          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # Verify sign-off step: never the label alone
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # verified by pr signoff: never the label alone
+          APPROVALS: ${{ steps.state.outputs.approvals }}
+          MAINTAINERS: ${{ steps.state.outputs.maintainers }}
+          AUTO_MERGE: ${{ steps.state.outputs.auto_merge }}
         run: |
           set +e
-          # Live auto-merge state, not the event snapshot.
-          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
-          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
           signed=
           if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --maintainer-approvals "$MAINTAINERS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 
-A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist, on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`, so the auto-merge item follows the PR. Before posting the comment it checks the head, the auto-merge state and the sign-off label again, and before passing it checks the auto-merge state, the sign-off label and the approvals again: a run that saw an older state leaves the comment or the decision to the newer run.
+`pr signoff`, `pr state` and `pr fresh` hold all the sign-off and freshness logic in Go; the workflow only passes them the event's values. A small `github-script` step posts `pr-comment.md`, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker), and a last step fails the job when `pr check` exited 5. The workflow also runs on `pull_request_review`, so an owner's approval ticks the checklist (any maintainer's approval ticks Protect items), on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`, so the auto-merge item follows the PR. Before posting the comment it checks the head, the auto-merge state and the sign-off label again, and before passing it checks the auto-merge state, the sign-off label and the approvals again: a run that saw an older state leaves the comment or the decision to the newer run.
 
 </details>
 
@@ -445,7 +455,7 @@ A small `github-script` step posts `pr-comment.md`, updating its earlier comment
 
 `--fail-on critical` exits 5 while a PR that changes a Harden now file (tier `critical`) has open **Do before merge** items; once every item is ticked it passes (`✅ All before-merge items done: ready to merge`). The shipped workflow turns exit 5 into a failed `triage` job. In **Settings > Branches > Branch protection rules**, add `triage` as a required status check. Use `--fail-on high` to also gate Protect files, `--strict` to block on the tier alone whatever is done. Start with `--shadow` to log decisions without failing.
 
-GitHub does not let authors approve their own PRs, so a sole maintainer could never tick a sign-off item. A maintainer with write access adds the label `highstakes:signed-off` after reviewing instead. The workflow's **Verify sign-off** step passes `--signed-off` only when someone with write access added it, for the commit they reviewed (recorded as a `highstakes/signed-off/pr-<number>` commit status): a new push or removing the label withdraws it. Copy that step from `highstakes github install` rather than checking for the label yourself; see [CI integration](docs/ci-integration.md#sign-off-label).
+GitHub does not let authors approve their own PRs, so a sole maintainer could never tick a sign-off item. A maintainer with write access adds the label `highstakes:signed-off` after reviewing instead. The workflow's `highstakes pr signoff` step passes `--signed-off` only when someone with write access added it, for the commit they reviewed (recorded as a `highstakes/signed-off/pr-<number>` commit status): a new push or removing the label withdraws it. Use that command (as `highstakes github install` writes it) rather than checking for the label yourself; see [CI integration](docs/ci-integration.md#sign-off-label).
 
 </details>
 

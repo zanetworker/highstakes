@@ -203,7 +203,7 @@ func TestRender_Rules(t *testing.T) {
 		if top, _, _ := strings.Cut(out, "<details><summary>Why"); strings.Contains(top, "a top owner") {
 			t.Errorf("checklist names an unmapped owner as \"a top owner\":\n%s", out)
 		}
-		if !strings.Contains(out, "- [ ] 👀 Request a review from @bo on `net/policy.rs` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n") {
+		if !strings.Contains(out, "- [ ] 👀 Request a review from @bo on `net/policy.rs` (any maintainer approves, or adds the `highstakes:signed-off` label after reviewing)\n") {
 			t.Errorf("review request should name the GitHub handle only:\n%s", out)
 		}
 	})
@@ -532,7 +532,7 @@ func TestRender_Rules(t *testing.T) {
 		out := Render(risk, &types.Heatmap{}, Links{})
 		for _, want := range []string{
 			"- [ ] 👀 Get sign-off from someone who knows `core/a.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n",
-			"- [ ] 👀 Request a review from @bo on `core/b.go` (a maintainer adds the `highstakes:signed-off` label after reviewing)\n",
+			"- [ ] 👀 Request a review from @bo on `core/b.go` (any maintainer approves, or adds the `highstakes:signed-off` label after reviewing)\n",
 			"- [x] 👀 Get sign-off from @cy on `core/c.go`\n",
 		} {
 			if !strings.Contains(out, want) {

@@ -18,14 +18,17 @@ const (
 // Change is what pr check knows about the PR. Whether exported symbols
 // changed is not detected (it would need a per-language diff parser).
 type Change struct {
-	Paths      []string          // every changed path (renames as old and new path)
-	Deleted    map[string]bool   // paths the PR deletes, including a rename's old path
-	Lines      int               // lines added plus deleted
-	Components int               // distinct components among changed non-test files
-	Approvals  []string          // GitHub logins that approved the PR (from CI)
-	Codeowned  func(string) bool // CODEOWNERS at HEAD covers a path; nil: nothing
-	SignedOff  bool              // the PR carries the SignOffLabel
-	AutoMerge  string            // AutoMergeOn, AutoMergeOff, else unknown
+	Paths      []string        // every changed path (renames as old and new path)
+	Deleted    map[string]bool // paths the PR deletes, including a rename's old path
+	Lines      int             // lines added plus deleted
+	Components int             // distinct components among changed non-test files
+	Approvals  []string        // GitHub logins that approved the PR (from CI)
+	// MaintainerApprovals are approvals of the head from logins with write
+	// access (from CI); any one of them ticks owner-review items.
+	MaintainerApprovals []string
+	Codeowned           func(string) bool // CODEOWNERS at HEAD covers a path; nil: nothing
+	SignedOff           bool              // the PR carries the SignOffLabel
+	AutoMerge           string            // AutoMergeOn, AutoMergeOff, else unknown
 }
 
 // SignOffLabel is the PR label a maintainer adds after reviewing; it ticks
@@ -98,6 +101,10 @@ func satisfied(a types.Action, file string, c Change) bool {
 		}
 	case a.ID == "codeowners":
 		return c.Codeowned != nil && c.Codeowned(file)
+	case a.ID == "owner-review" && len(c.MaintainerApprovals) > 0:
+		// Protect: someone with write access looked; a senior sign-off on
+		// Harden now still needs a named owner or the sign-off label.
+		return true
 	case reviewActions[a.ID]:
 		return approvedByOwner(a.Owners, c.Approvals)
 	}
