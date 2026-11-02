@@ -49,7 +49,6 @@ highstakes dashboard
 
 **Terminal TUI** with keyboard navigation:
 
-<img src="images/tui-view.png" alt="Terminal TUI" style="max-width: 100%; border: 1px solid #ddd; border-radius: 6px; margin: 1.5em 0;">
 
 **CLI** with JSON output for CI:
 
@@ -85,6 +84,8 @@ export HIGHSTAKES_API_URL="http://localhost:11434/v1/chat/completions"
 ## Documentation
 
 - [Getting started](getting-started.md)
+- [Usage guide](usage.md)
+- [Dashboard and TUI](dashboard.md)
 - [Configuration](configuration.md)
 - [CI integration](ci-integration.md)
 - [CLI reference](cli-reference.md)
