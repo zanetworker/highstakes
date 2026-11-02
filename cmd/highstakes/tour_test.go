@@ -53,7 +53,7 @@ func runCLI(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { os.Stdout = orig }()
 
 	// Reset flags that persist across Execute calls in one process.
-	for _, c := range []*cobra.Command{tourCmd, listUnitsCmd, architectureCmd, prCheckCmd, createPolicyCmd, listTasksCmd} {
+	for _, c := range []*cobra.Command{tourCmd, listUnitsCmd, architectureCmd, prCheckCmd, createPolicyCmd, listTasksCmd, prSignoffCmd, prStateCmd, prFreshCmd} {
 		c.Flags().VisitAll(func(f *pflag.Flag) {
 			if sv, ok := f.Value.(pflag.SliceValue); ok {
 				_ = sv.Replace(nil)

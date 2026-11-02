@@ -125,15 +125,20 @@ type CodeownersRow struct {
 
 // Codeowners renders a marked CODEOWNERS block. Owners of a directory entry are
 // ranked by their summed share across its files; at most maxOwners are kept.
-// Entries without owners become comments so they never clear an earlier rule.
-// Paths CODEOWNERS cannot express (see unrepresentableReason) also become
-// comments and are returned in unrepresentable instead of rows.
-func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners int) (block string, rows []CodeownersRow, unrepresentable []string) {
+// Only GitHub @handles are written: an owner without one (an email nobody
+// mapped in the config's owners) is left out and returned in unmapped, since
+// CODEOWNERS is committed (emails would be published) and GitHub ignores an
+// email it cannot tie to an account. Entries left without owners become
+// comments so they never clear an earlier rule. Paths CODEOWNERS cannot
+// express (see unrepresentableReason) also become comments and are returned
+// in unrepresentable instead of rows.
+func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners int) (block string, rows []CodeownersRow, unrepresentable, unmapped []string) {
 	var b strings.Builder
 	b.WriteString(BeginMarker + "\n")
 	b.WriteString("# High-stakes paths and their most active recent authors.\n")
 	rows = make([]CodeownersRow, 0, len(entries))
-	unrepresentable = []string{}
+	unrepresentable, unmapped = []string{}, []string{}
+	missing := map[string]bool{}
 	for _, e := range entries {
 		if reason := unrepresentableReason(e.Path); reason != "" {
 			fmt.Fprintf(&b, "# cannot express in CODEOWNERS (%s): %s\n", reason, e.Path)
@@ -141,8 +146,16 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 			continue
 		}
 		score := map[string]float64{}
+		dropped := false
 		for _, f := range e.Files {
 			for _, o := range owners[f] {
+				if !strings.HasPrefix(o.Handle, "@") {
+					if o.Handle != "" {
+						missing[o.Handle] = true
+					}
+					dropped = true
+					continue
+				}
 				score[o.Handle] += o.Share
 			}
 		}
@@ -164,14 +177,22 @@ func Codeowners(entries []Entry, owners map[string][]ownership.Owner, maxOwners 
 		rows = append(rows, CodeownersRow{Entry: e, Owners: handles})
 
 		line := "/" + e.Path
-		if len(handles) == 0 {
+		switch {
+		case len(handles) == 0 && dropped:
+			fmt.Fprintf(&b, "# %s (%s, heat %d): no owner with a GitHub handle; map owners in .heatmap/config.yaml\n", line, e.Tier, e.HeatScore)
+			continue
+		case len(handles) == 0:
 			fmt.Fprintf(&b, "# %s (%s, heat %d): no owner found in git history\n", line, e.Tier, e.HeatScore)
 			continue
 		}
 		fmt.Fprintf(&b, "%s %s\n", line, strings.Join(handles, " "))
 	}
 	b.WriteString(EndMarker + "\n")
-	return b.String(), rows, unrepresentable
+	for m := range missing {
+		unmapped = append(unmapped, m)
+	}
+	sort.Strings(unmapped)
+	return b.String(), rows, unrepresentable, unmapped
 }
 
 // unrepresentableReason says why a path cannot be a CODEOWNERS rule, or "" if

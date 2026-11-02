@@ -22,6 +22,7 @@ internal/
   llm/                       LLM blast radius assessment via OpenRouter
   scorer/                    Likelihood, impact, heat and quadrant tier assignment
   prscore/                   PR risk scoring (importance + change risk), reviewers, gate
+  prstate/                   PR sign-off, live state and freshness checks for CI (pr signoff/state/fresh; gh behind an API interface)
   ownership/                 Per-file owners from git log (recency-weighted, .mailmap aware)
   policy/                    Hot path collapsing, CODEOWNERS block and coverage, AI reviewer policy
   explain/                   Verdict, reasons and scoped actions per file; PR-time done marking (pure, no LLM)
@@ -50,5 +51,5 @@ docs/                        User-facing documentation
 
 - CLI verbs follow agentic CLI vocabulary: get, list, create, check (not show, find, add)
 - Errors include valid values when an enum is the cause
-- Exit codes: 0=success, 1=internal, 2=invalid input, 3=external failure, 4=not found, 5=PR blocked by `pr check --fail-on`
+- Exit codes: 0=success, 1=internal, 2=invalid input, 3=external failure, 4=not found, 5=PR blocked by `pr check --fail-on`, or changed during the run (`pr fresh`)
 - Tests use table-driven patterns with t.Run subtests

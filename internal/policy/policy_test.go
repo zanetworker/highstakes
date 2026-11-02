@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -130,7 +131,7 @@ func TestCodeowners(t *testing.T) {
 		"main.go":         {{Handle: "dave@x.com", Share: 1}},
 	}
 
-	block, rows, _ := Codeowners(entries, owners, 2)
+	block, rows, _, _ := Codeowners(entries, owners, 2)
 
 	t.Run("dir owners aggregate across files", func(t *testing.T) {
 		if got := rows[0].Owners; len(got) != 2 || got[0] != "@alice" || got[1] != "@bob" {
@@ -138,7 +139,7 @@ func TestCodeowners(t *testing.T) {
 		}
 	})
 	t.Run("block has markers and anchored paths", func(t *testing.T) {
-		for _, want := range []string{BeginMarker, EndMarker, "/auth/ @alice @bob", "/main.go dave@x.com"} {
+		for _, want := range []string{BeginMarker, EndMarker, "/auth/ @alice @bob", "# /main.go (critical, heat 90): no owner with a GitHub handle"} {
 			if !strings.Contains(block, want) {
 				t.Errorf("block missing %q:\n%s", want, block)
 			}
@@ -153,7 +154,7 @@ func TestCodeowners(t *testing.T) {
 		}
 	})
 	t.Run("maxOwners one limits list", func(t *testing.T) {
-		_, rows, _ := Codeowners(entries, owners, 1)
+		_, rows, _, _ := Codeowners(entries, owners, 1)
 		if len(rows[0].Owners) != 1 {
 			t.Errorf("owners = %v, want 1", rows[0].Owners)
 		}
@@ -270,7 +271,7 @@ func TestCodeowners_UnrepresentablePaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entries := []Entry{{Path: tt.path, Tier: types.TierCritical, HeatScore: 90, Files: []string{tt.path}}}
 			owners := map[string][]ownership.Owner{tt.path: {{Handle: "@alice", Share: 1}}}
-			block, rows, unrep := Codeowners(entries, owners, 2)
+			block, rows, unrep, _ := Codeowners(entries, owners, 2)
 			if !strings.Contains(block, "\n"+tt.wantLine+"\n") {
 				t.Errorf("block missing %q:\n%s", tt.wantLine, block)
 			}
@@ -284,7 +285,7 @@ func TestCodeowners_UnrepresentablePaths(t *testing.T) {
 		})
 	}
 	t.Run("no entries gives empty list not nil", func(t *testing.T) {
-		if _, _, unrep := Codeowners(nil, nil, 2); unrep == nil {
+		if _, _, unrep, _ := Codeowners(nil, nil, 2); unrep == nil {
 			t.Error("want empty slice for stable JSON")
 		}
 	})
@@ -381,4 +382,35 @@ func TestAgents(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCodeowners_HandlesOnly(t *testing.T) {
+	entries := []Entry{
+		{Path: "auth/", Tier: types.TierCritical, HeatScore: 90, Files: []string{"auth/a.go"}},
+		{Path: "pay/p.go", Tier: types.TierHigh, HeatScore: 70, Files: []string{"pay/p.go"}},
+	}
+	owners := map[string][]ownership.Owner{
+		// the top owner has no GitHub handle mapped: Handle falls back to the email
+		"auth/a.go": {{Email: "ann@corp.example", Handle: "ann@corp.example", Share: 0.7}, {Handle: "@bo", Share: 0.3}},
+		"pay/p.go":  {{Email: "cy@corp.example", Handle: "cy@corp.example", Share: 1}},
+	}
+	block, rows, _, unmapped := Codeowners(entries, owners, 2)
+	if strings.Contains(block, "@corp.example") {
+		t.Errorf("block contains an email address:\n%s", block)
+	}
+	if !strings.Contains(block, "\n/auth/ @bo\n") {
+		t.Errorf("block missing the handle-only rule for auth/:\n%s", block)
+	}
+	if !strings.Contains(block, "# /pay/p.go (high, heat 70): no owner with a GitHub handle; map owners in .heatmap/config.yaml\n") {
+		t.Errorf("block should comment a path whose owners are all unmapped:\n%s", block)
+	}
+	if want := []string{"ann@corp.example", "cy@corp.example"}; !reflect.DeepEqual(unmapped, want) {
+		t.Errorf("unmapped = %v, want %v", unmapped, want)
+	}
+	if len(rows) != 2 || !reflect.DeepEqual(rows[0].Owners, []string{"@bo"}) || len(rows[1].Owners) != 0 {
+		t.Errorf("rows = %+v, want auth/ -> [@bo] and pay/p.go -> none", rows)
+	}
+	if _, _, _, none := Codeowners(nil, nil, 2); none == nil {
+		t.Error("unmapped = nil, want an empty list (JSON [])")
+	}
 }

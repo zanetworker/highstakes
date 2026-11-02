@@ -9,31 +9,43 @@ Code Heatmap can run in any CI system to automatically assess PR risk and gate m
 Copy [`.github/workflows/heatmap-triage.yml`](https://github.com/zanetworker/highstakes/blob/main/.github/workflows/heatmap-triage.yml) into your repo. Each run:
 
 1. Runs `highstakes init` only when `.heatmap/config.yaml` is missing (a committed config is kept), then `highstakes analyze` (cached by file content).
-2. Collects the reviewers whose latest review is an approval, with `gh api repos/<repo>/pulls/<n>/reviews`.
-3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --repo <owner/name> --auto-merge-enabled <true|false> [--signed-off]`, which renders the comment in Go and exits 5 when the PR changes a Harden now file and **Do before merge** items are still open.
-4. Posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
-5. Fails the `triage` job when `pr check` exited 5.
+2. Verifies the sign-off label with `highstakes pr signoff` and reads the PR's live state with `highstakes pr state` (auto-merge, the approvals of the head commit, and which approvers have write access). Both run before the analysis.
+3. Runs `highstakes pr check --format markdown --fail-on critical --approvals <logins> --maintainer-approvals <logins> --repo <owner/name> --auto-merge-enabled <true|false> [--signed-off]`, which renders the comment in Go and exits 5 when the PR changes a Harden now file and **Do before merge** items are still open.
+4. Checks with `highstakes pr fresh` that the PR did not change during the run, then posts the output as a PR comment, updating its earlier comment (found by the `<!-- highstakes-triage -->` marker).
+5. Checks freshness again and fails the `triage` job when `pr check` exited 5.
 
-The workflow also runs on `pull_request_review`, so an owner's approval of the current head commit ticks the checklist on the next run (an approval of an earlier commit does not), on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`. The auto-merge state is read live from the API (`gh api repos/$REPO/pulls/$PR`), not from the event payload, since it may have changed since the run was queued. `SIGNED_OFF` must come from the workflow's **Verify sign-off** step (copy it from `highstakes github install`): passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core step:
+All the sign-off and freshness logic lives in those Go commands (tested in `internal/prstate`); the workflow only passes them the event's values. Copy it from `highstakes github install` rather than writing your own checks.
+
+The workflow also runs on `pull_request_review`, so an approval of the current head commit ticks the checklist on the next run (an approval of an earlier commit does not), on `labeled`/`unlabeled`, so the sign-off label does too, and on `auto_merge_enabled`/`auto_merge_disabled`. A suggested owner's approval ticks that file's review item; any approval from someone with write access ticks Protect files' owner-review items, never a Harden now senior sign-off. The auto-merge state is read live from the API, not from the event payload, since it may have changed since the run was queued. `SIGNED_OFF` must come from `pr signoff`: passing `--signed-off` because the label is present would skip the write-access check and the commit binding. The core steps (the job sets `GH_TOKEN`, `REPO`, `PR` and `HEAD_SHA` from the event):
 
 ```yaml
+      - name: Verify sign-off
+        id: signoff
+        env:
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
+        run: highstakes pr signoff --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA" --action "$ACTION" --label "$LABEL" --pushed-at "$PUSHED_AT" >> "$GITHUB_OUTPUT"
+
+      - name: Read PR state
+        id: state
+        run: highstakes pr state --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      # ... analyze ...
+
       - name: Assess PR risk
         id: risk
         env:
           BASE: origin/${{ github.event.pull_request.base.ref }}
-          APPROVALS: ${{ steps.approvals.outputs.logins }}
-          REPO: ${{ github.repository }}
-          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # from the Verify sign-off step: never the label alone
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          SIGNED_OFF: ${{ steps.signoff.outputs.signed }} # verified by pr signoff: never the label alone
+          APPROVALS: ${{ steps.state.outputs.approvals }}
+          MAINTAINERS: ${{ steps.state.outputs.maintainers }}
+          AUTO_MERGE: ${{ steps.state.outputs.auto_merge }}
         run: |
           set +e
-          # Live auto-merge state, not the event snapshot.
-          auto=$(gh api "repos/$REPO/pulls/$PR" --jq '.auto_merge != null' 2>/dev/null || echo unknown)
-          echo "auto_merge=$auto" >> "$GITHUB_OUTPUT"
           signed=
           if [ "$SIGNED_OFF" = "true" ]; then signed=--signed-off; fi
-          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --repo "$REPO" --auto-merge-enabled "$auto" $signed > pr-comment.md
+          highstakes pr check --base "$BASE" --format markdown --fail-on critical --approvals "$APPROVALS" --maintainer-approvals "$MAINTAINERS" --repo "$REPO" --auto-merge-enabled "$AUTO_MERGE" $signed > pr-comment.md
           echo "code=$?" >> "$GITHUB_OUTPUT"
 ```
 

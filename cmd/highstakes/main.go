@@ -405,6 +405,7 @@ var prCheckCmd = &cobra.Command{
 		authorFlag, _ := cmd.Flags().GetString("author")
 		maxReviewers, _ := cmd.Flags().GetInt("reviewers")
 		approvals, _ := cmd.Flags().GetStringSlice("approvals")
+		maintainerApprovals, _ := cmd.Flags().GetStringSlice("maintainer-approvals")
 		repoFlag, _ := cmd.Flags().GetString("repo")
 		prFlag, _ := cmd.Flags().GetInt("pr")
 
@@ -464,6 +465,7 @@ var prCheckCmd = &cobra.Command{
 		codeowners, _ := policy.LoadCodeowners(".") // CODEOWNERS at HEAD; missing means nothing is covered
 		change := buildChange(changes, hm, approvals, codeowners.Covers)
 		change.SignedOff, change.AutoMerge = signedOff, autoMerge
+		change.MaintainerApprovals = maintainerApprovals
 		attachPRActions(&risk, hm, change)
 		gateErr := applyGate(&risk, failOn, shadow, strict)
 		if ee, ok := gateErr.(*exitError); ok && ee.code == 2 {
@@ -801,19 +803,54 @@ func agentContext() map[string]interface{} {
 					"check": map[string]interface{}{
 						"description": "Score current diff against a base branch: verdict (Harden now, Protect, Stabilize, Routine), before-merge checklist of Harden now and Protect files with done items, worth-doing items that do not block (JSON worth_doing), backlog, and agent autonomy (JSON autonomy_level: lowest level over touched files; auto_merge_allowed: true only at level 3; autonomy_reason; files_changed[].autonomy)",
 						"flags": map[string]interface{}{
-							"--json":               flagDef("bool", false, "Output as JSON (same as --format json)"),
-							"--format":             flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
-							"--approvals":          flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
-							"--repo":               flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
-							"--pr":                 flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
-							"--base":               flagDef("string", "main", "Base branch"),
-							"--fail-on":            flagDef("enum", "", "Exit 5 when tier >= this and before-merge items are open (JSON open_items, decision_reason). Values: critical, high, medium, low"),
-							"--strict":             flagDef("bool", false, "With --fail-on, block on tier alone even when every before-merge item is done"),
-							"--signed-off":         flagDef("bool", false, "PR has the highstakes:signed-off label (added by a maintainer with write access); ticks sign-off and owner-review items"),
-							"--auto-merge-enabled": flagDef("enum", "unknown", "Values: true, false, unknown; false ticks the no-auto-merge items, true asks to turn it off"),
-							"--shadow":             flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
-							"--author":             flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
-							"--reviewers":          flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+							"--json":                 flagDef("bool", false, "Output as JSON (same as --format json)"),
+							"--format":               flagDef("enum", "text", "Values: text, markdown (the PR comment the triage workflow posts), json"),
+							"--approvals":            flagDef("string", "", "Comma-separated GitHub logins that approved the PR; a suggested owner's approval ticks owner-review items"),
+							"--maintainer-approvals": flagDef("string", "", "Comma-separated approvals of the head from logins with write access (from pr state); any one ticks owner-review items (Protect), never a senior sign-off"),
+							"--repo":                 flagDef("string", "", "GitHub owner/name the markdown comment links to (one-click issues, CODEOWNERS edit); default $GITHUB_REPOSITORY, then the origin remote; invalid exits 2"),
+							"--pr":                   flagDef("int", 0, "PR number the comment's issues link back to; default from $GITHUB_REF (refs/pull/N/merge), else no link; negative exits 2"),
+							"--base":                 flagDef("string", "main", "Base branch"),
+							"--fail-on":              flagDef("enum", "", "Exit 5 when tier >= this and before-merge items are open (JSON open_items, decision_reason). Values: critical, high, medium, low"),
+							"--strict":               flagDef("bool", false, "With --fail-on, block on tier alone even when every before-merge item is done"),
+							"--signed-off":           flagDef("bool", false, "PR has the highstakes:signed-off label (added by a maintainer with write access); ticks sign-off and owner-review items"),
+							"--auto-merge-enabled":   flagDef("enum", "unknown", "Values: true, false, unknown; false ticks the no-auto-merge items, true asks to turn it off"),
+							"--shadow":               flagDef("bool", false, "Log decision to .heatmap/shadow.jsonl, always exit 0"),
+							"--author":               flagDef("string", "", "Author to exclude from suggested reviewers (default: HEAD author)"),
+							"--reviewers":            flagDef("int", 3, "Max suggested reviewers (0 = off)"),
+						},
+					},
+					"signoff": map[string]interface{}{
+						"description": "CI: verify the highstakes:signed-off label (latest add by someone with write access, recorded as a highstakes/signed-off/pr-<N> status on the head it was added on; a push removes an older label; a withdrawn sign-off gets a failing status). Prints signed= and label_state= lines for $GITHUB_OUTPUT (or --json). GitHub errors exit 3",
+						"flags": map[string]interface{}{
+							"--repo":      flagDef("string", "", "owner/name; default $GITHUB_REPOSITORY, then the origin remote; missing exits 2"),
+							"--pr":        flagDef("int", 0, "PR number; default from $GITHUB_REF; missing exits 2"),
+							"--head-sha":  flagDef("string", "", "The PR head commit the run assesses; required (exit 2)"),
+							"--action":    flagDef("string", "", "github.event.action"),
+							"--label":     flagDef("string", "", "github.event.label.name"),
+							"--pushed-at": flagDef("string", "", "github.event.pull_request.updated_at (RFC 3339)"),
+							"--json":      flagDef("bool", false, "Output as JSON"),
+						},
+					},
+					"state": map[string]interface{}{
+						"description": "CI: print the PR's live state as key=value lines (or --json): head, auto_merge, label_state, approvals (latest review per login is an approval of --head-sha), maintainers (those approvers with write access). GitHub errors exit 3",
+						"flags": map[string]interface{}{
+							"--repo":     flagDef("string", "", "owner/name; default $GITHUB_REPOSITORY, then the origin remote; missing exits 2"),
+							"--pr":       flagDef("int", 0, "PR number; default from $GITHUB_REF; missing exits 2"),
+							"--head-sha": flagDef("string", "", "The PR head commit the run assesses; required (exit 2)"),
+							"--json":     flagDef("bool", false, "Output as JSON"),
+						},
+					},
+					"fresh": map[string]interface{}{
+						"description": "CI: exit 5 when the PR changed since the run assessed it (head, auto-merge, sign-off label, approvals or approvers with write access), so a stale run never posts or passes; 0 when unchanged. GitHub errors exit 3",
+						"flags": map[string]interface{}{
+							"--repo":        flagDef("string", "", "owner/name; default $GITHUB_REPOSITORY, then the origin remote; missing exits 2"),
+							"--pr":          flagDef("int", 0, "PR number; default from $GITHUB_REF; missing exits 2"),
+							"--head-sha":    flagDef("string", "", "The PR head commit the run assesses; required (exit 2)"),
+							"--auto-merge":  flagDef("enum", "", "Auto-merge as assessed. Values: true, false"),
+							"--label-state": flagDef("string", "", "label_state as assessed (from pr signoff)"),
+							"--approvals":   flagDef("string", "", "Comma-separated approvals as assessed (from pr state)"),
+							"--maintainers": flagDef("string", "", "Comma-separated approvers with write access as assessed (from pr state)"),
+							"--json":        flagDef("bool", false, "Print {fresh, changed} as JSON (exit codes unchanged)"),
 						},
 					},
 				},
@@ -935,7 +972,7 @@ func agentContext() map[string]interface{} {
 			"2": "Invalid input (bad flags, missing required params)",
 			"3": "External dependency failure (git, API)",
 			"4": "Not found (file not in heatmap)",
-			"5": "PR blocked by pr check --fail-on",
+			"5": "PR blocked by pr check --fail-on, or changed during the run (pr fresh)",
 		},
 	}
 }
@@ -1075,6 +1112,7 @@ func init() {
 	prCheckCmd.Flags().String("repo", "", "GitHub owner/name the markdown comment links to for one-click issues and CODEOWNERS edits (default: $GITHUB_REPOSITORY, then the origin remote)")
 	prCheckCmd.Flags().Int("pr", 0, "PR number the markdown comment's issues link back to (default: from $GITHUB_REF refs/pull/N/merge in GitHub Actions)")
 	prCheckCmd.Flags().StringSlice("approvals", nil, "GitHub logins that approved the PR (CI fills it); ticks owner-review items when a suggested owner approved")
+	prCheckCmd.Flags().StringSlice("maintainer-approvals", nil, "Approvals of the head from logins with write access (CI fills it from pr state); any one ticks owner-review items (Protect), never a senior sign-off")
 	prCmd.AddCommand(prCheckCmd)
 	rootCmd.AddCommand(prCmd)
 
