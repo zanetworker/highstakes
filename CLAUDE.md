@@ -53,3 +53,12 @@ docs/                        User-facing documentation
 - Errors include valid values when an enum is the cause
 - Exit codes: 0=success, 1=internal, 2=invalid input, 3=external failure, 4=not found, 5=PR blocked by `pr check --fail-on`, or changed during the run (`pr fresh`)
 - Tests use table-driven patterns with t.Run subtests
+
+## Learned rules (from feedback)
+
+
+### Readme visuals
+
+README/docs images: retake from the current product with real data (OpenShell works well), scrub email addresses before capture, and bake in soft edges with `repo-kit/bin/soften-image <file> --radius 20 --border '#30363d'`. For HighStakes the treemap (with a Harden now file's panel open) is the hero view. Keep the user's tagline "AI writes code faster than you can review it. See where you're needed and where AI can handle the rest." rather than writing a new one.
+
+**How to apply:** any README or docs image work in this repo or via repo-kit; never publish screenshots showing contributor emails. Related: git-identity-personal.
